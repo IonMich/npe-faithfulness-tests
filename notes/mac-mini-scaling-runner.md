@@ -55,6 +55,11 @@ sweep commands internally, and records status/logs for the submitted job.
 Adding another train job should mean adding another allowlisted endpoint or job
 type, not accepting arbitrary commands.
 
+Cache preparation skips an existing cache only when the sidecar JSON metadata
+matches the requested cache parameters. If a cache file exists but its metadata
+does not match, the endpoint regenerates it with `--force` so W/NLL comparisons
+do not silently mix different evaluation settings.
+
 ## Start The Endpoint
 
 Initial one-time setup on the Mac mini:

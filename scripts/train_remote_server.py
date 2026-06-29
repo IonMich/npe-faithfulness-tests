@@ -23,10 +23,15 @@ DEFAULT_VALIDATION_CACHE = Path(
     "runs/01_exponential_decay/15_broad_scaling/validation_cache/"
     "broad_prior_val_1m_float32.npz"
 )
+DEFAULT_VALIDATION_SEED = 20260990
+DEFAULT_VALIDATION_N_OBSERVATIONS = 40
+DEFAULT_VALIDATION_DTYPE = "float32"
 DEFAULT_PANEL_CACHE = Path(
     "runs/01_exponential_decay/15_broad_scaling/panel_marginal_cache/"
     "decay_panel16_grid180_marginals.npz"
 )
+DEFAULT_PANEL_SEED = 20261001
+DEFAULT_PANEL_TARGET_REPEATS = 5
 DEFAULT_TRAIN_SIMULATIONS = [64_000, 128_000, 256_000, 512_000, 1_000_000]
 DEFAULT_SEEDS = [20260901, 20260902, 20260903]
 RUN_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -151,6 +156,29 @@ def run_checked(command: list[str], *, cwd: Path, log_path: Path, env: dict[str,
         subprocess.run(command, cwd=cwd, env=env, check=True, stdout=handle, stderr=subprocess.STDOUT)
 
 
+def metadata_matches(path: Path, expected: dict[str, object]) -> bool:
+    if not path.exists():
+        return False
+    try:
+        metadata = read_json(path)
+    except (OSError, json.JSONDecodeError):
+        return False
+    return all(metadata.get(key) == value for key, value in expected.items())
+
+
+def setup_cache_is_current(repo_dir: Path, item: dict[str, object]) -> bool:
+    skip_path = item.get("skip_if_exists")
+    if not skip_path:
+        return False
+    cache_path = repo_dir / Path(str(skip_path))
+    if not cache_path.exists():
+        return False
+    expected = item.get("expected_metadata")
+    if not isinstance(expected, dict):
+        return True
+    return metadata_matches(cache_path.with_suffix(".json"), expected)
+
+
 def broad_scaling_config(payload: dict[str, object]) -> dict[str, object]:
     output_root = repo_relative_path(payload.get("output_root"), default=DEFAULT_OUTPUT_ROOT, name="output_root")
     validation_cache = repo_relative_path(
@@ -215,6 +243,12 @@ def broad_scaling_commands(config: dict[str, object], *, uv: str) -> tuple[list[
             {
                 "name": "validation_cache",
                 "skip_if_exists": validation_cache,
+                "expected_metadata": {
+                    "simulations": int(config["validation_cache_simulations"]),
+                    "seed": DEFAULT_VALIDATION_SEED,
+                    "n_observations": DEFAULT_VALIDATION_N_OBSERVATIONS,
+                    "dtype": DEFAULT_VALIDATION_DTYPE,
+                },
                 "command": [
                     uv,
                     "run",
@@ -223,11 +257,21 @@ def broad_scaling_commands(config: dict[str, object], *, uv: str) -> tuple[list[
                     str(validation_cache),
                     "--simulations",
                     str(config["validation_cache_simulations"]),
+                    "--force",
                 ],
             },
             {
                 "name": "panel_marginal_cache",
                 "skip_if_exists": panel_cache,
+                "expected_metadata": {
+                    "panel_size": int(config["panel_size"]),
+                    "prior_panel_size": int(config["panel_size"]),
+                    "include_x0": False,
+                    "panel_seed": DEFAULT_PANEL_SEED,
+                    "grid_size": int(config["panel_grid_size"]),
+                    "target_sample_count": int(config["panel_target_sample_count"]),
+                    "target_repeats": DEFAULT_PANEL_TARGET_REPEATS,
+                },
                 "command": [
                     uv,
                     "run",
@@ -240,6 +284,7 @@ def broad_scaling_commands(config: dict[str, object], *, uv: str) -> tuple[list[
                     str(config["panel_grid_size"]),
                     "--target-sample-count",
                     str(config["panel_target_sample_count"]),
+                    "--force",
                 ],
             },
         ]
@@ -340,9 +385,11 @@ def worker_main(spec_path: Path) -> int:
 
         for item in spec["setup_commands"]:
             skip_path = item.get("skip_if_exists")
-            if skip_path and (repo_dir / Path(str(skip_path))).exists():
-                append_log(log_path, f"[{utc_now()}] setup skip {item['name']}: {skip_path} exists")
+            if setup_cache_is_current(repo_dir, item):
+                append_log(log_path, f"[{utc_now()}] setup skip {item['name']}: {skip_path} metadata matches")
                 continue
+            if skip_path and (repo_dir / Path(str(skip_path))).exists():
+                append_log(log_path, f"[{utc_now()}] setup refresh {item['name']}: {skip_path} metadata mismatch")
             update_status(spec, state="running_setup", active_setup=item["name"], worker_pid=os.getpid())
             run_checked([str(part) for part in item["command"]], cwd=repo_dir, log_path=log_path, env=env)
 
