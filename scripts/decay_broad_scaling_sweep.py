@@ -243,6 +243,7 @@ def make_stage1_config(args: argparse.Namespace, seed: int, train_simulations: i
         families=[str(args.family)],
         posterior_samples=int(args.posterior_samples),
         reference_grid_size=300,
+        spline_bins=int(args.spline_bins),
     )
 
 
@@ -711,6 +712,8 @@ def build_parallel_child_command(args: argparse.Namespace, seed: int) -> list[st
         str(args.flow_layers),
         "--flow-context-dim",
         str(args.flow_context_dim),
+        "--spline-bins",
+        str(args.spline_bins),
         "--family",
         str(args.family),
         "--posterior-samples",
@@ -1065,7 +1068,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mdn-components", type=int, default=None)
     parser.add_argument("--flow-layers", type=int, default=6)
     parser.add_argument("--flow-context-dim", type=int, default=64)
-    parser.add_argument("--family", choices=("mdn", "affine_flow", "full_gaussian", "diag_gaussian"), default="mdn")
+    parser.add_argument("--spline-bins", type=int, default=12)
+    parser.add_argument(
+        "--family",
+        choices=("mdn", "affine_flow", "spline_flow", "full_gaussian", "diag_gaussian"),
+        default="mdn",
+    )
     parser.add_argument("--posterior-samples", type=int, default=None)
     parser.add_argument("--observed-seed", type=int, default=20260622)
     parser.add_argument("--validation-seed", type=int, default=20260990)

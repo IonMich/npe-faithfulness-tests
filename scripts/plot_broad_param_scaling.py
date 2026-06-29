@@ -81,10 +81,16 @@ def load_rows(summary_paths: list[Path]) -> list[dict[str, object]]:
                 item["mdn_components"] = int(config.get("mdn_components", 0))
                 item["flow_layers"] = int(config.get("flow_layers", 0))
                 item["flow_context_dim"] = int(config.get("flow_context_dim", 0))
+                item["spline_bins"] = int(config.get("spline_bins", 0))
                 if item["family"] == "affine_flow":
                     item["architecture_label"] = (
                         f"flow_h{item['hidden_dim']}_l{item['hidden_layers']}_"
                         f"t{item['flow_layers']}_ctx{item['flow_context_dim']}"
+                    )
+                elif item["family"] == "spline_flow":
+                    item["architecture_label"] = (
+                        f"spline_h{item['hidden_dim']}_l{item['hidden_layers']}_"
+                        f"t{item['flow_layers']}_b{item['spline_bins']}"
                     )
                 elif item["family"] == "mdn":
                     item["architecture_label"] = (
@@ -124,6 +130,7 @@ def summarize(rows: list[dict[str, object]]) -> list[dict[str, object]]:
             "mdn_components": first.get("mdn_components"),
             "flow_layers": first.get("flow_layers"),
             "flow_context_dim": first.get("flow_context_dim"),
+            "spline_bins": first.get("spline_bins"),
             "panel_marginal_wasserstein_mean": quantile_summary(
                 np.asarray([row["panel_marginal_wasserstein_mean"] for row in group], dtype=np.float64)
             ),

@@ -39,6 +39,7 @@ def build_payload(args: argparse.Namespace) -> dict[str, object]:
         "mdn_components": args.mdn_components,
         "flow_layers": args.flow_layers,
         "flow_context_dim": args.flow_context_dim,
+        "spline_bins": args.spline_bins,
         "jobs": args.jobs,
         "torch_threads": args.torch_threads,
         "eval_batch_size": args.eval_batch_size,
@@ -91,7 +92,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seeds", type=parse_csv_ints, default=parse_csv_ints("20260901,20260902,20260903"))
     parser.add_argument(
         "--family",
-        choices=("mdn", "affine_flow", "full_gaussian", "diag_gaussian"),
+        choices=("mdn", "affine_flow", "spline_flow", "full_gaussian", "diag_gaussian"),
         default="mdn",
     )
     parser.add_argument("--device", choices=("cpu", "mps", "auto", "cuda"), default="cpu")
@@ -100,6 +101,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mdn-components", type=int, default=5)
     parser.add_argument("--flow-layers", type=int, default=6)
     parser.add_argument("--flow-context-dim", type=int, default=64)
+    parser.add_argument("--spline-bins", type=int, default=12)
     parser.add_argument("--jobs", type=int, default=2)
     parser.add_argument("--torch-threads", type=int, default=2)
     parser.add_argument("--eval-batch-size", type=int, default=16384)

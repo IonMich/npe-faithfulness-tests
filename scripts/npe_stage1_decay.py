@@ -15,6 +15,7 @@ import corner
 import matplotlib
 import numpy as np
 import torch
+import zuko
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -31,18 +32,20 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 
-FAMILIES = ("diag_gaussian", "full_gaussian", "mdn", "affine_flow")
+FAMILIES = ("diag_gaussian", "full_gaussian", "mdn", "affine_flow", "spline_flow")
 FAMILY_LABELS = {
     "diag_gaussian": "Diagonal Gaussian",
     "full_gaussian": "Full Gaussian",
     "mdn": "MDN",
     "affine_flow": "Affine flow",
+    "spline_flow": "Spline flow",
 }
 FAMILY_COLORS = {
     "diag_gaussian": "#2f6fbb",
     "full_gaussian": "#3f8f5f",
     "mdn": "#c06f2d",
     "affine_flow": "#7a5cc2",
+    "spline_flow": "#0f8b8d",
     "grid_reference": "#172033",
 }
 LOG_2PI = math.log(2.0 * math.pi)
@@ -67,6 +70,7 @@ class Stage1Config:
     families: list[str]
     posterior_samples: int
     reference_grid_size: int
+    spline_bins: int = 12
 
 
 def choose_training_device(requested: str) -> torch.device:
@@ -328,6 +332,41 @@ class AffineFlowPosterior(nn.Module):
         return current
 
 
+class SplineFlowPosterior(nn.Module):
+    def __init__(
+        self,
+        x_dim: int,
+        z_dim: int,
+        hidden_dim: int,
+        hidden_layers: int,
+        flow_layers: int,
+        bins: int,
+    ) -> None:
+        super().__init__()
+        self.z_dim = z_dim
+        self.flow = zuko.flows.NSF(
+            z_dim,
+            context=x_dim,
+            transforms=flow_layers,
+            hidden_features=tuple(hidden_dim for _ in range(hidden_layers)),
+            bins=bins,
+        )
+
+    def log_prob(self, z: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        return self.flow(x).log_prob(z)
+
+    @torch.no_grad()
+    def sample(self, n: int, x: torch.Tensor, chunk_size: int = 65_536) -> torch.Tensor:
+        samples = []
+        for start in range(0, n, chunk_size):
+            current = min(chunk_size, n - start)
+            drawn = self.flow(x).sample((current,))
+            if drawn.ndim == 3:
+                drawn = drawn[:, 0, :]
+            samples.append(drawn)
+        return torch.cat(samples, dim=0)
+
+
 def make_model(family: str, config: Stage1Config, x_dim: int, z_dim: int) -> nn.Module:
     if family == "diag_gaussian":
         return DiagonalGaussianPosterior(x_dim, z_dim, config.hidden_dim, config.hidden_layers)
@@ -349,6 +388,15 @@ def make_model(family: str, config: Stage1Config, x_dim: int, z_dim: int) -> nn.
             config.hidden_layers,
             config.flow_layers,
             config.flow_context_dim,
+        )
+    if family == "spline_flow":
+        return SplineFlowPosterior(
+            x_dim,
+            z_dim,
+            config.hidden_dim,
+            config.hidden_layers,
+            config.flow_layers,
+            config.spline_bins,
         )
     raise ValueError(f"Unknown family: {family}")
 
@@ -604,6 +652,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mdn-components", type=int, default=5)
     parser.add_argument("--flow-layers", type=int, default=6)
     parser.add_argument("--flow-context-dim", type=int, default=64)
+    parser.add_argument("--spline-bins", type=int, default=12)
     parser.add_argument("--seed", type=int, default=20260622)
     parser.add_argument("--observed-seed", type=int, default=20260622)
     parser.add_argument("--device", choices=["auto", "cpu", "mps", "cuda"], default="auto")
@@ -640,6 +689,7 @@ def main() -> None:
         families=args.families,
         posterior_samples=args.posterior_samples,
         reference_grid_size=args.reference_grid_size,
+        spline_bins=args.spline_bins,
     )
 
     data_start = time.perf_counter()

@@ -46,6 +46,7 @@ The request is structured data:
   "mdn_components": 5,
   "flow_layers": 6,
   "flow_context_dim": 64,
+  "spline_bins": 12,
   "jobs": 2,
   "torch_threads": 2,
   "eval_batch_size": 16384,
@@ -136,7 +137,8 @@ uv run scripts/submit_remote_broad_scaling.py \
   --hidden-dim 96 \
   --hidden-layers 3 \
   --flow-layers 6 \
-  --flow-context-dim 64
+  --flow-context-dim 64 \
+  --spline-bins 12
 ```
 
 ## Inspect Runs

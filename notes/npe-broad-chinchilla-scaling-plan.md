@@ -875,3 +875,47 @@ Interpretation:
   obvious family to scale deeply for panel-W faithfulness. If the goal is NLL,
   a larger or more expressive flow may still be worth a targeted probe, but it
   is not a speed win.
+
+## Broad Spline-Flow Plan
+
+Next family to test: a broad prior-predictive conditional spline flow using the
+existing `zuko.flows.NSF` machinery, now exposed as the Stage-1 `spline_flow`
+family. Unlike the local flow, this uses the same full signal `x` input,
+standardization, broad prior-predictive training pairs, 1M validation-NLL
+cache, panel marginal W cache, checkpoint format, and Stage-1 UI loader path as
+the MDN and affine-flow broad sweeps.
+
+Initial spline-flow P grid:
+
+| Label | Hidden | Hidden layers | NSF transforms | Spline bins | Parameters |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| small | 64 | 2 | 4 | 8 | 45,844 |
+| base | 96 | 2 | 6 | 8 | 121,374 |
+| large | 144 | 2 | 8 | 8 | 297,768 |
+
+Run first:
+
+```text
+D = 16k,64k
+seeds = 20260901,20260902
+jobs = 2
+torch_threads = 2
+device = cpu
+same 1M NLL cache
+same panel16/grid180 marginal W cache
+```
+
+Compare against:
+
+- mini base MDN at `16k/64k`;
+- affine-flow base probe at `16k/64k`;
+- the existing local affine-flow P-axis result, as secondary context only
+  because same-seed training values are machine-local rather than bitwise
+  comparable across M2/M4.
+
+Decision rule:
+
+- If spline flow improves panel target ratio at `64k` relative to mini MDN
+  without an excessive runtime penalty, scale spline flow deeper.
+- If it only improves NLL while W remains worse, keep it as an NLL candidate
+  but do not make it the next W-focused scale-up family.

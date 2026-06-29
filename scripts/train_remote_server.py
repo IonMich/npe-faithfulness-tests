@@ -34,7 +34,7 @@ DEFAULT_PANEL_SEED = 20261001
 DEFAULT_PANEL_TARGET_REPEATS = 5
 DEFAULT_TRAIN_SIMULATIONS = [64_000, 128_000, 256_000, 512_000, 1_000_000]
 DEFAULT_SEEDS = [20260901, 20260902, 20260903]
-FAMILY_CHOICES = {"mdn", "affine_flow", "full_gaussian", "diag_gaussian"}
+FAMILY_CHOICES = {"mdn", "affine_flow", "spline_flow", "full_gaussian", "diag_gaussian"}
 DEVICE_CHOICES = {"cpu", "mps", "auto", "cuda"}
 RUN_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -217,6 +217,7 @@ def broad_scaling_config(payload: dict[str, object]) -> dict[str, object]:
         "mdn_components": parse_int(payload.get("mdn_components"), default=5, name="mdn_components"),
         "flow_layers": parse_int(payload.get("flow_layers"), default=6, name="flow_layers"),
         "flow_context_dim": parse_int(payload.get("flow_context_dim"), default=64, name="flow_context_dim"),
+        "spline_bins": parse_int(payload.get("spline_bins"), default=12, name="spline_bins", minimum=2),
         "jobs": parse_int(payload.get("jobs"), default=2, name="jobs"),
         "torch_threads": parse_int(payload.get("torch_threads"), default=2, name="torch_threads"),
         "eval_batch_size": parse_int(payload.get("eval_batch_size"), default=16_384, name="eval_batch_size"),
@@ -332,6 +333,8 @@ def broad_scaling_commands(config: dict[str, object], *, uv: str) -> tuple[list[
         str(config["flow_layers"]),
         "--flow-context-dim",
         str(config["flow_context_dim"]),
+        "--spline-bins",
+        str(config["spline_bins"]),
         "--device",
         str(config["device"]),
         "--validation-cache",

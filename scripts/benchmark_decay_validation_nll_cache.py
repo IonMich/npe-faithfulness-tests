@@ -55,6 +55,7 @@ def config_from_checkpoint(config_dict: dict[str, object]) -> stage1.Stage1Confi
         families=list(config_dict.get("families", [])),
         posterior_samples=int(config_dict.get("posterior_samples", 0)),
         reference_grid_size=int(config_dict.get("reference_grid_size", 0)),
+        spline_bins=int(config_dict.get("spline_bins", 12)),
     )
 
 

@@ -334,6 +334,7 @@ def stage1_config_from_dict(config: dict[str, object]) -> Stage1Config:
         families=[str(item) for item in config["families"]],
         posterior_samples=int(config["posterior_samples"]),
         reference_grid_size=int(config["reference_grid_size"]),
+        spline_bins=int(config.get("spline_bins", 12)),
     )
 
 
