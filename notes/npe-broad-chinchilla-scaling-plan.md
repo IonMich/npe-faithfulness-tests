@@ -919,3 +919,57 @@ Decision rule:
   without an excessive runtime penalty, scale spline flow deeper.
 - If it only improves NLL while W remains worse, keep it as an NLL candidate
   but do not make it the next W-focused scale-up family.
+
+## Broad Spline-Flow Pilot Results
+
+Implemented the Stage-1 `spline_flow` family and ran the requested small
+Mac-mini sweep:
+
+```text
+family = spline_flow
+D = 16k,64k
+seeds = 20260901,20260902
+jobs = 2
+torch_threads = 2
+device = cpu
+same 100k early-validation set
+same 1M final-NLL validation cache
+same panel16/grid180 marginal W cache
+```
+
+Local mirrored outputs contain only summary JSON/CSV/figures, not full remote
+checkpoints:
+
+- `runs/01_exponential_decay/15_broad_scaling/25_mini_spline_flow_param_axis/spline_small/results/broad_scaling_summary.json`
+- `runs/01_exponential_decay/15_broad_scaling/25_mini_spline_flow_param_axis/spline_base/results/broad_scaling_summary.json`
+- `runs/01_exponential_decay/15_broad_scaling/25_mini_spline_flow_param_axis/spline_large/results/broad_scaling_summary.json`
+- `runs/01_exponential_decay/15_broad_scaling/25_mini_spline_flow_param_axis/spline_param_axis/results/broad_param_scaling_summary.json`
+- `runs/01_exponential_decay/15_broad_scaling/25_mini_spline_flow_param_axis/spline_param_axis/figures/broad_param_scaling.png`
+
+Same-machine comparison against the mini MDN and mini affine-flow baselines:
+
+| Model | Parameters | D | Panel mean W | Panel target ratio | Final 1M NLL | Median train seconds |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| MDN base | 44,722 | 16,000 | 0.8352 | 77.98 | -2.3763 | 7.5 |
+| MDN base | 44,722 | 64,000 | 0.4983 | 46.76 | -2.8452 | 23.5 |
+| Affine-flow base | 127,300 | 16,000 | 0.7398 | 69.12 | -2.5069 | 21.2 |
+| Affine-flow base | 127,300 | 64,000 | 0.5621 | 52.64 | -2.8667 | 52.8 |
+| Spline-flow small | 45,844 | 16,000 | 0.4604 | 43.21 | -2.7878 | 19.8 |
+| Spline-flow small | 45,844 | 64,000 | 0.3219 | 30.25 | -3.2208 | 42.2 |
+| Spline-flow base | 121,374 | 16,000 | 0.5940 | 55.39 | -2.7469 | 19.2 |
+| Spline-flow base | 121,374 | 64,000 | 0.3899 | 36.53 | -3.0798 | 51.7 |
+| Spline-flow large | 297,768 | 16,000 | 0.6978 | 65.23 | -2.6286 | 30.9 |
+| Spline-flow large | 297,768 | 64,000 | 0.3635 | 34.30 | -3.0703 | 65.0 |
+
+Interpretation:
+
+- The small spline flow is clearly better than the same-machine MDN and
+  affine-flow baselines on both panel W and NLL at `16k` and `64k`.
+- The improvement is not just an NLL artifact. At `64k`, the small spline
+  improves the panel target ratio from the MDN's `46.76x` to `30.25x`.
+- Scaling spline-flow parameters upward at fixed `D = 16k,64k` does not help.
+  The base and large spline flows are slower and worse than the small spline
+  on the main panel-W metric.
+- The likely next useful spline experiment is data scaling for the small
+  spline-flow architecture, not a larger-`P` spline sweep. A direct next run is
+  `D = 64k,128k,256k,512k`, `seeds = 20260901,20260902,20260903`, same caches.
