@@ -18,29 +18,38 @@ Observed from this workspace:
 
 ## Server Model
 
-The Mac mini should run a generic train endpoint, not a scaling-law endpoint.
-The endpoint accepts a repo-local training command at `POST /train`:
+The Mac mini runs a train endpoint with allowlisted job types. It does not
+accept shell commands or command arrays from the client, and it does not fetch
+or checkout branches. The server runs whatever repo state is already checked
+out on the Mac mini.
+
+For the current scaling work, the supported submission endpoint is:
+
+```text
+POST /train/broad-scaling
+```
+
+The request is structured data:
 
 ```json
 {
   "run_name": "broad_mdn_1m",
-  "branch": "codex/mac-mini-scaling-runner",
+  "train_simulations": [64000, 128000, 256000, 512000, 1000000],
+  "seeds": [20260901, 20260902, 20260903],
+  "jobs": 2,
+  "torch_threads": 2,
+  "eval_batch_size": 16384,
+  "prepare_caches": true,
+  "save_models": true,
   "sync": true,
-  "setup_commands": [
-    {
-      "name": "validation_cache",
-      "skip_if_exists": "runs/.../broad_prior_val_1m_float32.npz",
-      "command": ["uv", "run", "scripts/cache_decay_broad_validation.py", "..."]
-    }
-  ],
-  "command": ["uv", "run", "scripts/decay_broad_scaling_sweep.py", "..."],
-  "output_root": "runs/..."
+  "output_root": "runs/01_exponential_decay/15_broad_scaling/11_mdn_1m_remote"
 }
 ```
 
-The scaling logic stays local in `scripts/submit_remote_broad_scaling.py`.
-The server only updates the repo, runs optional setup commands, and launches the
-requested train command.
+The server validates those fields, constructs the known cache-prep and broad
+sweep commands internally, and records status/logs for the submitted job.
+Adding another train job should mean adding another allowlisted endpoint or job
+type, not accepting arbitrary commands.
 
 ## Start The Endpoint
 
@@ -79,8 +88,7 @@ Then submit the broad scaling request from this repo:
 
 ```bash
 uv run scripts/submit_remote_broad_scaling.py \
-  --endpoint http://127.0.0.1:8765 \
-  --branch codex/mac-mini-scaling-runner
+  --endpoint http://127.0.0.1:8765
 ```
 
 The default request:
@@ -98,7 +106,6 @@ Dry-run the train request JSON without submitting:
 
 ```bash
 uv run scripts/submit_remote_broad_scaling.py \
-  --branch codex/mac-mini-scaling-runner \
   --dry-run
 ```
 
@@ -107,7 +114,6 @@ For a smaller timing test:
 ```bash
 uv run scripts/submit_remote_broad_scaling.py \
   --endpoint http://127.0.0.1:8765 \
-  --branch codex/mac-mini-scaling-runner \
   --train-simulations 64000,128000 \
   --seeds 20260901,20260902
 ```

@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 from pathlib import Path
 from urllib import request
 
@@ -27,99 +26,27 @@ def parse_csv_ints(value: str) -> list[int]:
     return items
 
 
-def current_branch() -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        check=True,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    return result.stdout.strip()
-
-
 def build_payload(args: argparse.Namespace) -> dict[str, object]:
-    train_simulations = ",".join(str(value) for value in args.train_simulations)
-    seeds = ",".join(str(value) for value in args.seeds)
-    command = [
-        "uv",
-        "run",
-        "scripts/decay_broad_scaling_sweep.py",
-        "--preset",
-        "pilot",
-        "--output-root",
-        str(args.output_root),
-        "--train-simulations",
-        train_simulations,
-        "--seeds",
-        seeds,
-        "--val-simulations",
-        str(args.early_stop_val_simulations),
-        "--validation-cache",
-        str(args.validation_cache),
-        "--panel-marginal-cache",
-        str(args.panel_marginal_cache),
-        "--panel-posterior-samples",
-        str(args.panel_posterior_samples),
-        "--skip-x0-reference",
-        "--skip-existing",
-        "--jobs",
-        str(args.jobs),
-        "--torch-threads",
-        str(args.torch_threads),
-        "--eval-batch-size",
-        str(args.eval_batch_size),
-    ]
-    if args.no_save_models:
-        command.append("--no-save-models")
-
-    setup_commands = []
-    if args.prepare_caches:
-        setup_commands.extend([
-            {
-                "name": "validation_cache",
-                "skip_if_exists": str(args.validation_cache),
-                "command": [
-                    "uv",
-                    "run",
-                    "scripts/cache_decay_broad_validation.py",
-                    "--output",
-                    str(args.validation_cache),
-                    "--simulations",
-                    str(args.validation_cache_simulations),
-                ],
-            },
-            {
-                "name": "panel_marginal_cache",
-                "skip_if_exists": str(args.panel_marginal_cache),
-                "command": [
-                    "uv",
-                    "run",
-                    "scripts/cache_decay_panel_marginals.py",
-                    "--output",
-                    str(args.panel_marginal_cache),
-                    "--panel-size",
-                    str(args.panel_size),
-                    "--grid-size",
-                    str(args.panel_grid_size),
-                    "--target-sample-count",
-                    str(args.panel_target_sample_count),
-                ],
-            },
-        ])
-
-    env = {}
-    if args.path_prefix:
-        env["PATH"] = f"{args.path_prefix}:{os.environ.get('PATH', '')}"
-
     return {
         "run_name": args.run_name,
-        "branch": args.branch,
-        "sync": not args.no_sync,
-        "setup_commands": setup_commands,
-        "command": command,
-        "env": env,
         "output_root": str(args.output_root),
+        "train_simulations": args.train_simulations,
+        "seeds": args.seeds,
+        "jobs": args.jobs,
+        "torch_threads": args.torch_threads,
+        "eval_batch_size": args.eval_batch_size,
+        "early_stop_val_simulations": args.early_stop_val_simulations,
+        "validation_cache": str(args.validation_cache),
+        "validation_cache_simulations": args.validation_cache_simulations,
+        "panel_marginal_cache": str(args.panel_marginal_cache),
+        "panel_size": args.panel_size,
+        "panel_grid_size": args.panel_grid_size,
+        "panel_target_sample_count": args.panel_target_sample_count,
+        "panel_posterior_samples": args.panel_posterior_samples,
+        "prepare_caches": args.prepare_caches,
+        "save_models": not args.no_save_models,
+        "sync": not args.no_sync,
+        "dry_run": args.remote_dry_run,
     }
 
 
@@ -131,21 +58,29 @@ def post_json(endpoint: str, token: str | None, payload: dict[str, object]) -> d
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    req = request.Request(endpoint.rstrip("/") + "/train", data=body, headers=headers, method="POST")
+    req = request.Request(
+        endpoint.rstrip("/") + "/train/broad-scaling",
+        data=body,
+        headers=headers,
+        method="POST",
+    )
     with request.urlopen(req, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Submit a broad scaling-law training request to a remote /train endpoint.",
+        description="Submit a structured broad scaling-law request to a remote train endpoint.",
     )
     parser.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
     parser.add_argument("--token", default=os.environ.get("TRAIN_REMOTE_TOKEN"))
-    parser.add_argument("--branch", default=None)
     parser.add_argument("--run-name", default="broad_mdn_1m")
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
-    parser.add_argument("--train-simulations", type=parse_csv_ints, default=parse_csv_ints("64000,128000,256000,512000,1000000"))
+    parser.add_argument(
+        "--train-simulations",
+        type=parse_csv_ints,
+        default=parse_csv_ints("64000,128000,256000,512000,1000000"),
+    )
     parser.add_argument("--seeds", type=parse_csv_ints, default=parse_csv_ints("20260901,20260902,20260903"))
     parser.add_argument("--jobs", type=int, default=2)
     parser.add_argument("--torch-threads", type=int, default=2)
@@ -163,15 +98,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-save-models", action="store_true")
     parser.add_argument("--no-sync", action="store_true")
     parser.add_argument(
-        "--path-prefix",
-        default=None,
-        help="Optional PATH prefix for the remote training process, e.g. /Users/ioannism/.local/bin.",
+        "--remote-dry-run",
+        action="store_true",
+        help="Ask the remote endpoint to run the broad sweep with --dry-run.",
     )
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-    if args.branch is None:
-        args.branch = current_branch()
-    return args
+    parser.add_argument("--dry-run", action="store_true", help="Print the request JSON without submitting.")
+    return parser.parse_args()
 
 
 def main() -> None:

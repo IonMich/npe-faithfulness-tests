@@ -17,7 +17,17 @@ from urllib.parse import parse_qs, urlparse
 
 
 DEFAULT_REPO_DIR = Path("/Users/ioannism/repos/npe")
-BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+DEFAULT_OUTPUT_ROOT = Path("runs/01_exponential_decay/15_broad_scaling/11_mdn_1m_remote")
+DEFAULT_VALIDATION_CACHE = Path(
+    "runs/01_exponential_decay/15_broad_scaling/validation_cache/"
+    "broad_prior_val_1m_float32.npz"
+)
+DEFAULT_PANEL_CACHE = Path(
+    "runs/01_exponential_decay/15_broad_scaling/panel_marginal_cache/"
+    "decay_panel16_grid180_marginals.npz"
+)
+DEFAULT_TRAIN_SIMULATIONS = [64_000, 128_000, 256_000, 512_000, 1_000_000]
+DEFAULT_SEEDS = [20260901, 20260902, 20260903]
 RUN_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -63,55 +73,54 @@ def process_is_running(pid: int | None) -> bool:
 
 
 def safe_run_name(value: object) -> str:
-    name = "train" if value in (None, "") else str(value)
-    return RUN_NAME_RE.sub("_", name).strip("._-") or "train"
+    name = "broad_scaling" if value in (None, "") else str(value)
+    return RUN_NAME_RE.sub("_", name).strip("._-") or "broad_scaling"
 
 
-def safe_branch(value: object) -> str | None:
-    if value in (None, ""):
-        return None
-    branch = str(value)
-    if not BRANCH_RE.fullmatch(branch):
-        raise ValueError(f"Unsafe branch name: {branch!r}")
-    return branch
-
-
-def require_command(value: object, *, uv: str, name: str) -> list[str]:
-    if not isinstance(value, list) or not value:
-        raise ValueError(f"{name} must be a non-empty list of command arguments")
-    command = [str(part) for part in value]
-    if command[0] == "uv":
-        command[0] = uv
-    if command[0] != uv:
-        raise ValueError(f"{name} must start with 'uv' or the configured uv path")
-    if len(command) < 4 or command[1] != "run" or not command[2].startswith("scripts/"):
-        raise ValueError(f"{name} must be a repo-local 'uv run scripts/...' command")
-    return command
-
-
-def require_setup_commands(value: object, *, uv: str) -> list[dict[str, object]]:
+def parse_bool(value: object, *, default: bool, name: str) -> bool:
     if value is None:
-        return []
-    if not isinstance(value, list):
-        raise ValueError("setup_commands must be a list")
-    output = []
-    for index, item in enumerate(value):
-        if not isinstance(item, dict):
-            raise ValueError(f"setup_commands[{index}] must be an object")
-        output.append({
-            "name": str(item.get("name") or f"setup_{index}"),
-            "skip_if_exists": str(item["skip_if_exists"]) if item.get("skip_if_exists") else None,
-            "command": require_command(item.get("command"), uv=uv, name=f"setup_commands[{index}].command"),
-        })
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    raise ValueError(f"{name} must be boolean")
+
+
+def parse_int(value: object, *, default: int, name: str, minimum: int = 1) -> int:
+    output = default if value is None else int(value)
+    if output < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
     return output
 
 
-def require_env(value: object) -> dict[str, str]:
+def parse_int_list(value: object, *, default: list[int], name: str) -> list[int]:
     if value is None:
-        return {}
-    if not isinstance(value, dict):
-        raise ValueError("env must be an object")
-    return {str(key): str(item) for key, item in value.items()}
+        values = list(default)
+    elif isinstance(value, str):
+        values = [int(piece.strip()) for piece in value.split(",") if piece.strip()]
+    elif isinstance(value, list):
+        values = [int(item) for item in value]
+    else:
+        raise ValueError(f"{name} must be a comma-separated string or list of integers")
+    if not values:
+        raise ValueError(f"{name} must contain at least one integer")
+    if any(value <= 0 for value in values):
+        raise ValueError(f"{name} values must be positive")
+    return values
+
+
+def repo_relative_path(value: object, *, default: Path, name: str) -> Path:
+    path = default if value in (None, "") else Path(str(value))
+    if path.is_absolute():
+        raise ValueError(f"{name} must be relative to the repo")
+    if ".." in path.parts:
+        raise ValueError(f"{name} cannot contain '..'")
+    return path
 
 
 def run_checked(command: list[str], *, cwd: Path, log_path: Path, env: dict[str, str]) -> None:
@@ -120,27 +129,153 @@ def run_checked(command: list[str], *, cwd: Path, log_path: Path, env: dict[str,
         subprocess.run(command, cwd=cwd, env=env, check=True, stdout=handle, stderr=subprocess.STDOUT)
 
 
-def build_train_spec(payload: dict[str, object], *, repo_dir: Path, uv: str) -> dict[str, object]:
-    run_name = safe_run_name(payload.get("run_name"))
+def broad_scaling_config(payload: dict[str, object]) -> dict[str, object]:
+    output_root = repo_relative_path(payload.get("output_root"), default=DEFAULT_OUTPUT_ROOT, name="output_root")
+    validation_cache = repo_relative_path(
+        payload.get("validation_cache"),
+        default=DEFAULT_VALIDATION_CACHE,
+        name="validation_cache",
+    )
+    panel_cache = repo_relative_path(
+        payload.get("panel_marginal_cache"),
+        default=DEFAULT_PANEL_CACHE,
+        name="panel_marginal_cache",
+    )
+    return {
+        "run_name": safe_run_name(payload.get("run_name")),
+        "output_root": output_root,
+        "train_simulations": parse_int_list(
+            payload.get("train_simulations"),
+            default=DEFAULT_TRAIN_SIMULATIONS,
+            name="train_simulations",
+        ),
+        "seeds": parse_int_list(payload.get("seeds"), default=DEFAULT_SEEDS, name="seeds"),
+        "jobs": parse_int(payload.get("jobs"), default=2, name="jobs"),
+        "torch_threads": parse_int(payload.get("torch_threads"), default=2, name="torch_threads"),
+        "eval_batch_size": parse_int(payload.get("eval_batch_size"), default=16_384, name="eval_batch_size"),
+        "early_stop_val_simulations": parse_int(
+            payload.get("early_stop_val_simulations"),
+            default=100_000,
+            name="early_stop_val_simulations",
+        ),
+        "validation_cache": validation_cache,
+        "validation_cache_simulations": parse_int(
+            payload.get("validation_cache_simulations"),
+            default=1_000_000,
+            name="validation_cache_simulations",
+        ),
+        "panel_marginal_cache": panel_cache,
+        "panel_size": parse_int(payload.get("panel_size"), default=16, name="panel_size"),
+        "panel_grid_size": parse_int(payload.get("panel_grid_size"), default=180, name="panel_grid_size", minimum=2),
+        "panel_target_sample_count": parse_int(
+            payload.get("panel_target_sample_count"),
+            default=20_000,
+            name="panel_target_sample_count",
+        ),
+        "panel_posterior_samples": parse_int(
+            payload.get("panel_posterior_samples"),
+            default=20_000,
+            name="panel_posterior_samples",
+        ),
+        "prepare_caches": parse_bool(payload.get("prepare_caches"), default=True, name="prepare_caches"),
+        "save_models": parse_bool(payload.get("save_models"), default=True, name="save_models"),
+        "sync": parse_bool(payload.get("sync"), default=True, name="sync"),
+        "dry_run": parse_bool(payload.get("dry_run"), default=False, name="dry_run"),
+    }
+
+
+def broad_scaling_commands(config: dict[str, object], *, uv: str) -> tuple[list[dict[str, object]], list[str]]:
+    validation_cache = Path(str(config["validation_cache"]))
+    panel_cache = Path(str(config["panel_marginal_cache"]))
+    setup_commands: list[dict[str, object]] = []
+    if config["prepare_caches"]:
+        setup_commands = [
+            {
+                "name": "validation_cache",
+                "skip_if_exists": validation_cache,
+                "command": [
+                    uv,
+                    "run",
+                    "scripts/cache_decay_broad_validation.py",
+                    "--output",
+                    str(validation_cache),
+                    "--simulations",
+                    str(config["validation_cache_simulations"]),
+                ],
+            },
+            {
+                "name": "panel_marginal_cache",
+                "skip_if_exists": panel_cache,
+                "command": [
+                    uv,
+                    "run",
+                    "scripts/cache_decay_panel_marginals.py",
+                    "--output",
+                    str(panel_cache),
+                    "--panel-size",
+                    str(config["panel_size"]),
+                    "--grid-size",
+                    str(config["panel_grid_size"]),
+                    "--target-sample-count",
+                    str(config["panel_target_sample_count"]),
+                ],
+            },
+        ]
+
+    command = [
+        uv,
+        "run",
+        "scripts/decay_broad_scaling_sweep.py",
+        "--preset",
+        "pilot",
+        "--output-root",
+        str(config["output_root"]),
+        "--train-simulations",
+        ",".join(str(value) for value in config["train_simulations"]),
+        "--seeds",
+        ",".join(str(value) for value in config["seeds"]),
+        "--val-simulations",
+        str(config["early_stop_val_simulations"]),
+        "--validation-cache",
+        str(validation_cache),
+        "--panel-marginal-cache",
+        str(panel_cache),
+        "--panel-posterior-samples",
+        str(config["panel_posterior_samples"]),
+        "--skip-x0-reference",
+        "--skip-existing",
+        "--jobs",
+        str(config["jobs"]),
+        "--torch-threads",
+        str(config["torch_threads"]),
+        "--eval-batch-size",
+        str(config["eval_batch_size"]),
+    ]
+    if not config["save_models"]:
+        command.append("--no-save-models")
+    if config["dry_run"]:
+        command.append("--dry-run")
+    return setup_commands, command
+
+
+def build_broad_scaling_spec(payload: dict[str, object], *, repo_dir: Path, uv: str) -> dict[str, object]:
+    config = broad_scaling_config(payload)
+    setup_commands, command = broad_scaling_commands(config, uv=uv)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    run_id = f"{run_name}_{timestamp}_{uuid.uuid4().hex[:8]}"
+    run_id = f"{config['run_name']}_{timestamp}_{uuid.uuid4().hex[:8]}"
     run_dir = repo_dir / "logs" / "train_remote" / run_id
-    command = require_command(payload.get("command"), uv=uv, name="command")
-    setup_commands = require_setup_commands(payload.get("setup_commands"), uv=uv)
-    env = require_env(payload.get("env"))
-    output_root = payload.get("output_root")
     return {
         "run_id": run_id,
-        "run_name": run_name,
+        "run_name": config["run_name"],
+        "job_type": "broad_scaling",
         "created_at": utc_now(),
         "repo_dir": repo_dir,
         "uv": uv,
-        "branch": safe_branch(payload.get("branch")),
-        "sync": bool(payload.get("sync", True)),
+        "config": config,
+        "sync": config["sync"],
         "setup_commands": setup_commands,
         "command": command,
-        "env": env,
-        "output_root": str(output_root) if output_root is not None else None,
+        "output_root": config["output_root"],
         "run_dir": run_dir,
         "spec_path": run_dir / "spec.json",
         "status_path": run_dir / "status.json",
@@ -154,11 +289,11 @@ def update_status(spec: dict[str, object], **updates: object) -> None:
     current.update({
         "run_id": spec["run_id"],
         "run_name": spec["run_name"],
+        "job_type": spec["job_type"],
         "created_at": spec["created_at"],
         "updated_at": utc_now(),
-        "branch": spec.get("branch"),
         "log_path": spec["log_path"],
-        "output_root": spec.get("output_root"),
+        "output_root": spec["output_root"],
     })
     current.update(updates)
     write_json(status_path, current)
@@ -169,15 +304,9 @@ def worker_main(spec_path: Path) -> int:
     repo_dir = Path(str(spec["repo_dir"]))
     log_path = Path(str(spec["log_path"]))
     env = os.environ.copy()
-    env.update({str(key): str(value) for key, value in dict(spec.get("env") or {}).items()})
     update_status(spec, state="preparing", worker_pid=os.getpid())
     append_log(log_path, f"[{utc_now()}] train worker starting")
     try:
-        branch = spec.get("branch")
-        if branch:
-            run_checked(["git", "fetch", "origin", str(branch), "--prune"], cwd=repo_dir, log_path=log_path, env=env)
-            run_checked(["git", "checkout", "-B", str(branch), f"origin/{branch}"], cwd=repo_dir, log_path=log_path, env=env)
-
         if spec.get("sync", True):
             run_checked([str(spec["uv"]), "sync"], cwd=repo_dir, log_path=log_path, env=env)
 
@@ -305,6 +434,7 @@ class Handler(BaseHTTPRequestHandler):
                     "uv": self.server.uv,
                     "uv_path": uv_path,
                     "token_required": bool(self.server.token),
+                    "train_endpoints": ["/train/broad-scaling"],
                 },
             )
             return
@@ -346,11 +476,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authorized():
             self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
             return
-        if parsed.path != "/train":
-            self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+        if parsed.path != "/train/broad-scaling":
+            self.send_json(
+                HTTPStatus.NOT_FOUND,
+                {"error": "not found", "supported_post_endpoints": ["/train/broad-scaling"]},
+            )
             return
         try:
-            spec = build_train_spec(self.read_payload(), repo_dir=self.server.repo_dir, uv=self.server.uv)
+            spec = build_broad_scaling_spec(self.read_payload(), repo_dir=self.server.repo_dir, uv=self.server.uv)
             spec_path = Path(str(spec["spec_path"]))
             write_json(spec_path, spec)
             update_status(spec, state="queued")
@@ -371,7 +504,7 @@ class Handler(BaseHTTPRequestHandler):
                     "status_url": f"/train/{spec['run_id']}",
                     "log_url": f"/train/{spec['run_id']}/log",
                     "log_path": spec["log_path"],
-                    "output_root": spec.get("output_root"),
+                    "output_root": spec["output_root"],
                 },
             )
         except Exception as exc:  # noqa: BLE001
@@ -379,7 +512,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="HTTP endpoint for launching repo-local training commands.")
+    parser = argparse.ArgumentParser(description="HTTP endpoint for launching allowlisted training jobs.")
     subparsers = parser.add_subparsers(dest="command")
 
     serve = subparsers.add_parser("serve", help="Run the train endpoint.")
