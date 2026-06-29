@@ -34,6 +34,8 @@ DEFAULT_PANEL_SEED = 20261001
 DEFAULT_PANEL_TARGET_REPEATS = 5
 DEFAULT_TRAIN_SIMULATIONS = [64_000, 128_000, 256_000, 512_000, 1_000_000]
 DEFAULT_SEEDS = [20260901, 20260902, 20260903]
+FAMILY_CHOICES = {"mdn", "affine_flow", "full_gaussian", "diag_gaussian"}
+DEVICE_CHOICES = {"cpu", "mps", "auto", "cuda"}
 RUN_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -141,6 +143,14 @@ def parse_int_list(value: object, *, default: list[int], name: str) -> list[int]
     return values
 
 
+def parse_choice(value: object, *, default: str, name: str, choices: set[str]) -> str:
+    output = default if value in (None, "") else str(value)
+    if output not in choices:
+        allowed = ", ".join(sorted(choices))
+        raise ValueError(f"{name} must be one of: {allowed}")
+    return output
+
+
 def repo_relative_path(value: object, *, default: Path, name: str) -> Path:
     path = default if value in (None, "") else Path(str(value))
     if path.is_absolute():
@@ -200,6 +210,13 @@ def broad_scaling_config(payload: dict[str, object]) -> dict[str, object]:
             name="train_simulations",
         ),
         "seeds": parse_int_list(payload.get("seeds"), default=DEFAULT_SEEDS, name="seeds"),
+        "family": parse_choice(payload.get("family"), default="mdn", name="family", choices=FAMILY_CHOICES),
+        "device": parse_choice(payload.get("device"), default="cpu", name="device", choices=DEVICE_CHOICES),
+        "hidden_dim": parse_int(payload.get("hidden_dim"), default=128, name="hidden_dim"),
+        "hidden_layers": parse_int(payload.get("hidden_layers"), default=3, name="hidden_layers"),
+        "mdn_components": parse_int(payload.get("mdn_components"), default=5, name="mdn_components"),
+        "flow_layers": parse_int(payload.get("flow_layers"), default=6, name="flow_layers"),
+        "flow_context_dim": parse_int(payload.get("flow_context_dim"), default=64, name="flow_context_dim"),
         "jobs": parse_int(payload.get("jobs"), default=2, name="jobs"),
         "torch_threads": parse_int(payload.get("torch_threads"), default=2, name="torch_threads"),
         "eval_batch_size": parse_int(payload.get("eval_batch_size"), default=16_384, name="eval_batch_size"),
@@ -301,8 +318,22 @@ def broad_scaling_commands(config: dict[str, object], *, uv: str) -> tuple[list[
         ",".join(str(value) for value in config["train_simulations"]),
         "--seeds",
         ",".join(str(value) for value in config["seeds"]),
+        "--family",
+        str(config["family"]),
         "--val-simulations",
         str(config["early_stop_val_simulations"]),
+        "--hidden-dim",
+        str(config["hidden_dim"]),
+        "--hidden-layers",
+        str(config["hidden_layers"]),
+        "--mdn-components",
+        str(config["mdn_components"]),
+        "--flow-layers",
+        str(config["flow_layers"]),
+        "--flow-context-dim",
+        str(config["flow_context_dim"]),
+        "--device",
+        str(config["device"]),
         "--validation-cache",
         str(validation_cache),
         "--panel-marginal-cache",

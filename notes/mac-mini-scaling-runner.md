@@ -40,6 +40,12 @@ The request is structured data:
   "run_name": "broad_mdn_1m",
   "train_simulations": [64000, 128000, 256000, 512000, 1000000],
   "seeds": [20260901, 20260902, 20260903],
+  "family": "mdn",
+  "hidden_dim": 128,
+  "hidden_layers": 3,
+  "mdn_components": 5,
+  "flow_layers": 6,
+  "flow_context_dim": 64,
   "jobs": 2,
   "torch_threads": 2,
   "eval_batch_size": 16384,
@@ -124,8 +130,13 @@ For a smaller timing test:
 ```bash
 uv run scripts/submit_remote_broad_scaling.py \
   --endpoint http://127.0.0.1:8877 \
+  --family affine_flow \
   --train-simulations 64000,128000 \
-  --seeds 20260901,20260902
+  --seeds 20260901,20260902 \
+  --hidden-dim 96 \
+  --hidden-layers 3 \
+  --flow-layers 6 \
+  --flow-context-dim 64
 ```
 
 ## Inspect Runs
