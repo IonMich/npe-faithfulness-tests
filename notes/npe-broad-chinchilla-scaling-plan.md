@@ -1055,3 +1055,86 @@ Decision:
   exact same-seed repeatability matters.
 - Do not spend on larger spline-flow parameter sweeps until the small spline
   data curve bends clearly or optimization settings are revisited.
+
+## Broad Spline-Flow Extension To 2M
+
+Extended the small spline-flow D-axis on the Mac mini:
+
+```text
+family = spline_flow
+hidden_dim = 64
+hidden_layers = 2
+flow_layers = 4
+spline_bins = 8
+parameters = 45,844
+D = 1,024,000 and 2,048,000
+seeds = 20260901,20260902
+jobs = 2
+torch_threads = 2
+device = cpu
+same 100k early-validation set
+same 1M final-NLL validation cache
+same panel16/grid180 marginal W cache
+```
+
+A simultaneous local/MacBook run for seeds `20260903,20260904` was stopped
+before completion because it was much slower than the Mac mini. The local
+partial run is excluded from all metrics below. Future intensive broad scaling
+runs should use the Mac mini unless there is a specific reason to collect
+machine-local controls.
+
+Outputs:
+
+- `runs/01_exponential_decay/15_broad_scaling/29_spline_flow_small_d2m_both_machines/mini/results/broad_scaling_summary.json`
+- `runs/01_exponential_decay/15_broad_scaling/29_spline_flow_small_d2m_both_machines/mini/results/broad_scaling_summary.csv`
+- `runs/01_exponential_decay/15_broad_scaling/29_spline_flow_small_d2m_both_machines/mini/figures/broad_scaling_law.png`
+
+Mini-only median results, combining with the previous Mac-mini `64k-512k`
+small-spline sweep for context:
+
+| D | Seeds | Panel mean W | Panel target ratio | Final 1M NLL | Median train seconds |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 64,000 | 3 | 0.3769 | 36.00 | -3.1712 | 37.1 |
+| 128,000 | 3 | 0.2611 | 24.72 | -3.3048 | 81.9 |
+| 256,000 | 3 | 0.2340 | 21.81 | -3.3968 | 167.7 |
+| 512,000 | 3 | 0.1880 | 17.48 | -3.4847 | 439.4 |
+| 1,024,000 | 2 | 0.1823 | 17.11 | -3.4929 | 490.3 |
+| 2,048,000 | 2 | 0.1779 | 16.78 | -3.5103 | 1089.2 |
+
+Raw 1M/2M rows:
+
+| Seed | D | Panel mean W | Panel target ratio | Final 1M NLL | Train seconds |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 20260901 | 1,024,000 | 0.1722 | 16.02 | -3.4939 | 499.1 |
+| 20260902 | 1,024,000 | 0.1925 | 18.21 | -3.4918 | 481.5 |
+| 20260901 | 2,048,000 | 0.1719 | 16.12 | -3.5080 | 1234.7 |
+| 20260902 | 2,048,000 | 0.1839 | 17.44 | -3.5126 | 943.6 |
+
+The no-floor target-ratio extrapolation worsened after adding `1M/2M`:
+
+```text
+ratio ~= 323.5 * D^-0.212
+log-space R2 ~= 0.855
+```
+
+A fitted-floor curve explains the extended data much better:
+
+| Metric | Fitted floor | Alpha | Raw R2 | Log-excess R2 |
+| --- | ---: | ---: | ---: | ---: |
+| Panel target ratio | 16.22 | 1.095 | 0.990 | 0.965 |
+| Panel mean W | 0.1722 | 1.052 | 0.988 | 0.977 |
+| Final 1M NLL | -3.5540 | 0.686 | 0.991 | 0.965 |
+
+Interpretation:
+
+- The spline-flow D-axis improved strongly up to `512k`, but the W metric
+  mostly flattened from `512k` to `2M`: `17.48x -> 17.11x -> 16.78x`.
+- NLL still improves with data, so the density objective has not completely
+  saturated. The posterior-W metric appears to be hitting either a model,
+  objective, panel-reference, or sampling/optimization floor.
+- A blind jump above `2M` is not the best next step. If we go higher, it should
+  be a targeted Mac-mini-only diagnostic such as one `4M` seed to test the
+  floor, not a broad multi-seed scale-up.
+- Before spending heavily above `2M`, better candidates are: improve/revisit
+  optimization for the larger spline, increase posterior samples for W at
+  `1M/2M` to check W noise, or compare an additional posterior family.
