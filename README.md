@@ -108,6 +108,74 @@ and tail effective sample size, trace plots, posterior summaries, corner
 overlays, and posterior predictive overlays when the simulator generates
 curves.
 
+## Starting A New Model
+
+Begin by writing down the statistical problem before changing code. A new test
+case should have a prior, simulator, observation rule, diagnostic coordinates,
+and reference plan:
+
+```math
+\theta \sim p(\theta),
+\qquad
+x \sim p(x\mid\theta),
+\qquad
+x_0 = f(\theta_0,\epsilon_0).
+```
+
+The posterior target for the fixed signal $x_0$ is:
+
+```math
+p(\theta\mid x_0)
+\propto
+p(x_0\mid\theta)p(\theta).
+```
+
+Define the parameterization used for numerical comparison at the same time:
+
+```math
+g:\Theta\to\mathbb R^d.
+```
+
+For an identifiable model, $g(\theta)$ is often the raw parameter vector. For a
+model with signs, labels, ridges, or ordered components, choose $g$ so that the
+comparison measures the statistical posterior rather than an arbitrary
+coordinate convention.
+
+Then implement the smallest exact-likelihood test loop that can answer whether
+NPE is faithful:
+
+1. Add the simulator, prior sampler, likelihood, context summary, display
+   transform, and diagnostic transform. Simple stress tests usually belong in
+   `scripts/npe_flow_stress_tests.py`; decay-style models with specialized
+   references can use a dedicated script.
+2. Pick a fixed truth $\theta_0$ and generate one observed signal $x_0$. Keep
+   this signal fixed while comparing methods, otherwise the reference target is
+   changing between runs.
+3. Build an independent reference posterior. Use a grid when $d$ is small
+   enough for direct quadrature; otherwise use exact-likelihood MCMC or HMC and
+   check trace behavior, acceptance, `Rhat`, and effective sample size.
+4. Run a smoke NPE experiment first. It should verify that the simulator,
+   context, neural posterior, sampling code, and plotting code all work before
+   spending time on a larger run.
+5. Run the serious NPE fit and compare posterior samples with the reference
+   using the normalized Wasserstein diagnostic $D(q,p_{\mathrm{ref}})$ already
+   defined above. Inspect marginal overlays, corner plots, posterior
+   predictive overlays, and any model-specific mode or symmetry diagnostics.
+6. Decide the run status from the reference comparison. A passing run should
+   match the posterior target in the diagnostic coordinates and should not rely
+   only on visually plausible predictive curves.
+7. Record the run command, target, metric, plots, and conclusion in the run
+   README, then update the root README only when the result changes the
+   project-level understanding of that model.
+
+Useful entry points are:
+
+```sh
+uv run scripts/npe_flow_stress_tests.py --help
+uv run scripts/check_faithfulness_target.py
+uv run scripts/build_runs_view.py
+```
+
 ## Models And Progress
 
 ### Single-Exponential Decay
