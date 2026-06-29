@@ -199,10 +199,13 @@ Implemented after this investigation:
   training batch size.
 - `--skip-x0-reference` allows fresh-machine panel-W/NLL scaling runs without
   the large local `300^3` x0 grid cache.
-- `scripts/run_scaling_on_mac_mini.py` clones or updates the repo on `mini`,
-  prepares the validation and panel-marginal caches, and launches a detached
-  broad scaling run with logs.
+- `scripts/train_remote_server.py` runs a generic `/train` endpoint on a remote
+  machine. It does not encode scaling-law logic; it updates the repo, runs
+  optional setup commands, and launches a requested repo-local training command.
+- `scripts/submit_remote_broad_scaling.py` keeps the broad-scaling logic local
+  by constructing the cache-prep commands and the broad sweep command, then
+  submitting that JSON request to `/train`.
 
-The Mac mini launcher intentionally runs panel-W and NLL first. x0-specific W
-can be added later by transferring or regenerating the x0 grid cache on the
-mini.
+The default broad-scaling train request intentionally runs panel-W and NLL
+first. x0-specific W can be added later by transferring or regenerating the x0
+grid cache on the remote machine and changing the submitted training command.
