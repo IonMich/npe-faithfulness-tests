@@ -15,6 +15,10 @@ Observed from this workspace:
 - GitHub HTTPS read access works for this repo.
 - `uv` is installed at `/Users/ioannism/.local/bin/uv`, but non-interactive SSH
   sessions did not include that directory in `PATH`.
+- The repo pins Python `3.12.9` in `.python-version`, and `pyproject.toml`
+  accepts only Python `3.12.x`. Run `uv sync --python 3.12.9` after pulling
+  this branch on the Mac mini so seeded comparisons use the same interpreter
+  family as local runs.
 
 ## Server Model
 
@@ -60,6 +64,7 @@ mkdir -p /Users/ioannism/repos
 git clone https://github.com/IonMich/npe-faithfulness-tests.git /Users/ioannism/repos/npe
 cd /Users/ioannism/repos/npe
 git checkout codex/mac-mini-scaling-runner
+PATH="$HOME/.local/bin:$PATH" uv sync --python 3.12.9
 ```
 
 Start the endpoint on the Mac mini:

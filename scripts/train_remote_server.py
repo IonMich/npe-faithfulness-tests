@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import re
 import shutil
 import signal
@@ -58,6 +59,27 @@ def append_log(path: Path, message: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(message.rstrip() + "\n")
+
+
+def project_python_version(repo_dir: Path) -> str | None:
+    version_file = repo_dir / ".python-version"
+    if not version_file.exists():
+        return None
+    value = version_file.read_text(encoding="utf-8").strip()
+    return value or None
+
+
+def runtime_metadata(repo_dir: Path) -> dict[str, object]:
+    return {
+        "python_version": platform.python_version(),
+        "python_full_version": sys.version,
+        "python_executable": sys.executable,
+        "python_implementation": platform.python_implementation(),
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "processor": platform.processor(),
+        "project_python_version": project_python_version(repo_dir),
+    }
 
 
 def process_is_running(pid: int | None) -> bool:
@@ -271,6 +293,7 @@ def build_broad_scaling_spec(payload: dict[str, object], *, repo_dir: Path, uv: 
         "created_at": utc_now(),
         "repo_dir": repo_dir,
         "uv": uv,
+        "runtime": runtime_metadata(repo_dir),
         "config": config,
         "sync": config["sync"],
         "setup_commands": setup_commands,
@@ -292,6 +315,7 @@ def update_status(spec: dict[str, object], **updates: object) -> None:
         "job_type": spec["job_type"],
         "created_at": spec["created_at"],
         "updated_at": utc_now(),
+        "runtime": spec.get("runtime"),
         "log_path": spec["log_path"],
         "output_root": spec["output_root"],
     })
@@ -304,11 +328,15 @@ def worker_main(spec_path: Path) -> int:
     repo_dir = Path(str(spec["repo_dir"]))
     log_path = Path(str(spec["log_path"]))
     env = os.environ.copy()
-    update_status(spec, state="preparing", worker_pid=os.getpid())
+    update_status(spec, state="preparing", worker_pid=os.getpid(), worker_runtime=runtime_metadata(repo_dir))
     append_log(log_path, f"[{utc_now()}] train worker starting")
     try:
         if spec.get("sync", True):
-            run_checked([str(spec["uv"]), "sync"], cwd=repo_dir, log_path=log_path, env=env)
+            command = [str(spec["uv"]), "sync"]
+            python_version = project_python_version(repo_dir)
+            if python_version:
+                command.extend(["--python", python_version])
+            run_checked(command, cwd=repo_dir, log_path=log_path, env=env)
 
         for item in spec["setup_commands"]:
             skip_path = item.get("skip_if_exists")
@@ -433,6 +461,7 @@ class Handler(BaseHTTPRequestHandler):
                     "repo_dir": self.server.repo_dir,
                     "uv": self.server.uv,
                     "uv_path": uv_path,
+                    "runtime": runtime_metadata(self.server.repo_dir),
                     "token_required": bool(self.server.token),
                     "train_endpoints": ["/train/broad-scaling"],
                 },

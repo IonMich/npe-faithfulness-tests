@@ -5,6 +5,7 @@ import csv
 import json
 import math
 import os
+import platform
 import subprocess
 import sys
 import time
@@ -93,6 +94,21 @@ def json_ready(value: object) -> object:
     if isinstance(value, (list, tuple)):
         return [json_ready(item) for item in value]
     return value
+
+
+def runtime_metadata() -> dict[str, object]:
+    return {
+        "python_version": platform.python_version(),
+        "python_full_version": sys.version,
+        "python_executable": sys.executable,
+        "python_implementation": platform.python_implementation(),
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "processor": platform.processor(),
+        "numpy_version": np.__version__,
+        "torch_version": torch.__version__,
+        "matplotlib_version": matplotlib.__version__,
+    }
 
 
 def fill_from_preset(args: argparse.Namespace) -> argparse.Namespace:
@@ -790,6 +806,7 @@ def run_parallel_by_seed(args: argparse.Namespace) -> None:
 
     metadata = {
         "mode": "parallel_by_seed",
+        "runtime": runtime_metadata(),
         "max_workers": max_workers,
         "seeds": seeds,
         "log_dir": str(logs_dir),
@@ -920,6 +937,7 @@ def run_one(
                 "z_mean": stats["z_mean"],
                 "z_std": stats["z_std"],
                 "config": asdict(config),
+                "runtime": runtime_metadata(),
             },
             model_path,
         )
@@ -932,6 +950,7 @@ def run_one(
         "nll_validation": nll_validation_metadata,
         "posterior_samples": int(args.posterior_samples),
         "model_parameters": int(sum(param.numel() for param in model.parameters())),
+        "runtime": runtime_metadata(),
         "epochs_completed": int(metrics["epochs_completed"]),
         "best_val_nll_standardized": float(metrics["best_val_nll"]),
         "best_val_nll_z_units": best_val_nll_z,
@@ -998,6 +1017,7 @@ def aggregate_and_write(
     )
     output = {
         "config": json_ready(vars(args)),
+        "runtime": runtime_metadata(),
         "reference": (
             {
                 "grid_size": int(reference["grid_size"]),
@@ -1240,6 +1260,7 @@ def main() -> None:
                 )
         metadata = {
             "total_seconds_before_aggregation": time.perf_counter() - start,
+            "runtime": runtime_metadata(),
             "early_stop_validation": early_stop_validation_metadata,
             "nll_validation": nll_validation_metadata,
             "panel_reference": panel_reference_metadata,
