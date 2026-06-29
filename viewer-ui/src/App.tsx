@@ -28,7 +28,8 @@ const PREVIOUS_CONTROL_STATE_KEY = "npePosteriorViewer.controls.v3";
 const LEGACY_V2_CONTROL_STATE_KEY = "npePosteriorViewer.controls.v2";
 const LEGACY_CONTROL_STATE_KEY = "npePosteriorViewer.controls.v1";
 
-const NPE_MODEL_IDS = ["local_flow", "broad_mdn"] as const;
+const NPE_MODEL_IDS = ["local_flow", "broad_mdn", "broad_mdn_512k"] as const;
+type NpeOverlay = (typeof NPE_MODEL_IDS)[number];
 const GRID_SIZE_OPTIONS = ["45", "60", "90", "120", "150", "180"] as const;
 const NPE_GRID_SIZE_OPTIONS = ["30", "45", "60", "75", "90", "120", "150", "180"] as const;
 const MAX_POSTERIOR_DRAWS = 500_000;
@@ -43,12 +44,12 @@ const defaultControls: ControlState = {
   activeView: "corner"
 };
 
-function isNpeLayer(value: string): value is Extract<Overlay, "local_flow" | "broad_mdn"> {
-  return NPE_MODEL_IDS.includes(value as Extract<Overlay, "local_flow" | "broad_mdn">);
+function isNpeLayer(value: string): value is NpeOverlay {
+  return NPE_MODEL_IDS.includes(value as NpeOverlay);
 }
 
 function isOverlay(value: unknown): value is Overlay {
-  return value === "local_flow" || value === "broad_mdn" || value === "grid" || value === "mcmc";
+  return typeof value === "string" && (isNpeLayer(value) || value === "grid" || value === "mcmc");
 }
 
 function uniqueOverlays(overlays: Overlay[]): Overlay[] {
@@ -77,7 +78,7 @@ function normalizeSelectValue<T extends string>(
 }
 
 function modelIdToLayer(value: unknown): Overlay {
-  return value === "broad_mdn" ? "broad_mdn" : "local_flow";
+  return typeof value === "string" && isNpeLayer(value) ? value : "local_flow";
 }
 
 function migrateNpeOverlay(overlays: unknown[], modelId: unknown): Overlay[] {
@@ -432,8 +433,12 @@ export default function App() {
   const loading = loadingMode !== null;
 
   const selectedNpeModelIds = controls.overlays.filter(isNpeLayer);
+  const modelLabelById = useMemo(
+    () => new Map(models.map((model) => [model.id, model.plot_label || model.label])),
+    [models]
+  );
   const selectedNpeLayerLabels = selectedNpeModelIds.map((modelId) =>
-    modelId === "local_flow" ? "Local NPE" : "Broad NPE"
+    modelLabelById.get(modelId) || (modelId === "local_flow" ? "Local NPE" : "Broad NPE")
   );
   const hasGrid = controls.overlays.includes("grid");
   const drawingNewSignal = loadingMode === "draw";
@@ -442,7 +447,7 @@ export default function App() {
       ...models
         .filter((model) => isNpeLayer(model.id))
         .map((model) => ({
-          value: model.id as Extract<Overlay, "local_flow" | "broad_mdn">,
+          value: model.id as NpeOverlay,
           label: model.plot_label || model.label,
           icon: model.id === "local_flow" ? <Activity size={14} /> : <BarChart3 size={14} />,
           refreshable: controls.npeMode === "sample"
