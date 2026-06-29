@@ -812,3 +812,66 @@ Interpretation:
 - At these budgets, affine flow is not the next family to scale deeply if the
   main target is panel posterior faithfulness. It may still be useful for NLL,
   but that is not the limiting metric.
+
+## Mac Mini Affine-Flow Remote Probe
+
+After adding the structured remote train endpoint, reran the base affine-flow
+probe on the Mac mini and duplicated it locally for a speed/control check.
+
+Common settings:
+
+```text
+family = affine_flow
+hidden_dim = 96
+hidden_layers = 3
+flow_layers = 6
+flow_context_dim = 64
+D = 16k,64k
+seeds = 20260901,20260902
+jobs = 2
+torch_threads = 2
+device = cpu
+same 1M final-NLL validation cache
+same panel16/grid180 marginal W cache
+```
+
+Outputs:
+
+- Mini affine-flow: `runs/01_exponential_decay/15_broad_scaling/22_mini_affine_flow_base_probe/results/broad_scaling_summary.json`
+- Local affine-flow duplicate: `runs/01_exponential_decay/15_broad_scaling/23_local_affine_flow_base_probe/results/broad_scaling_summary.json`
+- Mini MDN baseline: `runs/01_exponential_decay/15_broad_scaling/24_mini_mdn_base_probe/results/broad_scaling_summary.json`
+
+Mini base affine-flow medians:
+
+| D | Panel mean W | Panel target ratio | Final 1M NLL | Train seconds |
+| ---: | ---: | ---: | ---: | ---: |
+| 16,000 | 0.7398 | 69.12 | -2.5069 | 21.2 |
+| 64,000 | 0.5621 | 52.64 | -2.8667 | 52.8 |
+
+Local duplicate base affine-flow medians:
+
+| D | Panel mean W | Panel target ratio | Final 1M NLL | Train seconds |
+| ---: | ---: | ---: | ---: | ---: |
+| 16,000 | 0.9432 | 87.98 | -2.4587 | 34.2 |
+| 64,000 | 0.5436 | 50.96 | -2.8410 | 90.5 |
+
+Mini base MDN medians:
+
+| D | Panel mean W | Panel target ratio | Final 1M NLL | Train seconds |
+| ---: | ---: | ---: | ---: | ---: |
+| 16,000 | 0.8352 | 77.98 | -2.3763 | 7.5 |
+| 64,000 | 0.4983 | 46.76 | -2.8452 | 23.5 |
+
+Interpretation:
+
+- The Mac mini is faster than local for the affine-flow run by about `1.6x`
+  at `16k` and `1.7x` at `64k`.
+- On the same Mac mini, the base affine flow is not faster than the base MDN:
+  it is about `2.8x` slower at `16k` and `2.2x` slower at `64k`.
+- The affine flow slightly improves NLL on the mini, especially at `16k`, but
+  it does not improve the panel W metric at `64k`; the mini MDN has better
+  panel W there.
+- This reinforces the earlier local conclusion: affine flow is not the next
+  obvious family to scale deeply for panel-W faithfulness. If the goal is NLL,
+  a larger or more expressive flow may still be worth a targeted probe, but it
+  is not a speed win.
