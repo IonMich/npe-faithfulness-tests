@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib import request
 
 
-DEFAULT_ENDPOINT = "http://127.0.0.1:8765"
+DEFAULT_ENDPOINT = "http://127.0.0.1:8877"
 DEFAULT_OUTPUT_ROOT = Path("runs/01_exponential_decay/15_broad_scaling/11_mdn_1m_remote")
 DEFAULT_VALIDATION_CACHE = Path(
     "runs/01_exponential_decay/15_broad_scaling/validation_cache/"

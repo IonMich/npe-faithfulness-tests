@@ -69,7 +69,7 @@ cd /Users/ioannism/repos/npe
 PATH="$HOME/.local/bin:$PATH" \
 uv run scripts/train_remote_server.py serve \
   --host 127.0.0.1 \
-  --port 8765 \
+  --port 8877 \
   --uv "$HOME/.local/bin/uv"
 ```
 
@@ -81,14 +81,14 @@ If the endpoint is bound to localhost on the Mac mini, open a tunnel from the
 local machine:
 
 ```bash
-ssh -N -L 8765:127.0.0.1:8765 mini
+ssh -N -L 8877:127.0.0.1:8877 mini
 ```
 
 Then submit the broad scaling request from this repo:
 
 ```bash
 uv run scripts/submit_remote_broad_scaling.py \
-  --endpoint http://127.0.0.1:8765
+  --endpoint http://127.0.0.1:8877
 ```
 
 The default request:
@@ -113,7 +113,7 @@ For a smaller timing test:
 
 ```bash
 uv run scripts/submit_remote_broad_scaling.py \
-  --endpoint http://127.0.0.1:8765 \
+  --endpoint http://127.0.0.1:8877 \
   --train-simulations 64000,128000 \
   --seeds 20260901,20260902
 ```
@@ -121,10 +121,10 @@ uv run scripts/submit_remote_broad_scaling.py \
 ## Inspect Runs
 
 ```bash
-curl http://127.0.0.1:8765/health
-curl http://127.0.0.1:8765/train
-curl http://127.0.0.1:8765/train/<run_id>
-curl 'http://127.0.0.1:8765/train/<run_id>/log?tail=120'
+curl http://127.0.0.1:8877/health
+curl http://127.0.0.1:8877/train
+curl http://127.0.0.1:8877/train/<run_id>
+curl 'http://127.0.0.1:8877/train/<run_id>/log?tail=120'
 ```
 
 Remote logs live under:

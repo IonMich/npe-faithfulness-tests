@@ -517,7 +517,7 @@ def parse_args() -> argparse.Namespace:
 
     serve = subparsers.add_parser("serve", help="Run the train endpoint.")
     serve.add_argument("--host", default="127.0.0.1")
-    serve.add_argument("--port", type=int, default=8765)
+    serve.add_argument("--port", type=int, default=8877)
     serve.add_argument("--repo-dir", type=Path, default=DEFAULT_REPO_DIR)
     serve.add_argument("--uv", default=os.environ.get("UV", "uv"))
     serve.add_argument("--token", default=os.environ.get("TRAIN_REMOTE_TOKEN"))
@@ -529,7 +529,7 @@ def parse_args() -> argparse.Namespace:
     if args.command is None:
         args.command = "serve"
         args.host = "127.0.0.1"
-        args.port = 8765
+        args.port = 8877
         args.repo_dir = DEFAULT_REPO_DIR
         args.uv = os.environ.get("UV", "uv")
         args.token = os.environ.get("TRAIN_REMOTE_TOKEN")
