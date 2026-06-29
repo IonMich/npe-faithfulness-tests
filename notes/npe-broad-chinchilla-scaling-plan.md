@@ -973,3 +973,85 @@ Interpretation:
 - The likely next useful spline experiment is data scaling for the small
   spline-flow architecture, not a larger-`P` spline sweep. A direct next run is
   `D = 64k,128k,256k,512k`, `seeds = 20260901,20260902,20260903`, same caches.
+
+## Broad Spline-Flow D-Axis Scale-Up
+
+Ran the recommended medium data-axis scale-up for the small spline-flow
+architecture:
+
+```text
+family = spline_flow
+hidden_dim = 64
+hidden_layers = 2
+flow_layers = 4
+spline_bins = 8
+parameters = 45,844
+D = 64k,128k,256k,512k
+seeds = 20260901,20260902,20260903
+jobs = 2
+torch_threads = 2
+device = cpu
+same 100k early-validation set
+same 1M final-NLL validation cache
+same panel16/grid180 marginal W cache
+```
+
+Outputs:
+
+- `runs/01_exponential_decay/15_broad_scaling/28_mini_spline_flow_small_panel512k/results/broad_scaling_summary.json`
+- `runs/01_exponential_decay/15_broad_scaling/28_mini_spline_flow_small_panel512k/results/broad_scaling_summary.csv`
+- `runs/01_exponential_decay/15_broad_scaling/28_mini_spline_flow_small_panel512k/figures/broad_scaling_law.png`
+- `runs/01_exponential_decay/15_broad_scaling/28_mini_spline_flow_small_panel512k/figures/broad_scaling_log_excess.png`
+
+Local mirrored storage was small: `848 KiB` for summaries and figures only.
+Full checkpoints remain on the Mac mini.
+
+Median results:
+
+| D | Panel mean W | Panel target ratio | Final 1M NLL | Median train seconds |
+| ---: | ---: | ---: | ---: | ---: |
+| 64,000 | 0.3769 | 36.00 | -3.1712 | 37.1 |
+| 128,000 | 0.2611 | 24.72 | -3.3048 | 81.9 |
+| 256,000 | 0.2340 | 21.81 | -3.3968 | 167.7 |
+| 512,000 | 0.1880 | 17.48 | -3.4847 | 439.4 |
+
+Per-seed 512k results:
+
+| Seed | Panel mean W | Panel target ratio | Final 1M NLL |
+| ---: | ---: | ---: | ---: |
+| 20260901 | 0.1826 | 17.21 | -3.4706 |
+| 20260902 | 0.2218 | 20.95 | -3.4847 |
+| 20260903 | 0.1880 | 17.48 | -3.4925 |
+
+Fitted-floor diagnostics:
+
+| Metric | Fitted floor | Alpha | Raw R2 | Log-excess R2 |
+| --- | ---: | ---: | ---: | ---: |
+| Panel mean W | 0.1733 | 1.064 | 0.982 | 0.931 |
+| Final 1M NLL | -3.7956 | 0.331 | 0.999 | 0.999 |
+| Best 100k-val NLL | -3.7811 | 0.340 | 0.999 | 0.999 |
+
+Interpretation:
+
+- The small spline flow has a clear data-axis scaling signal over
+  `64k-512k`. NLL is extremely smooth, and panel W improves from `36.0x` to
+  `17.5x` target.
+- At `256k`, the small spline roughly matches the earlier base-MDN `512k`
+  panel ratio. At `512k`, it beats that MDN point.
+- The fitted panel-W floor is close to the largest observed point because four
+  D values are not enough to separate a real asymptote from local curvature.
+  Read the W fit as a warning, not as proof that the spline cannot improve
+  past `~17x`.
+- The earlier P-axis result does not contradict this. For spline flows, adding
+  transforms/width at `16k/64k` changed optimization and model family behavior,
+  and did not help under the fixed optimizer/epoch budget. The small spline is
+  data-limited in this window; larger splines may need different optimization
+  or larger D before they become useful.
+
+Decision:
+
+- The next W-focused run should extend the same small spline to `1M` and
+  possibly `2M`, or add a serial reproducibility check at `64k/128k` first if
+  exact same-seed repeatability matters.
+- Do not spend on larger spline-flow parameter sweeps until the small spline
+  data curve bends clearly or optimization settings are revisited.
