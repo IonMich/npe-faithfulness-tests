@@ -1,0 +1,58 @@
+# macOS and editor noise
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Python environments and caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Node / Vite frontend outputs
+viewer-ui/node_modules/
+viewer-ui/dist/
+viewer-ui/.vite/
+viewer-ui/vite.config.js
+viewer-ui/vite.config.d.ts
+*.tsbuildinfo
+
+# Experiment outputs and generated logs.
+# Keep the lightweight run index docs trackable.
+runs/**
+!runs/
+!runs/**/
+!runs/**/README.md
+sbi-logs/
+
+# Large generated numerical/model artifacts
+*.ckpt
+*.h5
+*.joblib
+*.npy
+*.npz
+*.pkl
+*.pickle
+*.pt
+*.pth
+
+# Common generated reports and temporary exports
+*.log
+*.tmp
+*.temp
+*.bak

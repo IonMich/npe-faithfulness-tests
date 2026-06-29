@@ -1,0 +1,13 @@
+[project]
+name = "npe"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "arviz>=1.2.0",
+    "corner>=2.2.3",
+    "matplotlib>=3.11.0",
+    "numpy>=2.5.0",
+    "sbi>=0.26.1",
+    "scipy>=1.18.0",
+    "torch>=2.12.1",
+]

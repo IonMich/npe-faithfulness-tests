@@ -1,0 +1,11 @@
+# 03_npe_flow_search / 08_npe_flow_local_q0005_linear_100k_t4_seed20260701
+
+Status: `near`
+Reason: NPE target pass flag
+Metric: mean normalized Wasserstein = `0.0366275`
+Target: `0.034`
+
+Artifacts:
+- `results/` - result files and summary JSON for this run
+- `figures/` - plots for this run, when available
+- script: `scripts/npe_flow_decay.py`
