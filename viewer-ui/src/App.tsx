@@ -731,7 +731,7 @@ export default function App() {
 
       <main className="workspace">
         <aside className="inspector">
-          <Card>
+          <Card className="draw-card">
             <CardHeader
               title="Current draw"
               meta={
@@ -768,7 +768,7 @@ export default function App() {
             </div>
           </Card>
 
-          <Card>
+          <Card className="runtime-card">
             <CardHeader title="Runtime" meta={<Timer size={15} />} />
             <div className="card-body">
               {data ? <KeyValueList rows={timingRows(data)} /> : <div className="empty">Waiting for first run.</div>}

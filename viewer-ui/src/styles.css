@@ -205,10 +205,14 @@ select {
 .inspector {
   min-height: 0;
   overflow: auto;
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   padding-right: 1px;
+}
+
+.inspector > .card {
+  flex: 0 0 auto;
 }
 
 .card {
@@ -420,8 +424,10 @@ select {
 .kv-row span {
   min-width: 0;
   width: 100%;
+  max-width: 100%;
   color: var(--muted);
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .kv-row strong {
@@ -437,6 +443,18 @@ select {
 
 .kv-warn strong {
   color: var(--warn);
+}
+
+.draw-card .kv-row {
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+}
+
+.runtime-card .card-body {
+  padding-bottom: 12px;
+}
+
+.runtime-card .kv-row:last-child {
+  padding-bottom: 2px;
 }
 
 .table-wrap {
@@ -909,6 +927,10 @@ select {
 
   .card-body {
     padding: 8px 10px;
+  }
+
+  .runtime-card .card-body {
+    padding-bottom: 10px;
   }
 
   .table-wrap {
