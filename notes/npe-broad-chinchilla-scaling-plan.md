@@ -1138,3 +1138,47 @@ Interpretation:
 - Before spending heavily above `2M`, better candidates are: improve/revisit
   optimization for the larger spline, increase posterior samples for W at
   `1M/2M` to check W noise, or compare an additional posterior family.
+
+## Fixed-P 4M Diagnostic
+
+Ran one Mac-mini-only diagnostic seed at `D=4,096,000` for the two comparable
+fixed-parameter broad NPEs:
+
+```text
+seed = 20260901
+validation cache = broad_prior_val_1m_float32.npz
+panel W cache = decay_panel16_grid180_marginals.npz
+posterior samples per panel signal = 20,000
+jobs = 1 per family, launched concurrently on the Mac mini
+device = cpu
+torch_threads = 2
+```
+
+Outputs:
+
+- `runs/01_exponential_decay/15_broad_scaling/34_mini_fixed_p_4m_diagnostic/mdn/results/broad_scaling_summary.json`
+- `runs/01_exponential_decay/15_broad_scaling/34_mini_fixed_p_4m_diagnostic/spline/results/broad_scaling_summary.json`
+- `runs/01_exponential_decay/15_broad_scaling/31_mdn_vs_spline_fixed_p_d_scaling/figures/mdn_vs_spline_fixed_p_2x2_4m.png`
+- `runs/01_exponential_decay/15_broad_scaling/31_mdn_vs_spline_fixed_p_d_scaling/results/mdn_vs_spline_fixed_p_summary_4m.json`
+
+| Family | Parameters | D | Seeds | Panel mean W | Panel target ratio | Final 1M NLL | Train seconds |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| MDN base | 44,722 | 4,096,000 | 1 | 0.1817 | 16.89 | -3.5141 | 1371.1 |
+| Spline flow small | 45,844 | 4,096,000 | 1 | 0.1283 | 12.02 | -3.5431 | 2482.4 |
+
+Context against the preceding fixed-P results:
+
+- MDN does not improve in W from its `2.048M` median to this single `4.096M`
+  seed: target ratio `16.60x -> 16.89x`. Its NLL still improves
+  `-3.4927 -> -3.5141`.
+- The small spline-flow result is materially better than the previous
+  `2.048M` spline median: target ratio `16.78x -> 12.02x`, W
+  `0.1779 -> 0.1283`, and NLL `-3.5103 -> -3.5431`.
+- This means the apparent small-spline W floor around `16-17x` after `1M/2M`
+  was not a reliable final floor. It was likely a combination of single-family
+  seed noise, local curvature in the scaling curve, or optimization/sampling
+  variance at those data sizes.
+- The result is still only one seed at `4.096M`; do not refit the exponent as
+  if this were a settled multi-seed point. The most defensible next diagnostic
+  is another `4.096M` spline seed, or a paired second seed for both MDN and
+  spline if we want a cleaner family comparison.
