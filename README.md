@@ -49,7 +49,7 @@ D(q, p_{\mathrm{ref}})
 \frac{
 W_1\!\left(g_j(\theta_q), g_j(\theta_{\mathrm{ref}})\right)
 }{
-\operatorname{sd}_{p_{\mathrm{ref}}}\!\left(g_j(\theta)\right)
+\mathrm{sd}_{p_{\mathrm{ref}}}\!\left(g_j(\theta)\right)
 }.
 ```
 
@@ -88,7 +88,7 @@ W_1(a,b)
 
   In the run summaries, $a$ and $b$ are empirical one-dimensional sample sets
   or weighted grid marginals for one diagnostic coordinate.
-- $\operatorname{sd}_{p_{\mathrm{ref}}}(g_j(\theta))$: the posterior standard
+- $\mathrm{sd}_{p_{\mathrm{ref}}}(g_j(\theta))$: the posterior standard
   deviation of diagnostic coordinate $j$ under the reference posterior.
 
 The division by the reference standard deviation turns each coordinate's
@@ -196,7 +196,7 @@ z=(\log A,\log k,\log\sigma),
 \qquad
 z \sim \mathcal N\!\left(
 \log(4.0,0.50,0.40),
-\operatorname{diag}(0.8^2,0.8^2,0.8^2)
+\mathrm{diag}(0.8^2,0.8^2,0.8^2)
 \right).
 ```
 
@@ -238,7 +238,7 @@ x =
 \qquad
 \epsilon \sim \mathcal N\!\left(
 0,
-\operatorname{diag}(0.22^2,0.16^2)
+\mathrm{diag}(0.22^2,0.16^2)
 \right).
 ```
 
@@ -247,7 +247,7 @@ The prior is:
 ```math
 \theta \sim \mathcal N\!\left(
 0,
-\operatorname{diag}(1.8^2,1.8^2)
+\mathrm{diag}(1.8^2,1.8^2)
 \right).
 ```
 
@@ -294,12 +294,12 @@ The observation noise and prior are:
 ```math
 \epsilon \sim \mathcal N\!\left(
 0,
-\operatorname{diag}(0.20^2,0.18^2)
+\mathrm{diag}(0.20^2,0.18^2)
 \right),
 \qquad
 \theta \sim \mathcal N\!\left(
 0,
-\operatorname{diag}(1.8^2,1.8^2)
+\mathrm{diag}(1.8^2,1.8^2)
 \right).
 ```
 
@@ -345,7 +345,7 @@ z=(\mu_1,\mu_2,\log\sigma),
 \qquad
 z \sim \mathcal N\!\left(
 (0,0,\log 0.45),
-\operatorname{diag}(2.2^2,2.2^2,0.55^2)
+\mathrm{diag}(2.2^2,2.2^2,0.55^2)
 \right).
 ```
 
@@ -465,7 +465,7 @@ The current ordered prior is:
 ```math
 z \sim \mathcal N\!\left(
 (\log 2.5,\log 0.35,\log 1.4,\log 0.75,\log 0.25),
-\operatorname{diag}(0.60^2,0.55^2,0.65^2,0.60^2,0.45^2)
+\mathrm{diag}(0.60^2,0.55^2,0.65^2,0.60^2,0.45^2)
 \right).
 ```
 
@@ -584,7 +584,7 @@ For each fixed $k$, the least-squares amplitude is:
 The profiled squared error is:
 
 ```math
-\operatorname{SSE}(k;x)
+\mathrm{SSE}(k;x)
 =
 \sum_{i=1}^{n}
 \left[
@@ -597,7 +597,7 @@ The fitted decay rate is the grid-profile minimizer:
 ```math
 \widehat k(x)
 =
-\arg\min_{k\in\mathcal K}\operatorname{SSE}(k;x),
+\arg\min_{k\in\mathcal K}\mathrm{SSE}(k;x),
 ```
 
 with a small quadratic interpolation around the best grid point. The fitted
@@ -606,7 +606,7 @@ noise scale is:
 ```math
 \widehat\sigma(x)
 =
-\sqrt{\frac{\operatorname{SSE}(\widehat k(x);x)}{n}}.
+\sqrt{\frac{\mathrm{SSE}(\widehat k(x);x)}{n}}.
 ```
 
 The context summary used for the local region is then:
