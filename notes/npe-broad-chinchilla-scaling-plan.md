@@ -1235,3 +1235,63 @@ Interpretation:
   either repeat seeds at `4.096M/8.192M`, or change the optimization schedule
   for high-D spline runs and rerun the same seed to separate data scaling from
   early-stopping/optimization effects.
+
+## Fixed-P 16M Diagnostic And Final Readout
+
+Ran the final fixed-P power-of-two diagnostic on the Mac mini:
+
+```text
+seed = 20260901
+D = 16,384,000
+validation cache = broad_prior_val_1m_float32.npz
+panel W cache = decay_panel16_grid180_marginals.npz
+posterior samples per panel signal = 20,000
+jobs = 1 per family, launched concurrently on the Mac mini
+device = cpu
+torch_threads = 2
+```
+
+Outputs:
+
+- `runs/01_exponential_decay/15_broad_scaling/36_mini_fixed_p_16m_diagnostic/mdn/results/broad_scaling_summary.json`
+- `runs/01_exponential_decay/15_broad_scaling/36_mini_fixed_p_16m_diagnostic/spline/results/broad_scaling_summary.json`
+- `runs/01_exponential_decay/15_broad_scaling/31_mdn_vs_spline_fixed_p_d_scaling/figures/mdn_vs_spline_fixed_p_2x2_16m.png`
+- `runs/01_exponential_decay/15_broad_scaling/31_mdn_vs_spline_fixed_p_d_scaling/results/mdn_vs_spline_fixed_p_summary_16m.json`
+
+| Family | Parameters | D | Seeds | Epochs | Panel mean W | Panel target ratio | Final 1M NLL | Train seconds |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| MDN base | 44,722 | 16,384,000 | 1 | 63 | 0.1711 | 15.96 | -3.5272 | 4147.8 |
+| Spline flow small | 45,844 | 16,384,000 | 1 | 50 | 0.1812 | 17.03 | -3.5566 | 7358.2 |
+
+High-D single-seed context:
+
+| Family | D | Panel mean W | Panel target ratio | Final 1M NLL |
+| --- | ---: | ---: | ---: | ---: |
+| MDN base | 4,096,000 | 0.1817 | 16.89 | -3.5141 |
+| MDN base | 8,192,000 | 0.1892 | 17.58 | -3.5121 |
+| MDN base | 16,384,000 | 0.1711 | 15.96 | -3.5272 |
+| Spline flow small | 4,096,000 | 0.1283 | 12.02 | -3.5431 |
+| Spline flow small | 8,192,000 | 0.1610 | 15.03 | -3.5269 |
+| Spline flow small | 16,384,000 | 0.1812 | 17.03 | -3.5566 |
+
+Final fixed-P interpretation:
+
+- The low/mid-D region still supports the original scaling-law motivation:
+  panel-W and NLL improve strongly as data increases through the first few
+  hundred thousand simulations.
+- At fixed small parameter count, the high-D W curve is not a clean power law.
+  MDN hovers around `16-18x` target ratio from `2M` through `16M`, and spline
+  has one very good `4M` W point that is not sustained at `8M/16M`.
+- The NLL objective continues to improve more smoothly than panel-W at high D.
+  The spline `16M` NLL is the best density score observed here, but its panel-W
+  is worse than the MDN `16M` point. This confirms that final NLL and posterior
+  marginal W are not interchangeable diagnostics: NLL measures average
+  conditional density fit over prior-predictive validation signals, while panel
+  W measures posterior shape/calibration on a small set of signals and can
+  expose different errors.
+- These fixed-P runs do not justify another blind D-only jump. The better next
+  scaling-law experiment is a Chinchilla-style parameter/data sweep around the
+  useful high-D range, with repeat seeds or an optimization control. For the
+  present architectures, simply adding data past a few million simulations is
+  mostly probing optimization/seed/objective mismatch rather than a stable W
+  scaling exponent.
