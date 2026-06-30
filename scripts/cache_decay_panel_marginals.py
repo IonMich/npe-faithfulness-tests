@@ -74,6 +74,98 @@ def max_edge_mass(edge_mass: dict[str, dict[str, float]]) -> float:
     return max(value for item in edge_mass.values() for value in item.values())
 
 
+def build_weighted_grid(
+    *,
+    x: np.ndarray,
+    t: np.ndarray,
+    z_ranges: np.ndarray,
+    grid_size: int,
+    chunk_size: int,
+) -> dict[str, object]:
+    axes_z = [
+        np.linspace(float(z_ranges[index, 0]), float(z_ranges[index, 1]), grid_size)
+        for index in range(3)
+    ]
+    grid_points = grid_size**3
+    logp = np.empty(grid_points, dtype=np.float64)
+    for start in range(0, grid_points, chunk_size):
+        stop = min(start + chunk_size, grid_points)
+        z_chunk = flat_z_chunk(axes_z, start, stop)
+        logp[start:stop] = log_posterior_z_numpy(z_chunk, t=t, y=x)
+    weights = np.exp(logp - logsumexp(logp))
+    edge_mass = edge_mass_from_weights(weights, grid_size)
+    return {
+        "axes_z": axes_z,
+        "weights": weights,
+        "edge_mass": edge_mass,
+    }
+
+
+def marginal_weights_from_grid(weights: np.ndarray, grid_size: int) -> np.ndarray:
+    cube = weights.reshape((grid_size, grid_size, grid_size))
+    output = np.empty((3, grid_size), dtype=np.float64)
+    for axis in range(3):
+        sum_axes = tuple(item for item in range(3) if item != axis)
+        marginal = cube.sum(axis=sum_axes)
+        output[axis] = marginal / marginal.sum()
+    return output
+
+
+def resolution_diagnostics(
+    *,
+    axes_z: list[np.ndarray],
+    marginal_weights: np.ndarray,
+) -> dict[str, dict[str, float]]:
+    diagnostics: dict[str, dict[str, float]] = {}
+    for axis, name in enumerate(PARAMETER_NAMES):
+        weights = marginal_weights[axis] / marginal_weights[axis].sum()
+        z_axis = axes_z[axis]
+        step = float(abs(z_axis[1] - z_axis[0])) if z_axis.size > 1 else float("nan")
+        q05, q95 = weighted_quantile(z_axis, weights, [0.05, 0.95])
+        q01, q99 = weighted_quantile(z_axis, weights, [0.01, 0.99])
+        effective_bins = float(1.0 / max(np.sum(weights**2), 1e-300))
+        diagnostics[name] = {
+            "z_step": step,
+            "q05_q95_bins": float(abs(q95 - q05) / max(step, 1e-300)),
+            "q01_q99_bins": float(abs(q99 - q01) / max(step, 1e-300)),
+            "effective_bins": effective_bins,
+            "max_bin_weight": float(np.max(weights)),
+        }
+    return diagnostics
+
+
+def refine_ranges_from_marginals(
+    *,
+    axes_z: list[np.ndarray],
+    marginal_weights: np.ndarray,
+    true_z: np.ndarray,
+    quantile_tail: float,
+    padding_fraction: float,
+    min_padding: float,
+    true_padding: float,
+) -> np.ndarray:
+    ranges = []
+    for axis in range(3):
+        weights = marginal_weights[axis] / marginal_weights[axis].sum()
+        low_q, high_q = weighted_quantile(
+            axes_z[axis],
+            weights,
+            [quantile_tail, 1.0 - quantile_tail],
+        )
+        width = max(float(high_q - low_q), 1e-8)
+        padding = max(float(padding_fraction) * width, float(min_padding))
+        low = min(float(low_q - padding), float(true_z[axis] - true_padding))
+        high = max(float(high_q + padding), float(true_z[axis] + true_padding))
+        ranges.append((low, high))
+    return np.asarray(ranges, dtype=np.float64)
+
+
+def expand_ranges(z_ranges: np.ndarray, factor: float = 1.5) -> np.ndarray:
+    center = z_ranges.mean(axis=1)
+    half_width = 0.5 * (z_ranges[:, 1] - z_ranges[:, 0]) * factor
+    return np.column_stack([center - half_width, center + half_width])
+
+
 def build_signal_marginals(
     *,
     x: np.ndarray,
@@ -87,60 +179,92 @@ def build_signal_marginals(
     target_sample_count: int,
     target_repeats: int,
     seed: int,
+    refine_marginal_ranges: bool,
+    refine_quantile_tail: float,
+    refine_padding_fraction: float,
+    refine_min_padding: float,
+    refine_true_padding: float,
 ) -> dict[str, object]:
     half_width = float(initial_half_width)
     last: dict[str, object] | None = None
     for expand_index in range(max_expand + 1):
-        axes_z = [
-            np.linspace(true_z[index] - half_width, true_z[index] + half_width, grid_size)
-            for index in range(3)
-        ]
-        grid_points = grid_size**3
-        logp = np.empty(grid_points, dtype=np.float64)
-        for start in range(0, grid_points, chunk_size):
-            stop = min(start + chunk_size, grid_points)
-            z_chunk = flat_z_chunk(axes_z, start, stop)
-            logp[start:stop] = log_posterior_z_numpy(z_chunk, t=t, y=x)
-        weights = np.exp(logp - logsumexp(logp))
-        edge_mass = edge_mass_from_weights(weights, grid_size)
+        z_ranges = np.column_stack([true_z - half_width, true_z + half_width])
+        built_grid = build_weighted_grid(
+            x=x,
+            t=t,
+            z_ranges=z_ranges,
+            grid_size=grid_size,
+            chunk_size=chunk_size,
+        )
         last = {
-            "axes_z": axes_z,
-            "weights": weights,
-            "edge_mass": edge_mass,
+            **built_grid,
             "half_width": half_width,
             "expand_index": expand_index,
+            "z_ranges": z_ranges,
+            "refined": False,
+            "refine_expand_index": 0,
         }
-        if max_edge_mass(edge_mass) <= edge_mass_tolerance:
+        if max_edge_mass(built_grid["edge_mass"]) <= edge_mass_tolerance:
             break
         half_width *= 1.5
     if last is None:
         raise RuntimeError("marginal reference construction failed")
 
+    if refine_marginal_ranges:
+        broad_marginal_weights = marginal_weights_from_grid(
+            np.asarray(last["weights"], dtype=np.float64),
+            grid_size,
+        )
+        refined_ranges = refine_ranges_from_marginals(
+            axes_z=last["axes_z"],
+            marginal_weights=broad_marginal_weights,
+            true_z=true_z,
+            quantile_tail=refine_quantile_tail,
+            padding_fraction=refine_padding_fraction,
+            min_padding=refine_min_padding,
+            true_padding=refine_true_padding,
+        )
+        for refine_expand_index in range(max_expand + 1):
+            refined_grid = build_weighted_grid(
+                x=x,
+                t=t,
+                z_ranges=refined_ranges,
+                grid_size=grid_size,
+                chunk_size=chunk_size,
+            )
+            if max_edge_mass(refined_grid["edge_mass"]) <= edge_mass_tolerance or refine_expand_index == max_expand:
+                last = {
+                    **refined_grid,
+                    "half_width": float(np.max(0.5 * (refined_ranges[:, 1] - refined_ranges[:, 0]))),
+                    "expand_index": int(last["expand_index"]),
+                    "z_ranges": refined_ranges,
+                    "refined": True,
+                    "refine_expand_index": refine_expand_index,
+                }
+                break
+            refined_ranges = expand_ranges(refined_ranges, factor=1.5)
+
     axes_z = last["axes_z"]
     weights = np.asarray(last["weights"], dtype=np.float64)
-    cube = weights.reshape((grid_size, grid_size, grid_size))
     theta_axes = np.stack([np.exp(axis) for axis in axes_z])
-    marginal_weights = np.empty((3, grid_size), dtype=np.float64)
+    marginal_weights = marginal_weights_from_grid(weights, grid_size)
     summaries: dict[str, dict[str, float]] = {}
     for axis, name in enumerate(PARAMETER_NAMES):
-        sum_axes = tuple(item for item in range(3) if item != axis)
-        marginal = cube.sum(axis=sum_axes)
-        marginal = marginal / marginal.sum()
-        marginal_weights[axis] = marginal
-        summaries[name] = summarize_marginal(theta_axes[axis], marginal)
+        summaries[name] = summarize_marginal(theta_axes[axis], marginal_weights[axis])
 
     rng = np.random.default_rng(seed)
     target_rows = []
-    flat_count = grid_size**3
     for _ in range(target_repeats):
-        flat_index = rng.choice(flat_count, size=target_sample_count, replace=True, p=weights)
-        i0 = flat_index // (grid_size * grid_size)
-        i1 = (flat_index // grid_size) % grid_size
-        i2 = flat_index % grid_size
-        sample = np.column_stack((theta_axes[0][i0], theta_axes[1][i1], theta_axes[2][i2]))
         values = []
         for axis, name in enumerate(PARAMETER_NAMES):
-            w = wasserstein_distance(sample[:, axis], theta_axes[axis], v_weights=marginal_weights[axis])
+            sample_index = rng.choice(
+                grid_size,
+                size=target_sample_count,
+                replace=True,
+                p=marginal_weights[axis],
+            )
+            sample = theta_axes[axis][sample_index]
+            w = wasserstein_distance(sample, theta_axes[axis], v_weights=marginal_weights[axis])
             values.append(float(w / max(summaries[name]["sd"], 1e-12)))
         target_rows.append(float(np.mean(values)))
     target_array = np.asarray(target_rows, dtype=np.float64)
@@ -161,6 +285,16 @@ def build_signal_marginals(
         "max_edge_mass": max_edge_mass(last["edge_mass"]),
         "half_width": float(last["half_width"]),
         "expand_index": int(last["expand_index"]),
+        "z_ranges": {
+            name: [float(last["z_ranges"][axis, 0]), float(last["z_ranges"][axis, 1])]
+            for axis, name in enumerate(PARAMETER_NAMES)
+        },
+        "refined": bool(last["refined"]),
+        "refine_expand_index": int(last["refine_expand_index"]),
+        "resolution": resolution_diagnostics(
+            axes_z=axes_z,
+            marginal_weights=marginal_weights,
+        ),
     }
 
 
@@ -176,6 +310,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--initial-half-width", type=float, default=1.2)
     parser.add_argument("--edge-mass-tolerance", type=float, default=1e-4)
     parser.add_argument("--max-expand", type=int, default=3)
+    parser.add_argument(
+        "--refine-marginal-ranges",
+        action="store_true",
+        help=(
+            "After the broad true-centered grid contains the posterior, rebuild "
+            "on marginal-quantile ranges to improve resolution for sharp cases."
+        ),
+    )
+    parser.add_argument("--refine-quantile-tail", type=float, default=5e-4)
+    parser.add_argument("--refine-padding-fraction", type=float, default=0.40)
+    parser.add_argument("--refine-min-padding", type=float, default=0.035)
+    parser.add_argument("--refine-true-padding", type=float, default=0.020)
     parser.add_argument("--target-sample-count", type=int, default=20_000)
     parser.add_argument("--target-repeats", type=int, default=5)
     parser.add_argument("--include-x0", action="store_true")
@@ -220,6 +366,11 @@ def main() -> None:
             target_sample_count=args.target_sample_count,
             target_repeats=args.target_repeats,
             seed=args.panel_seed + 10_000 + index,
+            refine_marginal_ranges=args.refine_marginal_ranges,
+            refine_quantile_tail=args.refine_quantile_tail,
+            refine_padding_fraction=args.refine_padding_fraction,
+            refine_min_padding=args.refine_min_padding,
+            refine_true_padding=args.refine_true_padding,
         )
         theta_axes.append(np.asarray(built["theta_axes"], dtype=np.float32))
         marginal_weights.append(np.asarray(built["marginal_weights"], dtype=np.float32))
@@ -234,6 +385,10 @@ def main() -> None:
             "max_edge_mass": built["max_edge_mass"],
             "half_width": built["half_width"],
             "expand_index": built["expand_index"],
+            "z_ranges": built["z_ranges"],
+            "refined": built["refined"],
+            "refine_expand_index": built["refine_expand_index"],
+            "resolution": built["resolution"],
             "seconds": time.perf_counter() - signal_start,
         })
         print(
@@ -277,6 +432,14 @@ def main() -> None:
         "target_sample_count": int(args.target_sample_count),
         "target_repeats": int(args.target_repeats),
         "edge_mass_tolerance": float(args.edge_mass_tolerance),
+        "initial_half_width": float(args.initial_half_width),
+        "max_expand": int(args.max_expand),
+        "refine_marginal_ranges": bool(args.refine_marginal_ranges),
+        "refine_quantile_tail": float(args.refine_quantile_tail),
+        "refine_padding_fraction": float(args.refine_padding_fraction),
+        "refine_min_padding": float(args.refine_min_padding),
+        "refine_true_padding": float(args.refine_true_padding),
+        "chunk_size": int(args.chunk_size),
         "signals": metadata_rows,
         "compressed_bytes": int(output_bytes),
         "compressed_mib": output_bytes / (1024**2),

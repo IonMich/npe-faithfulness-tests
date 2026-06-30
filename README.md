@@ -224,6 +224,38 @@ Then, the corresponding best posterior overlay:
 
 ![Single decay best posterior overlay](runs/01_exponential_decay/03_npe_flow_search/11_npe_flow_local_q0005_linear_150k_t8_seed20260706/figures/npe_flow_decay_corner_overlay.png)
 
+### Single-Exponential Scaling Diagnostics
+
+The broad prior-amortized decay NPE is also being used as a small scaling-law
+testbed. These runs hold the architecture family roughly fixed and scale the
+number of prior-predictive training pairs $D$. The main 2x2 diagnostic compares
+an MDN and a conditional spline flow with about 45k parameters each. It reports
+both validation NLL over broad prior samples and panel marginal Wasserstein over
+cached exact grid marginals for a fixed panel of signals.
+
+![Single decay broad NPE fixed-P scaling](runs/00_shared_assets/readme_scaling/decay_mdn_vs_spline_fixed_p_2x2_16m.png)
+
+The log-log panels show useful scaling with $D$ through the tested range up to
+16.384M simulations, but the panel Wasserstein remains far above the numerical
+evaluation floor. This is a broad amortization diagnostic rather than the
+single-signal $x_0$ faithfulness target above.
+
+Because panel means can hide rare failures, the current comparison also looks
+at the full distribution of per-signal panel marginal Wasserstein values. The
+metric is the same coordinate-wise diagnostic defined in the evaluation
+section: for each signal, exact grid posterior marginals over $A$, $k$, and
+$\sigma$ are compared with NPE posterior samples using normalized 1D
+Wasserstein distances, then averaged over coordinates.
+
+![Single decay broad NPE panel W distribution](runs/00_shared_assets/readme_scaling/decay_panel_w_distribution_mdn512k_vs_spline4m_500.png)
+
+On this 500-signal panel, the 4.096M spline-flow checkpoint improves the
+distribution relative to the 512k MDN checkpoint: median panel marginal
+Wasserstein is 0.115 for the spline and 0.161 for the MDN, and the spline is
+better on 351 of 500 signals. Both models still have rare severe failures,
+especially in low-noise or edge-of-prior regimes, so this plot is a diagnostic
+for where scaling helps and where model or training changes are still needed.
+
 ### Sign-Symmetry Stress Test
 
 This model creates a two-mode posterior by observing a squared parameter:
