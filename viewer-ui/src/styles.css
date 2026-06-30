@@ -265,6 +265,39 @@ select {
   margin-bottom: 4px;
 }
 
+.truth-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  background: rgba(62, 99, 221, 0.05);
+}
+
+.truth-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  border-radius: 999px;
+  background: var(--card);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.truth-pill span {
+  color: var(--muted);
+  font-weight: 720;
+}
+
+.truth-pill strong {
+  color: var(--foreground);
+  font-weight: 760;
+}
+
 .model-strip {
   display: flex;
   align-items: center;
@@ -438,12 +471,6 @@ select {
 .summary-table th:nth-child(2),
 .summary-table td:nth-child(2) {
   text-align: left;
-}
-
-.summary-table tr.truth-row td {
-  background: rgba(62, 99, 221, 0.08);
-  color: var(--text);
-  font-weight: 720;
 }
 
 .visual-card {
