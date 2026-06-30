@@ -369,7 +369,7 @@ select {
 
 .kv-row {
   display: grid;
-  grid-template-columns: minmax(86px, 0.8fr) minmax(0, 1.25fr);
+  grid-template-columns: minmax(74px, 0.65fr) minmax(0, 1.35fr);
   align-items: flex-start;
   gap: 10px;
   min-width: 0;
@@ -386,15 +386,17 @@ select {
 
 .kv-row span {
   min-width: 0;
+  width: 100%;
   color: var(--muted);
   overflow-wrap: anywhere;
 }
 
 .kv-row strong {
   min-width: 0;
+  width: 100%;
   max-width: 100%;
   text-align: right;
-  justify-self: end;
+  justify-self: stretch;
   overflow-wrap: anywhere;
   word-break: break-word;
   font-weight: 690;
