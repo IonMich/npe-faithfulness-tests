@@ -28,11 +28,14 @@ I reproduced the mechanism with a controlled low-noise, high-amplitude signal:
 Diagnostic artifacts:
 
 - `runs/01_exponential_decay/16_failure_diagnostics/01_ui_extreme_tail_grid/figures/controlled_failure_resolution_and_wasserstein.png`
+- `runs/01_exponential_decay/16_failure_diagnostics/01_ui_extreme_tail_grid/figures/controlled_failure_resolution_v2.png`
 - `runs/01_exponential_decay/16_failure_diagnostics/01_ui_extreme_tail_grid/figures/controlled_failure_ui_grid_corner.png`
 - `runs/01_exponential_decay/16_failure_diagnostics/01_ui_extreme_tail_grid/figures/controlled_failure_focused_grid_corner.png`
 - `runs/01_exponential_decay/16_failure_diagnostics/01_ui_extreme_tail_grid/figures/controlled_failure_tail_quantiles.png`
 - `runs/01_exponential_decay/16_failure_diagnostics/01_ui_extreme_tail_grid/figures/controlled_failure_signal_predictive.png`
 - `runs/01_exponential_decay/16_failure_diagnostics/01_ui_extreme_tail_grid/results/controlled_failure_diagnostics.json`
+- `runs/01_exponential_decay/16_failure_diagnostics/01_ui_extreme_tail_grid/results/controlled_failure_diagnostics_v2.json`
+- `runs/01_exponential_decay/16_failure_diagnostics/01_ui_extreme_tail_grid/results/broad_nll_slice_analysis.json`
 
 ## Findings
 
@@ -70,6 +73,18 @@ Normalized Wasserstein against the focused grid remains bad:
 - Broad spline 4.096M: `418.4`
 - Broad MDN 512k: `72.5`
 
+The UI's `180^3` reference setting is not the same as the focused `180^3`
+diagnostic. In sample mode the UI reference grid range is anchored to the first
+selected NPE's samples. If those samples contain broad or extreme tails, the
+range stays huge and `180^3` is still too coarse in the sharp directions:
+
+- UI-range `180^3` edge mass: `3.4e-58`
+- UI-range `180^3` step near true `k`: `0.0146`
+- UI-range `180^3` grid `k` sd: effectively zero
+- UI-range `180^3` normalized W:
+  - Broad spline 4.096M: `6.8e10`
+  - Broad MDN 512k: `4.6e9`
+
 So the giant UI numbers should not be read literally. They are magnified by a
 bad reference grid denominator and an under-resolved sharp posterior. However,
 even the corrected focused reference shows that both broad amortized models are
@@ -88,6 +103,44 @@ The broad spline has a very small but severe high-`k` tail in this case:
 This tail expands the corner-plot axis and affects tail-sensitive metrics. The
 usual q05/q16/median/q84/q95 table hides this because the extreme tail is above
 the displayed central quantiles.
+
+## Effect On Aggregate Training Metrics
+
+This failure case is a rare broad-prior corner. For
+`theta = (A=52.4, k=0.306, sigma=0.045)`, the prior z-scores are approximately:
+
+- `A`: `+3.22`
+- `k`: `-0.61`
+- `sigma`: `-2.73`
+
+Under the independent log-normal prior, `P(A > 52.4, sigma < 0.045)` is about
+`2.1e-6`, so the expected counts are about:
+
+- `512k` training simulations: `1.1` examples
+- `4.096M` training simulations: `8.4` examples
+
+On the existing 1M prior-predictive validation cache:
+
+- `A > 50, sigma < 0.05`: `3` examples (`3e-6` of validation)
+- `A > 40, sigma < 0.075`: `36` examples (`3.6e-5`)
+- `sigma < 0.075`: `18,284` examples (`1.83%`)
+
+NLL in z units on the exact rare slice (`A > 50, sigma < 0.05`):
+
+- Broad MDN 512k mean NLL: `18.05`
+- Broad spline 4.096M mean NLL: `1.21`
+
+Because the slice has only 3 examples in 1M, even a very bad MDN NLL contributes
+only about `5e-5` to the overall average NLL. Aggregate prior-predictive NLL
+therefore barely sees this corner unless the validation set or objective is
+stratified or stress-weighted.
+
+The W/NLL mismatch is also important. The spline has much better pointwise NLL
+at the true parameter in this rare slice, but its sampled posterior can still
+have too much mass in broad tails and score worse under focused Wasserstein.
+Pointwise conditional NLL rewards density at the sampled true `theta`; it does
+not directly penalize extra posterior mass elsewhere except through model
+normalization and finite capacity.
 
 ## UI Fix Made
 
@@ -108,3 +161,10 @@ small metadata panel.
 4. Add tail quantiles such as q99/q99.9/max or a tail warning for NPE samples.
 5. Treat this low-noise, high-A regime as a targeted failure set for the next
    model-family and scaling tests.
+6. Add a stratified validation panel by prior slice. The broad average should
+   still be reported, but rare high-curvature slices need their own NLL,
+   posterior W, tail, and coverage metrics.
+7. Consider objective-level fixes: oversample or importance-weight low-noise and
+   high-amplitude regions; use a sequential/focused second-stage NPE for hard
+   observations; or apply likelihood-aware posterior correction after amortized
+   sampling.
