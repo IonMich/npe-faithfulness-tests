@@ -425,6 +425,12 @@ select {
   text-align: left;
 }
 
+.summary-table tr.truth-row td {
+  background: rgba(62, 99, 221, 0.08);
+  color: var(--text);
+  font-weight: 720;
+}
+
 .visual-card {
   min-height: 0;
   height: 100%;

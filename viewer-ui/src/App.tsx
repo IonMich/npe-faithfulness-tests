@@ -276,6 +276,14 @@ function wassersteinDistanceItems(data: ViewerResponse | null) {
   ].filter(Boolean) as Array<{ label: string; value: string }>;
 }
 
+function trueThetaRows(data: ViewerResponse | null): SummaryRow[] {
+  if (!data) return [];
+  return (["A", "k", "sigma"] as const).map((parameter) => {
+    const value = formatValue(data.true_theta[parameter]);
+    return { parameter, q05: value, q16: value, median: value, q84: value, q95: value };
+  });
+}
+
 function timingRows(data: ViewerResponse | null) {
   if (!data) return [];
   const timing = data.timing || {};
@@ -337,15 +345,18 @@ function WassersteinStrip({ data }: { data: ViewerResponse | null }) {
 }
 
 function SummaryTable({
+  truthRows,
   npeSummaries,
   gridRows,
   mcmcRows
 }: {
+  truthRows: SummaryRow[];
   npeSummaries: ViewerResponse["npe_summaries"];
   gridRows: SummaryRow[] | null;
   mcmcRows: SummaryRow[] | null;
 }) {
   const combined = [
+    ...truthRows.map((row) => ({ ...row, source: "Truth" })),
     ...npeSummaries.flatMap((item) =>
       item.summary.map((row) => ({ ...row, source: item.label }))
     ),
@@ -368,7 +379,7 @@ function SummaryTable({
       </thead>
       <tbody>
         {combined.map((row) => (
-          <tr key={`${row.source}-${row.parameter}`}>
+          <tr className={row.source === "Truth" ? "truth-row" : ""} key={`${row.source}-${row.parameter}`}>
             <td>{row.source}</td>
             <td>{row.parameter}</td>
             <td>{row.q05}</td>
@@ -711,6 +722,7 @@ export default function App() {
             <div className="table-wrap">
               {data ? (
                 <SummaryTable
+                  truthRows={trueThetaRows(data)}
                   npeSummaries={data.npe_summaries}
                   gridRows={hasGrid ? data.grid_summary : null}
                   mcmcRows={controls.overlays.includes("mcmc") ? data.mcmc_summary : null}
