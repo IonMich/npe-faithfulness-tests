@@ -1387,6 +1387,14 @@ class NPEPosteriorViewer:
                 name: float(true_theta[index])
                 for index, name in enumerate(PARAMETER_NAMES)
             },
+            "signal_data": {
+                "t": [float(value) for value in self.t],
+                "x": [float(value) for value in x],
+                "z_true": {
+                    name: float(z_true[index])
+                    for index, name in enumerate(PARAMETER_NAMES)
+                },
+            },
             "posterior_summary": [] if first_npe is None else first_npe["summary"],
             "npe_summaries": [
                 {

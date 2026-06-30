@@ -243,6 +243,19 @@ select {
   letter-spacing: 0;
 }
 
+.draw-header-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.copy-reference-button {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
 .card-body {
   min-height: 0;
   padding: 10px 12px;

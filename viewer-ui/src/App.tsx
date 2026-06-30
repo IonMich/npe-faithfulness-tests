@@ -1,6 +1,8 @@
 import {
   Activity,
   BarChart3,
+  Check,
+  Copy,
   Grid2X2,
   Loader2,
   Plus,
@@ -230,6 +232,7 @@ function metricRows(data: ViewerResponse | null) {
   const selectedLabels = selectedModels.map((model) => model.plot_label || model.label);
 
   return [
+    ["draw id", data.draw_id.slice(0, 12)],
     ["NPE layers", selectedLabels.length ? selectedLabels.join(", ") : "none"],
     selectedModels.length
       ? ["NPE mode", data.npe_render_mode === "grid" ? "grid evaluated" : "posterior samples"]
@@ -255,6 +258,35 @@ function metricRows(data: ViewerResponse | null) {
         [`${model.plot_label || model.label} checkpoint`, compactPath(model.checkpoint)] as [string, string]
     )
   ].filter(Boolean) as [string, string, string?][];
+}
+
+function debugReferencePayload(data: ViewerResponse, controls: ControlState) {
+  return {
+    source: "npe_posterior_viewer",
+    version: 1,
+    draw_id: data.draw_id,
+    mode_metadata: data.mode_metadata,
+    controls: {
+      mode: controls.mode,
+      samples: controls.samples,
+      npe_mode: controls.npeMode,
+      npe_grid_size: controls.npeGridSize,
+      ref_grid_size: controls.gridSize,
+      overlays: controls.overlays
+    },
+    selected_npe_model_ids: data.selected_npe_model_ids,
+    selected_npe_models: data.selected_npe_models.map((model) => ({
+      id: model.id,
+      label: model.plot_label || model.label,
+      checkpoint: model.checkpoint,
+      train_simulations: model.train_simulations,
+      training_scope: model.training_scope
+    })),
+    true_theta: data.true_theta,
+    signal_data: data.signal_data,
+    grid_metadata: data.grid_metadata,
+    npe_grid_metadata: data.npe_grid_metadata
+  };
 }
 
 function wassersteinDistanceItems(data: ViewerResponse | null) {
@@ -440,6 +472,7 @@ export default function App() {
   const [loadingMode, setLoadingMode] = useState<"draw" | "update" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasRendered, setHasRendered] = useState(false);
+  const [copiedReference, setCopiedReference] = useState(false);
   const lastFailedRequestKey = useRef<string | null>(null);
   const loading = loadingMode !== null;
 
@@ -552,6 +585,18 @@ export default function App() {
       controlsOverride: nextControls,
       refreshLayers: [layer]
     });
+  }
+
+  async function copyDebugReference() {
+    if (!data) return;
+    const payload = JSON.stringify(debugReferencePayload(data, controls), null, 2);
+    try {
+      await navigator.clipboard.writeText(payload);
+      setCopiedReference(true);
+      window.setTimeout(() => setCopiedReference(false), 1800);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : "Could not copy draw reference.");
+    }
   }
 
   useEffect(() => {
@@ -689,9 +734,20 @@ export default function App() {
               title="Current draw"
               meta={
                 data ? (
-                  <Badge tone={data.inside_local_region === false ? "warn" : "muted"}>
-                    {data.mode_metadata.mode}
-                  </Badge>
+                  <div className="draw-header-meta">
+                    <Badge tone={data.inside_local_region === false ? "warn" : "muted"}>
+                      {data.mode_metadata.mode}
+                    </Badge>
+                    <Button
+                      className="copy-reference-button"
+                      disabled={loading}
+                      variant="outline"
+                      onClick={() => void copyDebugReference()}
+                    >
+                      {copiedReference ? <Check size={14} /> : <Copy size={14} />}
+                      {copiedReference ? "Copied" : "Copy ref"}
+                    </Button>
+                  </div>
                 ) : null
               }
             />
