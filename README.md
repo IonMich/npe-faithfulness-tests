@@ -214,15 +214,15 @@ runs remain useful diagnostics because they show how visually close posteriors
 can still miss reference-level accuracy.
 
 Best posterior:
-[local_q0005_linear_150k_t8_seed20260706 summary](runs/01_exponential_decay/03_npe_flow_search/11_npe_flow_local_q0005_linear_150k_t8_seed20260706/results/npe_flow_decay_summary.json).
+[local_q0005_linear_150k_t8_seed20260706 run](runs/01_exponential_decay/03_npe_flow_search/11_npe_flow_local_q0005_linear_150k_t8_seed20260706/README.md).
 
 First, the observed $x_0$ signal and posterior predictive fit:
 
-![Single decay x0 predictive fit](runs/01_exponential_decay/03_npe_flow_search/11_npe_flow_local_q0005_linear_150k_t8_seed20260706/figures/npe_flow_decay_predictive_overlay.png)
+![Single decay x0 predictive fit](runs/00_shared_assets/readme_model_overlays/single_decay_x0_predictive_overlay.png)
 
 Then, the corresponding best posterior overlay:
 
-![Single decay best posterior overlay](runs/01_exponential_decay/03_npe_flow_search/11_npe_flow_local_q0005_linear_150k_t8_seed20260706/figures/npe_flow_decay_corner_overlay.png)
+![Single decay best posterior overlay](runs/00_shared_assets/readme_model_overlays/single_decay_best_posterior_overlay.png)
 
 ### Single-Exponential Scaling Diagnostics
 
@@ -302,9 +302,9 @@ the sign of $\theta_1$ after sampling. This run passes the exact-grid
 diagnostic target and has good mode-mass behavior.
 
 Best posterior:
-[sign_absfold_q008_linear summary](runs/02_stress_sign/01_npe_flow/21_npe_flow_stress_tests_sign_absfold_q008_linear/results/sign_summary.json).
+[sign_absfold_q008_linear run](runs/02_stress_sign/01_npe_flow/21_npe_flow_stress_tests_sign_absfold_q008_linear/README.md).
 
-![Sign-symmetry best posterior overlay](runs/02_stress_sign/01_npe_flow/21_npe_flow_stress_tests_sign_absfold_q008_linear/figures/sign_mcmc_hmc_npe_corner.png)
+![Sign-symmetry best posterior overlay](runs/00_shared_assets/readme_model_overlays/sign_symmetry_best_posterior_overlay.png)
 
 ### Banana Stress Test
 
@@ -353,9 +353,9 @@ a legacy pairwise pass. The remaining work is model-specific calibration
 against a truth/reference target.
 
 Best posterior:
-[banana_q008 summary](runs/03_stress_banana/01_npe_flow/03_npe_flow_stress_tests_banana_q008/results/banana_summary.json).
+[banana_q008 run](runs/03_stress_banana/01_npe_flow/03_npe_flow_stress_tests_banana_q008/README.md).
 
-![Banana best posterior overlay](runs/03_stress_banana/01_npe_flow/03_npe_flow_stress_tests_banana_q008/figures/banana_mcmc_hmc_npe_corner.png)
+![Banana best posterior overlay](runs/00_shared_assets/readme_model_overlays/banana_best_posterior_overlay.png)
 
 ### Label-Switching Mixture
 
@@ -404,9 +404,9 @@ diagnostics pass and pairwise agreement is strong. Final status remains a
 legacy pairwise pass until model-specific calibration is added.
 
 Best posterior:
-[label_em summary](runs/04_stress_label_switch/01_npe_flow/05_npe_flow_stress_tests_label_em/results/label_switch_summary.json).
+[label_em run](runs/04_stress_label_switch/01_npe_flow/05_npe_flow_stress_tests_label_em/README.md).
 
-![Label-switching best posterior overlay](runs/04_stress_label_switch/01_npe_flow/05_npe_flow_stress_tests_label_em/figures/label_switch_mcmc_hmc_npe_corner.png)
+![Label-switching best posterior overlay](runs/00_shared_assets/readme_model_overlays/label_switching_best_posterior_overlay.png)
 
 ### Linear6 Stress Test
 
@@ -463,9 +463,9 @@ local NPE region. It is a legacy pairwise pass pending model-specific
 calibration.
 
 Best posterior:
-[linear6_q008 summary](runs/05_stress_linear6/01_npe_flow/13_npe_flow_stress_tests_linear6_q008/results/linear6_summary.json).
+[linear6_q008 run](runs/05_stress_linear6/01_npe_flow/13_npe_flow_stress_tests_linear6_q008/README.md).
 
-![Linear6 best posterior overlay](runs/05_stress_linear6/01_npe_flow/13_npe_flow_stress_tests_linear6_q008/figures/linear6_mcmc_hmc_npe_corner.png)
+![Linear6 best posterior overlay](runs/00_shared_assets/readme_model_overlays/linear6_best_posterior_overlay.png)
 
 ### Ordered Two-Exponential Decay
 
@@ -523,9 +523,9 @@ ridge coordinates, raw-curve context, and `sbi` SNPE-C have left the gap
 unresolved.
 
 Best posterior:
-[two_exp_ordered_residual summary](runs/06_two_exponential/01_npe_flow/12_npe_flow_stress_tests_two_exp_ordered_residual/results/two_exp_ordered_summary.json).
+[two_exp_ordered_residual run](runs/06_two_exponential/01_npe_flow/12_npe_flow_stress_tests_two_exp_ordered_residual/README.md).
 
-![Ordered two-exponential best posterior overlay](runs/06_two_exponential/01_npe_flow/12_npe_flow_stress_tests_two_exp_ordered_residual/figures/two_exp_ordered_mcmc_hmc_npe_corner.png)
+![Ordered two-exponential best posterior overlay](runs/00_shared_assets/readme_model_overlays/two_exp_ordered_best_posterior_overlay.png)
 
 ## Decay Amortization Check
 
