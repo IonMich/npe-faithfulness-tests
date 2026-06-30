@@ -65,6 +65,15 @@ export type ViewerResponse = {
     k: number;
     sigma: number;
   };
+  signal_data: {
+    t: number[];
+    x: number[];
+    z_true: {
+      A: number;
+      k: number;
+      sigma: number;
+    };
+  };
   posterior_summary: SummaryRow[];
   npe_summaries: Array<{
     model_id: string;
@@ -115,7 +124,13 @@ export type ViewerResponse = {
   z_sample_shape: number[];
 };
 
-export type Overlay = "local_flow" | "broad_mdn" | "grid" | "mcmc";
+export type Overlay =
+  | "local_flow"
+  | "broad_mdn"
+  | "broad_mdn_512k"
+  | "broad_spline_4m"
+  | "grid"
+  | "mcmc";
 
 export type ControlState = {
   mode: string;

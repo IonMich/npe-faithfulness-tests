@@ -9,9 +9,9 @@ The historical target `0.034` came from the exponential-decay model. This checks
 ```math
 x = (\theta_1^2, \theta_2) + \epsilon,
 \qquad
-\epsilon \sim \mathcal N(0, \operatorname{diag}(0.22^2, 0.16^2)),
+\epsilon \sim \mathcal N(0, \mathrm{diag}(0.22^2, 0.16^2)),
 \qquad
-\theta \sim \mathcal N(0, \operatorname{diag}(1.8^2, 1.8^2)).
+\theta \sim \mathcal N(0, \mathrm{diag}(1.8^2, 1.8^2)).
 ```
 
 Observed signal:

@@ -1,6 +1,8 @@
 import {
   Activity,
   BarChart3,
+  Check,
+  Copy,
   Grid2X2,
   Loader2,
   Plus,
@@ -28,7 +30,8 @@ const PREVIOUS_CONTROL_STATE_KEY = "npePosteriorViewer.controls.v3";
 const LEGACY_V2_CONTROL_STATE_KEY = "npePosteriorViewer.controls.v2";
 const LEGACY_CONTROL_STATE_KEY = "npePosteriorViewer.controls.v1";
 
-const NPE_MODEL_IDS = ["local_flow", "broad_mdn"] as const;
+const NPE_MODEL_IDS = ["local_flow", "broad_mdn", "broad_mdn_512k", "broad_spline_4m"] as const;
+type NpeOverlay = (typeof NPE_MODEL_IDS)[number];
 const GRID_SIZE_OPTIONS = ["45", "60", "90", "120", "150", "180"] as const;
 const NPE_GRID_SIZE_OPTIONS = ["30", "45", "60", "75", "90", "120", "150", "180"] as const;
 const MAX_POSTERIOR_DRAWS = 500_000;
@@ -43,12 +46,12 @@ const defaultControls: ControlState = {
   activeView: "corner"
 };
 
-function isNpeLayer(value: string): value is Extract<Overlay, "local_flow" | "broad_mdn"> {
-  return NPE_MODEL_IDS.includes(value as Extract<Overlay, "local_flow" | "broad_mdn">);
+function isNpeLayer(value: string): value is NpeOverlay {
+  return NPE_MODEL_IDS.includes(value as NpeOverlay);
 }
 
 function isOverlay(value: unknown): value is Overlay {
-  return value === "local_flow" || value === "broad_mdn" || value === "grid" || value === "mcmc";
+  return typeof value === "string" && (isNpeLayer(value) || value === "grid" || value === "mcmc");
 }
 
 function uniqueOverlays(overlays: Overlay[]): Overlay[] {
@@ -77,7 +80,7 @@ function normalizeSelectValue<T extends string>(
 }
 
 function modelIdToLayer(value: unknown): Overlay {
-  return value === "broad_mdn" ? "broad_mdn" : "local_flow";
+  return typeof value === "string" && isNpeLayer(value) ? value : "local_flow";
 }
 
 function migrateNpeOverlay(overlays: unknown[], modelId: unknown): Overlay[] {
@@ -229,6 +232,7 @@ function metricRows(data: ViewerResponse | null) {
   const selectedLabels = selectedModels.map((model) => model.plot_label || model.label);
 
   return [
+    ["draw id", data.draw_id.slice(0, 12)],
     ["NPE layers", selectedLabels.length ? selectedLabels.join(", ") : "none"],
     selectedModels.length
       ? ["NPE mode", data.npe_render_mode === "grid" ? "grid evaluated" : "posterior samples"]
@@ -256,6 +260,35 @@ function metricRows(data: ViewerResponse | null) {
   ].filter(Boolean) as [string, string, string?][];
 }
 
+function debugReferencePayload(data: ViewerResponse, controls: ControlState) {
+  return {
+    source: "npe_posterior_viewer",
+    version: 1,
+    draw_id: data.draw_id,
+    mode_metadata: data.mode_metadata,
+    controls: {
+      mode: controls.mode,
+      samples: controls.samples,
+      npe_mode: controls.npeMode,
+      npe_grid_size: controls.npeGridSize,
+      ref_grid_size: controls.gridSize,
+      overlays: controls.overlays
+    },
+    selected_npe_model_ids: data.selected_npe_model_ids,
+    selected_npe_models: data.selected_npe_models.map((model) => ({
+      id: model.id,
+      label: model.plot_label || model.label,
+      checkpoint: model.checkpoint,
+      train_simulations: model.train_simulations,
+      training_scope: model.training_scope
+    })),
+    true_theta: data.true_theta,
+    signal_data: data.signal_data,
+    grid_metadata: data.grid_metadata,
+    npe_grid_metadata: data.npe_grid_metadata
+  };
+}
+
 function wassersteinDistanceItems(data: ViewerResponse | null) {
   if (!data?.grid_summary) return [];
   const npeItems = (data.selected_npe_models || [])
@@ -273,6 +306,19 @@ function wassersteinDistanceItems(data: ViewerResponse | null) {
     ...npeItems,
     mcmcMetric === undefined ? null : { label: "MCMC", value: formatValue(mcmcMetric) }
   ].filter(Boolean) as Array<{ label: string; value: string }>;
+}
+
+function TruthStrip({ data }: { data: ViewerResponse }) {
+  return (
+    <div className="truth-strip" aria-label="True parameter values">
+      {(["A", "k", "sigma"] as const).map((parameter) => (
+        <span className="truth-pill" key={parameter}>
+          <span>{parameter}</span>
+          <strong>{formatValue(data.true_theta[parameter])}</strong>
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function timingRows(data: ViewerResponse | null) {
@@ -428,12 +474,17 @@ export default function App() {
   const [loadingMode, setLoadingMode] = useState<"draw" | "update" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasRendered, setHasRendered] = useState(false);
+  const [copiedReference, setCopiedReference] = useState(false);
   const lastFailedRequestKey = useRef<string | null>(null);
   const loading = loadingMode !== null;
 
   const selectedNpeModelIds = controls.overlays.filter(isNpeLayer);
+  const modelLabelById = useMemo(
+    () => new Map(models.map((model) => [model.id, model.plot_label || model.label])),
+    [models]
+  );
   const selectedNpeLayerLabels = selectedNpeModelIds.map((modelId) =>
-    modelId === "local_flow" ? "Local NPE" : "Broad NPE"
+    modelLabelById.get(modelId) || (modelId === "local_flow" ? "Local NPE" : "Broad NPE")
   );
   const hasGrid = controls.overlays.includes("grid");
   const drawingNewSignal = loadingMode === "draw";
@@ -442,7 +493,7 @@ export default function App() {
       ...models
         .filter((model) => isNpeLayer(model.id))
         .map((model) => ({
-          value: model.id as Extract<Overlay, "local_flow" | "broad_mdn">,
+          value: model.id as NpeOverlay,
           label: model.plot_label || model.label,
           icon: model.id === "local_flow" ? <Activity size={14} /> : <BarChart3 size={14} />,
           refreshable: controls.npeMode === "sample"
@@ -536,6 +587,18 @@ export default function App() {
       controlsOverride: nextControls,
       refreshLayers: [layer]
     });
+  }
+
+  async function copyDebugReference() {
+    if (!data) return;
+    const payload = JSON.stringify(debugReferencePayload(data, controls), null, 2);
+    try {
+      await navigator.clipboard.writeText(payload);
+      setCopiedReference(true);
+      window.setTimeout(() => setCopiedReference(false), 1800);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : "Could not copy draw reference.");
+    }
   }
 
   useEffect(() => {
@@ -668,14 +731,25 @@ export default function App() {
 
       <main className="workspace">
         <aside className="inspector">
-          <Card>
+          <Card className="draw-card">
             <CardHeader
               title="Current draw"
               meta={
                 data ? (
-                  <Badge tone={data.inside_local_region === false ? "warn" : "muted"}>
-                    {data.mode_metadata.mode}
-                  </Badge>
+                  <div className="draw-header-meta">
+                    <Badge tone={data.inside_local_region === false ? "warn" : "muted"}>
+                      {data.mode_metadata.mode}
+                    </Badge>
+                    <Button
+                      className="copy-reference-button"
+                      disabled={loading}
+                      variant="outline"
+                      onClick={() => void copyDebugReference()}
+                    >
+                      {copiedReference ? <Check size={14} /> : <Copy size={14} />}
+                      {copiedReference ? "Copied" : "Copy ref"}
+                    </Button>
+                  </div>
                 ) : null
               }
             />
@@ -694,7 +768,7 @@ export default function App() {
             </div>
           </Card>
 
-          <Card>
+          <Card className="runtime-card">
             <CardHeader title="Runtime" meta={<Timer size={15} />} />
             <div className="card-body">
               {data ? <KeyValueList rows={timingRows(data)} /> : <div className="empty">Waiting for first run.</div>}
@@ -703,6 +777,7 @@ export default function App() {
 
           <Card className="summary-card">
             <CardHeader title="Posterior quantiles" meta={<BarChart3 size={15} />} />
+            {data ? <TruthStrip data={data} /> : null}
             <div className="table-wrap">
               {data ? (
                 <SummaryTable

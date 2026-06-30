@@ -167,6 +167,7 @@ def load_stage1_model(
         families=cfg["families"],
         posterior_samples=cfg["posterior_samples"],
         reference_grid_size=cfg["reference_grid_size"],
+        spline_bins=int(cfg.get("spline_bins", 12)),
     )
     model = make_model(family, config, x_dim=40, z_dim=3).to(device)
     model.load_state_dict(checkpoint["state_dict"])

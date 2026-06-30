@@ -62,9 +62,16 @@ DEFAULT_MODEL = Path(
     "11_npe_flow_local_q0005_linear_150k_t8_seed20260706/"
     "results/npe_flow_decay_model.pt"
 )
-DEFAULT_BROAD_MODEL = Path(
-    "runs/01_exponential_decay/02_npe_stage1_local_summary/"
-    "12_npe_stage1_scaled/results/mdn_model.pt"
+DEFAULT_BROAD_MODEL: Path | None = None
+DEFAULT_BEST_BROAD_MODEL = Path(
+    "runs/01_exponential_decay/15_broad_scaling/"
+    "09_ui_best_broad_mdn_512k_seed20260902/"
+    "runs/n512000_seed20260902/results/mdn_model.pt"
+)
+DEFAULT_BEST_BROAD_SPLINE_MODEL = Path(
+    "runs/01_exponential_decay/15_broad_scaling/"
+    "34_mini_fixed_p_4m_diagnostic/spline/"
+    "runs/n4096000_seed20260901/results/spline_flow_model.pt"
 )
 DEFAULT_UI_DIST = Path("viewer-ui/dist")
 DEFAULT_PORT = 8876
@@ -79,6 +86,8 @@ MCMC_COLOR = "#b85c38"
 NPE_LAYER_COLORS = {
     "local_flow": NPE_COLOR,
     "broad_mdn": BROAD_NPE_COLOR,
+    "broad_mdn_512k": "#6d4aff",
+    "broad_spline_4m": "#c45a2d",
 }
 
 
@@ -331,6 +340,7 @@ def stage1_config_from_dict(config: dict[str, object]) -> Stage1Config:
         families=[str(item) for item in config["families"]],
         posterior_samples=int(config["posterior_samples"]),
         reference_grid_size=int(config["reference_grid_size"]),
+        spline_bins=int(config.get("spline_bins", 12)),
     )
 
 
@@ -442,6 +452,8 @@ class NPEPosteriorViewer:
         self,
         model_path: Path,
         broad_model_path: Path | None,
+        best_broad_model_path: Path | None,
+        best_broad_spline_model_path: Path | None,
         seed: int,
         device: str,
         mcmc_device: str,
@@ -517,35 +529,77 @@ class NPEPosteriorViewer:
                 "has_local_region": self.local_region is not None,
             }
         }
-        self.broad_model = None
-        self.broad_state = None
+        self.stage1_models: dict[str, torch.nn.Module] = {}
+        self.stage1_states: dict[str, dict[str, object]] = {}
         if broad_model_path is not None and broad_model_path.exists():
-            self.broad_model, self.broad_state = load_stage1_checkpoint(
-                broad_model_path,
-                self.device,
+            self.register_stage1_checkpoint(
+                model_id="broad_mdn",
+                path=broad_model_path,
+                label="Broad prior-predictive MDN, 100k",
+                plot_label="Broad MDN NPE",
+                color=NPE_LAYER_COLORS["broad_mdn"],
+                training_description="theta drawn from the full decay prior, then x simulated from p(x | theta)",
             )
-            broad_config = self.broad_state["config"]
-            self.model_registry["broad_mdn"] = {
-                "id": "broad_mdn",
-                "label": "Broad prior-predictive MDN, 100k",
-                "plot_label": "Broad MDN NPE",
-                "color": NPE_LAYER_COLORS["broad_mdn"],
-                "kind": "stage1_mdn",
-                "training_scope": "broad_prior_predictive",
-                "training_description": "theta drawn from the full decay prior, then x simulated from p(x | theta)",
-                "family": self.broad_state["family"],
-                "family_label": self.broad_state["label"],
-                "train_simulations": broad_config.get("train_simulations"),
-                "local_quantile": None,
-                "checkpoint": str(broad_model_path),
-                "has_local_region": False,
-            }
+        if best_broad_model_path is not None and best_broad_model_path.exists():
+            self.register_stage1_checkpoint(
+                model_id="broad_mdn_512k",
+                path=best_broad_model_path,
+                label="Broad prior-predictive MDN, 512k seed 20260902",
+                plot_label="Broad MDN 512k",
+                color=NPE_LAYER_COLORS["broad_mdn_512k"],
+                training_description=(
+                    "best saved broad MDN from the corrected scaling sweep "
+                    "(512k prior-predictive simulations, seed 20260902)"
+                ),
+            )
+        if best_broad_spline_model_path is not None and best_broad_spline_model_path.exists():
+            self.register_stage1_checkpoint(
+                model_id="broad_spline_4m",
+                path=best_broad_spline_model_path,
+                label="Broad prior-predictive spline flow, 4.096M seed 20260901",
+                plot_label="Broad spline 4.096M",
+                color=NPE_LAYER_COLORS["broad_spline_4m"],
+                training_description=(
+                    "best panel-W fixed-P broad NPE from the scaling diagnostics "
+                    "(4.096M prior-predictive simulations, seed 20260901)"
+                ),
+            )
 
     def model_options(self) -> list[dict[str, object]]:
         return [
             json_ready(self.model_registry[model_id])
             for model_id in self.model_registry
         ]
+
+    def register_stage1_checkpoint(
+        self,
+        *,
+        model_id: str,
+        path: Path,
+        label: str,
+        plot_label: str,
+        color: str,
+        training_description: str,
+    ) -> None:
+        model, state = load_stage1_checkpoint(path, self.device)
+        config = state["config"]
+        self.stage1_models[model_id] = model
+        self.stage1_states[model_id] = state
+        self.model_registry[model_id] = {
+            "id": model_id,
+            "label": label,
+            "plot_label": plot_label,
+            "color": color,
+            "kind": f"stage1_{state['family']}",
+            "training_scope": "broad_prior_predictive",
+            "training_description": training_description,
+            "family": state["family"],
+            "family_label": state["label"],
+            "train_simulations": config.get("train_simulations"),
+            "local_quantile": None,
+            "checkpoint": str(path),
+            "has_local_region": False,
+        }
 
     def context_for_signal(self, x: np.ndarray) -> np.ndarray:
         return make_context_summaries(
@@ -770,14 +824,15 @@ class NPEPosteriorViewer:
                 n=posterior_samples,
                 device=self.device,
             )
-        if model_id == "broad_mdn" and self.broad_model is not None and self.broad_state is not None:
+        if model_id in self.stage1_models:
+            stage1_state = self.stage1_states[model_id]
             return sample_posterior_for_observation(
-                model=self.broad_model,
+                model=self.stage1_models[model_id],
                 observed_x=x,
-                x_mean=self.broad_state["x_mean"],
-                x_std=self.broad_state["x_std"],
-                z_mean=self.broad_state["z_mean"],
-                z_std=self.broad_state["z_std"],
+                x_mean=stage1_state["x_mean"],
+                x_std=stage1_state["x_std"],
+                z_mean=stage1_state["z_mean"],
+                z_std=stage1_state["z_std"],
                 n=posterior_samples,
                 device=self.device,
             )
@@ -813,18 +868,19 @@ class NPEPosteriorViewer:
                 log_prob[start:stop] = values
             return log_prob
 
-        if model_id == "broad_mdn" and self.broad_model is not None and self.broad_state is not None:
-            x_standardized = ((x[None, :] - self.broad_state["x_mean"][None, :]) / self.broad_state["x_std"][None, :]).astype(np.float32)
+        if model_id in self.stage1_models:
+            stage1_state = self.stage1_states[model_id]
+            x_standardized = ((x[None, :] - stage1_state["x_mean"][None, :]) / stage1_state["x_std"][None, :]).astype(np.float32)
             x_row = torch.from_numpy(x_standardized).to(self.device)
-            z_mean = np.asarray(self.broad_state["z_mean"], dtype=np.float64)
-            z_std = np.asarray(self.broad_state["z_std"], dtype=np.float64)
+            z_mean = np.asarray(stage1_state["z_mean"], dtype=np.float64)
+            z_std = np.asarray(stage1_state["z_std"], dtype=np.float64)
             for start in range(0, z_grid.shape[0], chunk_size):
                 stop = min(start + chunk_size, z_grid.shape[0])
                 z_standardized = ((z_grid[start:stop] - z_mean[None, :]) / z_std[None, :]).astype(np.float32)
                 z_tensor = torch.from_numpy(z_standardized).to(self.device)
                 x_tensor = x_row.expand(z_tensor.shape[0], -1)
                 with torch.no_grad():
-                    values = self.broad_model.log_prob(z_tensor, x_tensor).detach().cpu().numpy()
+                    values = self.stage1_models[model_id].log_prob(z_tensor, x_tensor).detach().cpu().numpy()
                 log_prob[start:stop] = values
             return log_prob
 
@@ -1107,9 +1163,10 @@ class NPEPosteriorViewer:
         if unknown_model_ids:
             available = ", ".join(self.model_registry)
             raise ValueError(f"Unknown model_id(s) {unknown_model_ids!r}. Available models: {available}")
-        unknown_refresh_layers = refresh_layers.difference({"local_flow", "broad_mdn", "grid", "mcmc"})
+        allowed_refresh_layers = set(self.model_registry) | {"grid", "mcmc"}
+        unknown_refresh_layers = refresh_layers.difference(allowed_refresh_layers)
         if unknown_refresh_layers:
-            available = "local_flow, broad_mdn, grid, mcmc"
+            available = ", ".join(sorted(allowed_refresh_layers))
             raise ValueError(f"Unknown refresh layer(s) {sorted(unknown_refresh_layers)!r}. Available layers: {available}")
         if npe_render_mode not in {"sample", "grid"}:
             raise ValueError("npe_render_mode must be 'sample' or 'grid'.")
@@ -1330,6 +1387,14 @@ class NPEPosteriorViewer:
                 name: float(true_theta[index])
                 for index, name in enumerate(PARAMETER_NAMES)
             },
+            "signal_data": {
+                "t": [float(value) for value in self.t],
+                "x": [float(value) for value in x],
+                "z_true": {
+                    name: float(z_true[index])
+                    for index, name in enumerate(PARAMETER_NAMES)
+                },
+            },
             "posterior_summary": [] if first_npe is None else first_npe["summary"],
             "npe_summaries": [
                 {
@@ -1538,9 +1603,26 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_BROAD_MODEL,
         help=(
-            "Optional broad prior-predictive decay NPE checkpoint to expose in "
-            "the posterior-estimator dropdown. If the path is missing, only the "
-            "local flow is shown."
+            "Optional older broad prior-predictive decay NPE checkpoint to expose "
+            "in the posterior-estimator dropdown. Omitted by default."
+        ),
+    )
+    parser.add_argument(
+        "--best-broad-model",
+        type=Path,
+        default=DEFAULT_BEST_BROAD_MODEL,
+        help=(
+            "Optional best broad prior-predictive checkpoint from the scaling-law "
+            "runs. If the path is missing, it is omitted from the model dropdown."
+        ),
+    )
+    parser.add_argument(
+        "--best-broad-spline-model",
+        type=Path,
+        default=DEFAULT_BEST_BROAD_SPLINE_MODEL,
+        help=(
+            "Optional best broad spline-flow checkpoint from the fixed-P scaling "
+            "diagnostics. If the path is missing, it is omitted from the model dropdown."
         ),
     )
     parser.add_argument("--host", default="127.0.0.1")
@@ -1577,6 +1659,8 @@ def main() -> None:
     viewer = NPEPosteriorViewer(
         args.model,
         args.broad_model,
+        args.best_broad_model,
+        args.best_broad_spline_model,
         seed=args.seed,
         device=args.device,
         mcmc_device=args.mcmc_device,

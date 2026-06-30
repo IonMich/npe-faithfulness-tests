@@ -205,10 +205,14 @@ select {
 .inspector {
   min-height: 0;
   overflow: auto;
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   padding-right: 1px;
+}
+
+.inspector > .card {
+  flex: 0 0 auto;
 }
 
 .card {
@@ -243,6 +247,19 @@ select {
   letter-spacing: 0;
 }
 
+.draw-header-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.copy-reference-button {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
 .card-body {
   min-height: 0;
   padding: 10px 12px;
@@ -250,6 +267,39 @@ select {
 
 .summary-card {
   margin-bottom: 4px;
+}
+
+.truth-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  background: rgba(62, 99, 221, 0.05);
+}
+
+.truth-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  border-radius: 999px;
+  background: var(--card);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.truth-pill span {
+  color: var(--muted);
+  font-weight: 720;
+}
+
+.truth-pill strong {
+  color: var(--foreground);
+  font-weight: 760;
 }
 
 .model-strip {
@@ -356,7 +406,7 @@ select {
 
 .kv-row {
   display: grid;
-  grid-template-columns: minmax(86px, 0.8fr) minmax(0, 1.25fr);
+  grid-template-columns: minmax(74px, 0.65fr) minmax(0, 1.35fr);
   align-items: flex-start;
   gap: 10px;
   min-width: 0;
@@ -373,15 +423,19 @@ select {
 
 .kv-row span {
   min-width: 0;
+  width: 100%;
+  max-width: 100%;
   color: var(--muted);
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .kv-row strong {
   min-width: 0;
+  width: 100%;
   max-width: 100%;
   text-align: right;
-  justify-self: end;
+  justify-self: stretch;
   overflow-wrap: anywhere;
   word-break: break-word;
   font-weight: 690;
@@ -389,6 +443,18 @@ select {
 
 .kv-warn strong {
   color: var(--warn);
+}
+
+.draw-card .kv-row {
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+}
+
+.runtime-card .card-body {
+  padding-bottom: 12px;
+}
+
+.runtime-card .kv-row:last-child {
+  padding-bottom: 2px;
 }
 
 .table-wrap {
@@ -861,6 +927,10 @@ select {
 
   .card-body {
     padding: 8px 10px;
+  }
+
+  .runtime-card .card-body {
+    padding-bottom: 10px;
   }
 
   .table-wrap {
