@@ -68,6 +68,11 @@ DEFAULT_BEST_BROAD_MODEL = Path(
     "09_ui_best_broad_mdn_512k_seed20260902/"
     "runs/n512000_seed20260902/results/mdn_model.pt"
 )
+DEFAULT_BEST_BROAD_SPLINE_MODEL = Path(
+    "runs/01_exponential_decay/15_broad_scaling/"
+    "34_mini_fixed_p_4m_diagnostic/spline/"
+    "runs/n4096000_seed20260901/results/spline_flow_model.pt"
+)
 DEFAULT_UI_DIST = Path("viewer-ui/dist")
 DEFAULT_PORT = 8876
 DEFAULT_NPE_EVAL_GRID_SIZE = 60
@@ -82,6 +87,7 @@ NPE_LAYER_COLORS = {
     "local_flow": NPE_COLOR,
     "broad_mdn": BROAD_NPE_COLOR,
     "broad_mdn_512k": "#6d4aff",
+    "broad_spline_4m": "#c45a2d",
 }
 
 
@@ -447,6 +453,7 @@ class NPEPosteriorViewer:
         model_path: Path,
         broad_model_path: Path | None,
         best_broad_model_path: Path | None,
+        best_broad_spline_model_path: Path | None,
         seed: int,
         device: str,
         mcmc_device: str,
@@ -543,6 +550,18 @@ class NPEPosteriorViewer:
                 training_description=(
                     "best saved broad MDN from the corrected scaling sweep "
                     "(512k prior-predictive simulations, seed 20260902)"
+                ),
+            )
+        if best_broad_spline_model_path is not None and best_broad_spline_model_path.exists():
+            self.register_stage1_checkpoint(
+                model_id="broad_spline_4m",
+                path=best_broad_spline_model_path,
+                label="Broad prior-predictive spline flow, 4.096M seed 20260901",
+                plot_label="Broad spline 4.096M",
+                color=NPE_LAYER_COLORS["broad_spline_4m"],
+                training_description=(
+                    "best panel-W fixed-P broad NPE from the scaling diagnostics "
+                    "(4.096M prior-predictive simulations, seed 20260901)"
                 ),
             )
 
@@ -1589,6 +1608,15 @@ def parse_args() -> argparse.Namespace:
             "runs. If the path is missing, it is omitted from the model dropdown."
         ),
     )
+    parser.add_argument(
+        "--best-broad-spline-model",
+        type=Path,
+        default=DEFAULT_BEST_BROAD_SPLINE_MODEL,
+        help=(
+            "Optional best broad spline-flow checkpoint from the fixed-P scaling "
+            "diagnostics. If the path is missing, it is omitted from the model dropdown."
+        ),
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument(
@@ -1624,6 +1652,7 @@ def main() -> None:
         args.model,
         args.broad_model,
         args.best_broad_model,
+        args.best_broad_spline_model,
         seed=args.seed,
         device=args.device,
         mcmc_device=args.mcmc_device,

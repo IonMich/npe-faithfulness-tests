@@ -28,7 +28,7 @@ const PREVIOUS_CONTROL_STATE_KEY = "npePosteriorViewer.controls.v3";
 const LEGACY_V2_CONTROL_STATE_KEY = "npePosteriorViewer.controls.v2";
 const LEGACY_CONTROL_STATE_KEY = "npePosteriorViewer.controls.v1";
 
-const NPE_MODEL_IDS = ["local_flow", "broad_mdn", "broad_mdn_512k"] as const;
+const NPE_MODEL_IDS = ["local_flow", "broad_mdn", "broad_mdn_512k", "broad_spline_4m"] as const;
 type NpeOverlay = (typeof NPE_MODEL_IDS)[number];
 const GRID_SIZE_OPTIONS = ["45", "60", "90", "120", "150", "180"] as const;
 const NPE_GRID_SIZE_OPTIONS = ["30", "45", "60", "75", "90", "120", "150", "180"] as const;

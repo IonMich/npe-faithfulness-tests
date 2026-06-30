@@ -115,7 +115,13 @@ export type ViewerResponse = {
   z_sample_shape: number[];
 };
 
-export type Overlay = "local_flow" | "broad_mdn" | "broad_mdn_512k" | "grid" | "mcmc";
+export type Overlay =
+  | "local_flow"
+  | "broad_mdn"
+  | "broad_mdn_512k"
+  | "broad_spline_4m"
+  | "grid"
+  | "mcmc";
 
 export type ControlState = {
   mode: string;
