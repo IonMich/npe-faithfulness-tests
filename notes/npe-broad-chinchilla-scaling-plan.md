@@ -1182,3 +1182,56 @@ Context against the preceding fixed-P results:
   if this were a settled multi-seed point. The most defensible next diagnostic
   is another `4.096M` spline seed, or a paired second seed for both MDN and
   spline if we want a cleaner family comparison.
+
+## Fixed-P 8M Diagnostic
+
+Ran the next power-of-two fixed-P diagnostic on the Mac mini:
+
+```text
+seed = 20260901
+D = 8,192,000
+validation cache = broad_prior_val_1m_float32.npz
+panel W cache = decay_panel16_grid180_marginals.npz
+posterior samples per panel signal = 20,000
+jobs = 1 per family, launched concurrently on the Mac mini
+device = cpu
+torch_threads = 2
+```
+
+Outputs:
+
+- `runs/01_exponential_decay/15_broad_scaling/35_mini_fixed_p_8m_diagnostic/mdn/results/broad_scaling_summary.json`
+- `runs/01_exponential_decay/15_broad_scaling/35_mini_fixed_p_8m_diagnostic/spline/results/broad_scaling_summary.json`
+- `runs/01_exponential_decay/15_broad_scaling/31_mdn_vs_spline_fixed_p_d_scaling/figures/mdn_vs_spline_fixed_p_2x2_8m.png`
+- `runs/01_exponential_decay/15_broad_scaling/31_mdn_vs_spline_fixed_p_d_scaling/results/mdn_vs_spline_fixed_p_summary_8m.json`
+
+| Family | Parameters | D | Seeds | Epochs | Panel mean W | Panel target ratio | Final 1M NLL | Train seconds |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| MDN base | 44,722 | 8,192,000 | 1 | 72 | 0.1892 | 17.58 | -3.5121 | 2363.2 |
+| Spline flow small | 45,844 | 8,192,000 | 1 | 32 | 0.1610 | 15.03 | -3.5269 | 2513.4 |
+
+Context against the preceding `4.096M` single-seed diagnostic:
+
+| Family | D | Panel mean W | Panel target ratio | Final 1M NLL |
+| --- | ---: | ---: | ---: | ---: |
+| MDN base | 4,096,000 | 0.1817 | 16.89 | -3.5141 |
+| MDN base | 8,192,000 | 0.1892 | 17.58 | -3.5121 |
+| Spline flow small | 4,096,000 | 0.1283 | 12.02 | -3.5431 |
+| Spline flow small | 8,192,000 | 0.1610 | 15.03 | -3.5269 |
+
+Interpretation:
+
+- The single `8.192M` seed does not improve either family over the single
+  `4.096M` seed on panel-W or final 1M NLL.
+- MDN is roughly flat-to-worse from `4.096M` to `8.192M`; this is consistent
+  with the broader evidence that the fixed-P MDN is no longer data-limited in
+  the useful W metric at this architecture.
+- The spline `8.192M` result is worse than its unusually good `4.096M` seed.
+  Since the spline `8.192M` run early-stopped after only 32 epochs, this should
+  not be interpreted as a clean law violation by itself. It is evidence that
+  the high-D fixed-P spline curve is noisy or optimization-sensitive enough
+  that single-seed extrapolations are not trustworthy.
+- The next defensible experiment is not a blind jump above `8M`. It should be
+  either repeat seeds at `4.096M/8.192M`, or change the optimization schedule
+  for high-D spline runs and rerun the same seed to separate data scaling from
+  early-stopping/optimization effects.
