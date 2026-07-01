@@ -29,7 +29,7 @@ const PREVIOUS_CONTROL_STATE_KEY = "npePosteriorViewer.controls.v3";
 const LEGACY_V2_CONTROL_STATE_KEY = "npePosteriorViewer.controls.v2";
 const LEGACY_CONTROL_STATE_KEY = "npePosteriorViewer.controls.v1";
 
-const NPE_MODEL_IDS = ["local_flow", "broad_mdn", "broad_mdn_512k", "broad_spline_4m"] as const;
+const NPE_MODEL_IDS = ["local_flow", "broad_mdn", "broad_spline_4m", "broad_spline_8m"] as const;
 type NpeOverlay = (typeof NPE_MODEL_IDS)[number];
 const GRID_SIZE_OPTIONS = ["45", "60", "90", "120", "150", "180"] as const;
 const NPE_GRID_SIZE_OPTIONS = ["30", "45", "60", "75", "90", "120", "150", "180"] as const;
@@ -253,6 +253,53 @@ function runDetailsSummary(data: ViewerResponse) {
 }
 
 function configRows(data: ViewerResponse): [string, string, string?][] {
+  const modelMetricRows = data.selected_npe_models.flatMap((model) => {
+    const rows: [string, string][] = [];
+    const trainingSummary = [
+      model.training_scope || model.kind,
+      model.train_simulations ? `${model.train_simulations.toLocaleString()} sims` : null,
+      model.model_parameters ? `${model.model_parameters.toLocaleString()} params` : null
+    ]
+      .filter(Boolean)
+      .join(", ");
+    rows.push([`${modelDisplayName(model)} training`, trainingSummary]);
+    if (
+      model.full_val_nll_z_units !== undefined ||
+      model.panel_marginal_wasserstein_mean !== undefined
+    ) {
+      rows.push([
+        `${modelDisplayName(model)} evidence`,
+        [
+          model.full_val_nll_z_units !== undefined
+            ? `NLL ${formatValue(model.full_val_nll_z_units)}`
+            : null,
+          model.panel_marginal_wasserstein_mean !== undefined
+            ? `panel W ${formatValue(model.panel_marginal_wasserstein_mean)}`
+            : null,
+          model.panel_marginal_wasserstein_median !== undefined
+            ? `median ${formatValue(model.panel_marginal_wasserstein_median)}`
+            : null
+        ]
+          .filter(Boolean)
+          .join(", ")
+      ]);
+    }
+    if (model.training_seconds !== undefined || model.optimizer_steps !== undefined) {
+      rows.push([
+        `${modelDisplayName(model)} budget`,
+        [
+          model.training_seconds !== undefined ? `${formatValue(model.training_seconds)} s` : null,
+          model.optimizer_steps !== undefined
+            ? `${model.optimizer_steps.toLocaleString()} steps`
+            : null,
+          model.epochs_completed !== undefined ? `${model.epochs_completed} epochs` : null
+        ]
+          .filter(Boolean)
+          .join(", ")
+      ]);
+    }
+    return rows;
+  });
   return [
     ["draw id", data.draw_id.slice(0, 12)],
     ["layers", selectedLayerNames(data).join(", ") || "none"],
@@ -270,16 +317,7 @@ function configRows(data: ViewerResponse): [string, string, string?][] {
           `${data.npe_grid_metadata.grid_size}^3, cap ${data.npe_grid_metadata.resolution_cap}`
         ]
       : null,
-    ...data.selected_npe_models.map((model) => {
-      const scope = model.training_scope || model.kind;
-      const simulations = model.train_simulations
-        ? `${model.train_simulations.toLocaleString()} sims`
-        : null;
-      return [
-        `${modelDisplayName(model)} training`,
-        [scope, simulations].filter(Boolean).join(", ")
-      ] as [string, string];
-    }),
+    ...modelMetricRows,
     ...data.selected_npe_models.map(
       (model) =>
         [`${modelDisplayName(model)} checkpoint`, compactPath(model.checkpoint)] as [string, string]

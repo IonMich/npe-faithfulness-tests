@@ -7,6 +7,17 @@ export type ModelOption = {
   training_scope?: string;
   training_description?: string;
   train_simulations?: number;
+  full_val_nll_z_units?: number;
+  best_val_nll_z_units?: number;
+  training_seconds?: number;
+  panel_marginal_wasserstein_mean?: number;
+  panel_marginal_wasserstein_median?: number;
+  optimizer_steps?: number;
+  epochs_completed?: number;
+  batches_per_epoch?: number;
+  validation_evaluations?: number;
+  model_parameters?: number;
+  run_summary?: string;
   local_quantile?: number | null;
   checkpoint: string;
   has_local_region: boolean;
@@ -127,8 +138,8 @@ export type ViewerResponse = {
 export type Overlay =
   | "local_flow"
   | "broad_mdn"
-  | "broad_mdn_512k"
   | "broad_spline_4m"
+  | "broad_spline_8m"
   | "grid"
   | "mcmc";
 

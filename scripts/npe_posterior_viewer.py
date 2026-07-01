@@ -63,15 +63,16 @@ DEFAULT_MODEL = Path(
     "results/npe_flow_decay_model.pt"
 )
 DEFAULT_BROAD_MODEL: Path | None = None
-DEFAULT_BEST_BROAD_MODEL = Path(
-    "runs/01_exponential_decay/15_broad_scaling/"
-    "09_ui_best_broad_mdn_512k_seed20260902/"
-    "runs/n512000_seed20260902/results/mdn_model.pt"
-)
+DEFAULT_BEST_BROAD_MODEL: Path | None = None
 DEFAULT_BEST_BROAD_SPLINE_MODEL = Path(
     "runs/01_exponential_decay/15_broad_scaling/"
     "34_mini_fixed_p_4m_diagnostic/spline/"
     "runs/n4096000_seed20260901/results/spline_flow_model.pt"
+)
+DEFAULT_BEST_BROAD_EFFICIENCY_MODEL = Path(
+    "runs/01_exponential_decay/15_broad_scaling/"
+    "74_ui_best_8m_checkpoint/train8m_lr004_wd2e4_e27_max212000_seed20260901/"
+    "runs/n8192000_seed20260901/results/spline_flow_model.pt"
 )
 DEFAULT_UI_DIST = Path("viewer-ui/dist")
 DEFAULT_PORT = 8876
@@ -86,8 +87,8 @@ MCMC_COLOR = "#b85c38"
 NPE_LAYER_COLORS = {
     "local_flow": NPE_COLOR,
     "broad_mdn": BROAD_NPE_COLOR,
-    "broad_mdn_512k": "#6d4aff",
     "broad_spline_4m": "#c45a2d",
+    "broad_spline_8m": "#6d4aff",
 }
 
 
@@ -432,7 +433,13 @@ def load_stage1_checkpoint(
         x_dim=int(x_mean.shape[0]),
         z_dim=int(z_mean.shape[0]),
     ).to(device)
-    model.load_state_dict(checkpoint["state_dict"])
+    state_dict = checkpoint["state_dict"]
+    if any(str(key).startswith("_orig_mod.") for key in state_dict):
+        state_dict = {
+            str(key).removeprefix("_orig_mod."): value
+            for key, value in state_dict.items()
+        }
+    model.load_state_dict(state_dict)
     model.eval()
     state = {
         "family": family,
@@ -447,6 +454,44 @@ def load_stage1_checkpoint(
     return model, state
 
 
+def load_stage1_run_metadata(path: Path) -> dict[str, object]:
+    keys = (
+        "full_val_nll_z_units",
+        "best_val_nll_z_units",
+        "training_seconds",
+        "panel_marginal_wasserstein_mean",
+        "panel_marginal_wasserstein_median",
+        "optimizer_steps",
+        "epochs_completed",
+        "batches_per_epoch",
+        "validation_evaluations",
+        "model_parameters",
+    )
+
+    def selected_metadata(row: dict[str, object], source_path: Path) -> dict[str, object]:
+        metadata = {key: row[key] for key in keys if row.get(key) is not None}
+        metadata["run_summary"] = str(row.get("summary_json") or source_path)
+        return metadata
+
+    run_summary_path = path.parent / "broad_scaling_run_summary.json"
+    if run_summary_path.exists():
+        return selected_metadata(
+            json.loads(run_summary_path.read_text(encoding="utf-8")),
+            run_summary_path,
+        )
+
+    checkpoint = str(path)
+    for parent in path.parents:
+        summary_path = parent / "results" / "broad_scaling_summary.json"
+        if not summary_path.exists():
+            continue
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        for row in summary.get("rows", []):
+            if row.get("model_pt") == checkpoint:
+                return selected_metadata(row, summary_path)
+    return {}
+
+
 class NPEPosteriorViewer:
     def __init__(
         self,
@@ -454,6 +499,7 @@ class NPEPosteriorViewer:
         broad_model_path: Path | None,
         best_broad_model_path: Path | None,
         best_broad_spline_model_path: Path | None,
+        best_broad_efficiency_model_path: Path | None,
         seed: int,
         device: str,
         mcmc_device: str,
@@ -531,27 +577,36 @@ class NPEPosteriorViewer:
         }
         self.stage1_models: dict[str, torch.nn.Module] = {}
         self.stage1_states: dict[str, dict[str, object]] = {}
-        if broad_model_path is not None and broad_model_path.exists():
-            self.register_stage1_checkpoint(
-                model_id="broad_mdn",
-                path=broad_model_path,
-                label="Broad prior-predictive MDN, 100k",
-                plot_label="Broad MDN NPE",
-                color=NPE_LAYER_COLORS["broad_mdn"],
-                training_description="theta drawn from the full decay prior, then x simulated from p(x | theta)",
-            )
-        if best_broad_model_path is not None and best_broad_model_path.exists():
-            self.register_stage1_checkpoint(
-                model_id="broad_mdn_512k",
-                path=best_broad_model_path,
-                label="Broad prior-predictive MDN, 512k seed 20260902",
-                plot_label="Broad MDN 512k",
-                color=NPE_LAYER_COLORS["broad_mdn_512k"],
-                training_description=(
-                    "best saved broad MDN from the corrected scaling sweep "
-                    "(512k prior-predictive simulations, seed 20260902)"
-                ),
-            )
+        # Keep the legacy MDN arguments loadable for explicit debugging, but omit
+        # them from the default UI model set after the broad-spline records.
+        for model_id, path, label, plot_label, color in (
+            (
+                "broad_mdn",
+                broad_model_path,
+                "Broad prior-predictive MDN, 100k",
+                "Broad MDN NPE",
+                NPE_LAYER_COLORS["broad_mdn"],
+            ),
+            (
+                "broad_mdn_512k",
+                best_broad_model_path,
+                "Broad prior-predictive MDN, 512k seed 20260902",
+                "Broad MDN 512k",
+                "#6d4aff",
+            ),
+        ):
+            if path is not None and path.exists():
+                self.register_stage1_checkpoint(
+                    model_id=model_id,
+                    path=path,
+                    label=label,
+                    plot_label=plot_label,
+                    color=color,
+                    training_description=(
+                        "legacy MDN broad-prior checkpoint retained for explicit "
+                        "debugging, not part of the default comparison set"
+                    ),
+                )
         if best_broad_spline_model_path is not None and best_broad_spline_model_path.exists():
             self.register_stage1_checkpoint(
                 model_id="broad_spline_4m",
@@ -562,6 +617,18 @@ class NPEPosteriorViewer:
                 training_description=(
                     "best panel-W fixed-P broad NPE from the scaling diagnostics "
                     "(4.096M prior-predictive simulations, seed 20260901)"
+                ),
+            )
+        if best_broad_efficiency_model_path is not None and best_broad_efficiency_model_path.exists():
+            self.register_stage1_checkpoint(
+                model_id="broad_spline_8m",
+                path=best_broad_efficiency_model_path,
+                label="Broad prior-predictive spline flow, 8.192M seed 20260901",
+                plot_label="Broad spline 8.192M",
+                color=NPE_LAYER_COLORS["broad_spline_8m"],
+                training_description=(
+                    "current broad-validation NLL record from the efficiency sweep "
+                    "(8.192M prior-predictive simulations, 212k optimizer steps)"
                 ),
             )
 
@@ -599,6 +666,7 @@ class NPEPosteriorViewer:
             "local_quantile": None,
             "checkpoint": str(path),
             "has_local_region": False,
+            **load_stage1_run_metadata(path),
         }
 
     def context_for_signal(self, x: np.ndarray) -> np.ndarray:
@@ -1612,8 +1680,8 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_BEST_BROAD_MODEL,
         help=(
-            "Optional best broad prior-predictive checkpoint from the scaling-law "
-            "runs. If the path is missing, it is omitted from the model dropdown."
+            "Optional legacy broad MDN checkpoint from earlier scaling-law runs. "
+            "Omitted by default."
         ),
     )
     parser.add_argument(
@@ -1623,6 +1691,15 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Optional best broad spline-flow checkpoint from the fixed-P scaling "
             "diagnostics. If the path is missing, it is omitted from the model dropdown."
+        ),
+    )
+    parser.add_argument(
+        "--best-broad-efficiency-model",
+        type=Path,
+        default=DEFAULT_BEST_BROAD_EFFICIENCY_MODEL,
+        help=(
+            "Optional current broad spline-flow efficiency-record checkpoint. "
+            "If the path is missing, it is omitted from the model dropdown."
         ),
     )
     parser.add_argument("--host", default="127.0.0.1")
@@ -1661,6 +1738,7 @@ def main() -> None:
         args.broad_model,
         args.best_broad_model,
         args.best_broad_spline_model,
+        args.best_broad_efficiency_model,
         seed=args.seed,
         device=args.device,
         mcmc_device=args.mcmc_device,
