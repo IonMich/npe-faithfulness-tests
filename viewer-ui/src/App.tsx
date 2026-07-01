@@ -7,7 +7,6 @@ import {
   Loader2,
   Plus,
   RefreshCw,
-  Timer,
   Waves
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -217,47 +216,83 @@ function responseMatchesControls(data: ViewerResponse, controls: ControlState): 
   );
 }
 
-function metricRows(data: ViewerResponse | null) {
-  if (!data) return [];
-  const selectedModels = data.selected_npe_models || [];
-  const localModelSelected = selectedModels.some((model) => model.id === "local_flow");
-  const outside = localModelSelected && data.inside_local_region === false;
-  const regionStatus = !localModelSelected
-    ? "local NPE not selected"
-    : data.inside_local_region === null
-      ? "n/a"
-      : data.inside_local_region
-        ? "inside local region"
-        : "outside local region";
-  const selectedLabels = selectedModels.map((model) => model.plot_label || model.label);
+function displayModeLabel(value: unknown) {
+  const mode = String(value || "");
+  if (mode === "local" || mode === "local_region") return "Local region";
+  if (mode === "x0") return "Original x0";
+  if (mode === "prior") return "Prior predictive";
+  return mode ? mode.replace(/_/g, " ") : "Unknown";
+}
 
+function modelDisplayName(model: Pick<ModelOption, "id" | "label" | "plot_label">) {
+  const label = model.plot_label || model.label;
+  return label === "Local flow NPE" ? "Local NPE" : label;
+}
+
+function selectedLayerNames(data: ViewerResponse) {
+  const layers = data.selected_npe_models.map(modelDisplayName);
+  if (data.grid_summary) {
+    layers.push(data.grid_metadata ? `Grid ${data.grid_metadata.grid_size}^3` : "Grid");
+  }
+  if (data.mcmc_summary) layers.push("MCMC");
+  return layers;
+}
+
+function renderModeSummary(data: ViewerResponse) {
+  if (!data.selected_npe_models.length) return "No NPE layer";
+  if (data.npe_render_mode === "grid") {
+    return `NPE grid ${data.npe_grid_metadata?.grid_size ?? "?"}^3`;
+  }
+  return `${data.posterior_samples.toLocaleString()} NPE draws`;
+}
+
+function runDetailsSummary(data: ViewerResponse) {
+  const layerCount = selectedLayerNames(data).length;
+  const label = layerCount === 1 ? "layer" : "layers";
+  return `${layerCount} ${label} · ${renderModeSummary(data)}`;
+}
+
+function configRows(data: ViewerResponse): [string, string, string?][] {
   return [
     ["draw id", data.draw_id.slice(0, 12)],
-    ["NPE layers", selectedLabels.length ? selectedLabels.join(", ") : "none"],
-    selectedModels.length
-      ? ["NPE mode", data.npe_render_mode === "grid" ? "grid evaluated" : "posterior samples"]
-      : null,
-    selectedModels.length
-      ? ["training scopes", selectedModels.map((model) => model.training_scope || model.kind).join(", ")]
-      : null,
-    ["true A", formatValue(data.true_theta.A)],
-    ["true k", formatValue(data.true_theta.k)],
-    ["true sigma", formatValue(data.true_theta.sigma)],
-    ["region status", regionStatus, outside ? "warn" : ""],
-    localModelSelected ? ["local distance", formatValue(data.local_distance), outside ? "warn" : ""] : null,
-    localModelSelected ? ["local radius", formatValue(data.local_radius)] : null,
+    ["layers", selectedLayerNames(data).join(", ") || "none"],
+    ["source", displayModeLabel(data.mode_metadata.mode)],
+    ["NPE render", renderModeSummary(data)],
     data.grid_metadata
       ? [
-          "grid",
+          "grid reference",
           `${data.grid_metadata.grid_size}^3, edge ${formatValue(data.grid_metadata.max_edge_mass)}`
         ]
       : null,
-    ["draws", data.posterior_samples.toLocaleString()],
-    ...selectedModels.map(
+    data.npe_grid_metadata && data.npe_render_mode === "grid"
+      ? [
+          "NPE grid",
+          `${data.npe_grid_metadata.grid_size}^3, cap ${data.npe_grid_metadata.resolution_cap}`
+        ]
+      : null,
+    ...data.selected_npe_models.map((model) => {
+      const scope = model.training_scope || model.kind;
+      const simulations = model.train_simulations
+        ? `${model.train_simulations.toLocaleString()} sims`
+        : null;
+      return [
+        `${modelDisplayName(model)} training`,
+        [scope, simulations].filter(Boolean).join(", ")
+      ] as [string, string];
+    }),
+    ...data.selected_npe_models.map(
       (model) =>
-        [`${model.plot_label || model.label} checkpoint`, compactPath(model.checkpoint)] as [string, string]
+        [`${modelDisplayName(model)} checkpoint`, compactPath(model.checkpoint)] as [string, string]
     )
   ].filter(Boolean) as [string, string, string?][];
+}
+
+function localRegionSummary(data: ViewerResponse) {
+  const localModelSelected = data.selected_npe_models.some((model) => model.id === "local_flow");
+  if (!localModelSelected) return { value: "Local layer off", tone: "muted" as const };
+  if (data.inside_local_region === null) return { value: "Region n/a", tone: "muted" as const };
+  if (data.inside_local_region) return { value: "Inside local region", tone: "ok" as const };
+  return { value: "Outside local region", tone: "warn" as const };
 }
 
 function debugReferencePayload(data: ViewerResponse, controls: ControlState) {
@@ -308,16 +343,55 @@ function wassersteinDistanceItems(data: ViewerResponse | null) {
   ].filter(Boolean) as Array<{ label: string; value: string }>;
 }
 
-function TruthStrip({ data }: { data: ViewerResponse }) {
+function DrawOverview({ data }: { data: ViewerResponse }) {
+  const region = localRegionSummary(data);
+  const localModelSelected = data.selected_npe_models.some((model) => model.id === "local_flow");
+  const distance =
+    localModelSelected && data.local_distance !== null && data.local_radius !== null
+      ? `${formatValue(data.local_distance)} / ${formatValue(data.local_radius)}`
+      : "n/a";
+
   return (
-    <div className="truth-strip" aria-label="True parameter values">
-      {(["A", "k", "sigma"] as const).map((parameter) => (
-        <span className="truth-pill" key={parameter}>
-          <span>{parameter}</span>
-          <strong>{formatValue(data.true_theta[parameter])}</strong>
-        </span>
-      ))}
+    <div className="draw-overview">
+      <div className="draw-status-grid">
+        <div className={`draw-status-tile draw-status-${region.tone}`}>
+          <span>region</span>
+          <strong>{region.value}</strong>
+        </div>
+        <div className="draw-status-tile">
+          <span>local d / r</span>
+          <strong>{distance}</strong>
+        </div>
+      </div>
+      <div className="truth-compact" aria-label="True parameter values">
+        {(["A", "k", "sigma"] as const).map((parameter) => (
+          <span className="truth-item" key={parameter}>
+            <span>{parameter}</span>
+            <strong>{formatValue(data.true_theta[parameter])}</strong>
+          </span>
+        ))}
+      </div>
     </div>
+  );
+}
+
+function DetailsBlock({
+  title,
+  summary,
+  children
+}: {
+  title: string;
+  summary: string;
+  children: ReactNode;
+}) {
+  return (
+    <details className="details-block">
+      <summary>
+        <span>{title}</span>
+        <strong>{summary}</strong>
+      </summary>
+      <div className="details-body">{children}</div>
+    </details>
   );
 }
 
@@ -325,6 +399,7 @@ function timingRows(data: ViewerResponse | null) {
   if (!data) return [];
   const timing = data.timing || {};
   return [
+    ["total", `${data.elapsed_seconds.toFixed(2)} s`],
     data.selected_npe_model_ids.length
       ? [
           data.npe_render_mode === "grid" ? "NPE grid eval" : "NPE sampling",
@@ -358,8 +433,7 @@ function timingRows(data: ViewerResponse | null) {
             timing.grid_points_per_second || 0
           ).toLocaleString()} points/s`
         ],
-    ["plotting", `${timing.plot_seconds.toFixed(3)} s`],
-    ["render time", `${data.elapsed_seconds.toFixed(2)} s`]
+    ["plotting", `${timing.plot_seconds.toFixed(3)} s`]
   ].filter(Boolean) as [string, string, string?][];
 }
 
@@ -368,7 +442,7 @@ function WassersteinStrip({ data }: { data: ViewerResponse | null }) {
   if (!items.length) return null;
   return (
     <div className="distance-panel" aria-label="Wasserstein distances to grid">
-      <div className="distance-panel-title">Wasserstein to grid</div>
+      <div className="distance-panel-title">Distance to grid</div>
       <div className="distance-grid">
         {items.map((item) => (
           <div className="distance-tile" key={item.label}>
@@ -390,9 +464,17 @@ function SummaryTable({
   gridRows: SummaryRow[] | null;
   mcmcRows: SummaryRow[] | null;
 }) {
+  function sourceLabel(label: string) {
+    if (label === "Local flow NPE") return "Local";
+    return label.replace(/\s+NPE$/, "");
+  }
+
   const combined = [
     ...npeSummaries.flatMap((item) =>
-      item.summary.map((row) => ({ ...row, source: item.label }))
+      item.summary.map((row) => ({
+        ...row,
+        source: sourceLabel(item.label)
+      }))
     ),
     ...(gridRows || []).map((row) => ({ ...row, source: "Grid" })),
     ...(mcmcRows || []).map((row) => ({ ...row, source: "MCMC" }))
@@ -402,13 +484,11 @@ function SummaryTable({
     <table className="summary-table">
       <thead>
         <tr>
-          <th>source</th>
+          <th>src</th>
           <th>param</th>
-          <th>q05</th>
-          <th>q16</th>
-          <th>median</th>
-          <th>q84</th>
-          <th>q95</th>
+          <th>med</th>
+          <th>68%</th>
+          <th>90%</th>
         </tr>
       </thead>
       <tbody>
@@ -416,11 +496,9 @@ function SummaryTable({
           <tr key={`${row.source}-${row.parameter}`}>
             <td>{row.source}</td>
             <td>{row.parameter}</td>
-            <td>{row.q05}</td>
-            <td>{row.q16}</td>
             <td>{row.median}</td>
-            <td>{row.q84}</td>
-            <td>{row.q95}</td>
+            <td>{row.q16}-{row.q84}</td>
+            <td>{row.q05}-{row.q95}</td>
           </tr>
         ))}
       </tbody>
@@ -478,15 +556,8 @@ export default function App() {
   const lastFailedRequestKey = useRef<string | null>(null);
   const loading = loadingMode !== null;
 
-  const selectedNpeModelIds = controls.overlays.filter(isNpeLayer);
-  const modelLabelById = useMemo(
-    () => new Map(models.map((model) => [model.id, model.plot_label || model.label])),
-    [models]
-  );
-  const selectedNpeLayerLabels = selectedNpeModelIds.map((modelId) =>
-    modelLabelById.get(modelId) || (modelId === "local_flow" ? "Local NPE" : "Broad NPE")
-  );
   const hasGrid = controls.overlays.includes("grid");
+  const hasNpeLayer = controls.overlays.some(isNpeLayer);
   const drawingNewSignal = loadingMode === "draw";
   const layerOptions = useMemo(
     (): Array<{ value: Overlay; label: string; icon: ReactNode; refreshable?: boolean }> => [
@@ -630,6 +701,13 @@ export default function App() {
 
   const activeImage = controls.activeView === "corner" ? data?.corner : data?.signal;
   const activeAlt = controls.activeView === "corner" ? "posterior corner plot" : "signal predictive plot";
+  const visualLayerCount = controls.overlays.length;
+  const visualSummaryParts = [
+    controls.activeView === "corner" ? "Corner" : "Signal",
+    visualLayerCount ? `${visualLayerCount} ${visualLayerCount === 1 ? "layer" : "layers"}` : "No layers",
+    hasNpeLayer ? (controls.npeMode === "grid" ? `NPE ${controls.npeGridSize}^3` : "NPE samples") : null,
+    hasGrid ? `ref ${controls.gridSize}^3` : null
+  ].filter(Boolean);
 
   return (
     <div className="app-shell">
@@ -638,13 +716,10 @@ export default function App() {
           <div className="brand-icon">
             <Activity size={18} />
           </div>
-          <div>
-            <h1>NPE Posterior Viewer</h1>
-            <p>Exponential decay posterior diagnostics</p>
-          </div>
+          <h1>NPE Posterior Viewer</h1>
         </div>
         <div className={`control-grid ${controls.npeMode === "grid" ? "control-grid-npe-grid" : ""}`}>
-          <Field label="Draw source">
+          <Field label="Signal">
             <SelectField
               ariaLabel="Signal source"
               value={controls.mode}
@@ -665,7 +740,7 @@ export default function App() {
               onChange={(samples) => setControls((current) => ({ ...current, samples }))}
             />
           </Field>
-          <Field label="Posterior layers" className="compare-field">
+          <Field label="Layers" className="compare-field">
             <MultiSelect
               options={layerOptions}
               placeholder="No layers"
@@ -705,7 +780,7 @@ export default function App() {
               </SelectField>
             </Field>
           ) : null}
-          <Field label="Ref grid">
+          <Field label="Ref">
             <SelectField
               ariaLabel="Reference grid size"
               value={controls.gridSize}
@@ -738,46 +813,42 @@ export default function App() {
                 data ? (
                   <div className="draw-header-meta">
                     <Badge tone={data.inside_local_region === false ? "warn" : "muted"}>
-                      {data.mode_metadata.mode}
+                      {displayModeLabel(data.mode_metadata.mode)}
                     </Badge>
                     <Button
+                      aria-label={copiedReference ? "Reference copied" : "Copy draw reference"}
                       className="copy-reference-button"
                       disabled={loading}
+                      title={copiedReference ? "Reference copied" : "Copy draw reference"}
                       variant="outline"
                       onClick={() => void copyDebugReference()}
                     >
                       {copiedReference ? <Check size={14} /> : <Copy size={14} />}
-                      {copiedReference ? "Copied" : "Copy ref"}
                     </Button>
                   </div>
                 ) : null
               }
             />
             <div className="card-body">
-              {data?.selected_npe_models.length ? (
-                <div className="model-strip">
-                  {data.selected_npe_models.map((model) => (
-                    <Badge key={model.id} tone={model.has_local_region ? "default" : "ok"}>
-                      {model.plot_label || model.label}
-                    </Badge>
-                  ))}
-                </div>
-              ) : null}
-              <WassersteinStrip data={data} />
-              {data ? <KeyValueList rows={metricRows(data)} /> : <div className="empty">No draw yet.</div>}
-            </div>
-          </Card>
-
-          <Card className="runtime-card">
-            <CardHeader title="Runtime" meta={<Timer size={15} />} />
-            <div className="card-body">
-              {data ? <KeyValueList rows={timingRows(data)} /> : <div className="empty">Waiting for first run.</div>}
+              {data ? (
+                <>
+                  <DrawOverview data={data} />
+                  <WassersteinStrip data={data} />
+                  <DetailsBlock title="Run details" summary={runDetailsSummary(data)}>
+                    <KeyValueList rows={configRows(data)} />
+                  </DetailsBlock>
+                  <DetailsBlock title="Runtime" summary={`${data.elapsed_seconds.toFixed(2)} s`}>
+                    <KeyValueList rows={timingRows(data)} />
+                  </DetailsBlock>
+                </>
+              ) : (
+                <div className="empty">No draw yet.</div>
+              )}
             </div>
           </Card>
 
           <Card className="summary-card">
             <CardHeader title="Posterior quantiles" meta={<BarChart3 size={15} />} />
-            {data ? <TruthStrip data={data} /> : null}
             <div className="table-wrap">
               {data ? (
                 <SummaryTable
@@ -797,19 +868,7 @@ export default function App() {
             title="Posterior diagnostics"
             meta={
               <div className="visual-meta">
-                <Badge tone="muted">{controls.activeView === "corner" ? "corner" : "signal"}</Badge>
-                {selectedNpeLayerLabels.map((label) => (
-                  <Badge key={label} tone="muted">
-                    {label}
-                  </Badge>
-                ))}
-                {selectedNpeLayerLabels.length ? (
-                  <Badge tone="muted">
-                    {controls.npeMode === "grid" ? `NPE grid ${controls.npeGridSize}^3` : "NPE samples"}
-                  </Badge>
-                ) : null}
-                {hasGrid ? <Badge tone="muted">grid {controls.gridSize}^3</Badge> : null}
-                {controls.overlays.includes("mcmc") ? <Badge tone="muted">MCMC</Badge> : null}
+                <span className="visual-summary">{visualSummaryParts.join(" · ")}</span>
                 {loading ? <Badge tone="default">rendering</Badge> : null}
               </div>
             }
