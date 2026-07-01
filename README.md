@@ -240,6 +240,15 @@ The log-log panels show useful scaling with $D$ through the tested range up to
 evaluation floor. This is a broad amortization diagnostic rather than the
 single-signal $x_0$ faithfulness target above.
 
+The current training-efficiency comparison below tracks the broad-prior
+single-decay validation objective as model size, batch size, training-pool size,
+and optimizer-step budget change. Solid curves are training NLL, dashed points
+are sparse validation NLL, and stars mark final full-cache validation NLL. The
+`Spline L3 h80, D=8.192M, B=1024` run reaches lower validation NLL than the
+previous record while staying under the 2x wall-time target.
+
+![Single decay broad NPE training efficiency curves](runs/00_shared_assets/readme_scaling/decay_broad_npe_training_efficiency_curves.png)
+
 Because panel means can hide rare failures, the current comparison also looks
 at the full distribution of per-signal panel marginal Wasserstein values. The
 metric is the same coordinate-wise diagnostic defined in the evaluation

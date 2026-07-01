@@ -5,7 +5,7 @@ import copy
 import json
 import math
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import artifact_paths as ap
@@ -33,6 +33,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 
 FAMILIES = ("diag_gaussian", "full_gaussian", "mdn", "affine_flow", "spline_flow")
+CONTEXT_FEATURE_MODES = ("raw", "decay_summary", "raw_decay_summary")
+TRAIN_SAMPLERS = ("random", "lhs", "sobol")
 FAMILY_LABELS = {
     "diag_gaussian": "Diagonal Gaussian",
     "full_gaussian": "Full Gaussian",
@@ -70,7 +72,20 @@ class Stage1Config:
     families: list[str]
     posterior_samples: int
     reference_grid_size: int
+    train_sampler: str = "random"
+    context_features: str = "raw"
     spline_bins: int = 12
+    lr_schedule: str = "constant"
+    lr_eta_min: float = 0.0
+    lr_warmup_steps: int = 0
+    validation_every_epochs: int = 1
+    torch_compile: str = "none"
+    grad_clip_norm: float = 20.0
+    ema_decay: float = 0.0
+    batching_mode: str = "dataloader"
+    max_optimizer_steps: int = 0
+    progress_jsonl: Path | None = None
+    progress_nll_offset: float = 0.0
 
 
 def choose_training_device(requested: str) -> torch.device:
@@ -88,6 +103,28 @@ def synchronize_device(device: torch.device) -> None:
         torch.mps.synchronize()
     elif device.type == "cuda":
         torch.cuda.synchronize(device)
+
+
+def json_progress_value(value: object) -> object:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.generic):
+        return json_progress_value(value.item())
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(key): json_progress_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_progress_value(item) for item in value]
+    return value
+
+
+def append_progress_record(path: Path | None, record: dict[str, object]) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(json_progress_value(record), sort_keys=True) + "\n")
 
 
 def make_mlp(
@@ -111,12 +148,31 @@ def sample_decay_pairs(
     n: int,
     seed: int,
     n_observations: int = 40,
+    sampler: str = "random",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     generator = torch.Generator(device="cpu").manual_seed(seed)
     t = torch.linspace(0.0, 6.0, n_observations, dtype=torch.float64)
     prior_mean = PRIOR_LOG_MEAN.to(dtype=torch.float64)
     prior_std = PRIOR_LOG_STD.to(dtype=torch.float64)
-    z = prior_mean[None, :] + torch.randn(n, 3, generator=generator, dtype=torch.float64) * prior_std[None, :]
+    if sampler == "random":
+        z_unit = torch.randn(n, 3, generator=generator, dtype=torch.float64)
+    elif sampler in {"lhs", "sobol"}:
+        z_unit_columns = []
+        eps = torch.finfo(torch.float64).eps
+        if sampler == "lhs":
+            for _ in range(3):
+                permutation = torch.randperm(n, generator=generator).to(dtype=torch.float64)
+                jitter = torch.rand(n, generator=generator, dtype=torch.float64)
+                quantiles = ((permutation + jitter) / float(n)).clamp(min=eps, max=1.0 - eps)
+                z_unit_columns.append(math.sqrt(2.0) * torch.erfinv(2.0 * quantiles - 1.0))
+            z_unit = torch.stack(z_unit_columns, dim=1)
+        else:
+            engine = torch.quasirandom.SobolEngine(dimension=3, scramble=True, seed=seed)
+            quantiles = engine.draw(n).to(dtype=torch.float64).clamp(min=eps, max=1.0 - eps)
+            z_unit = math.sqrt(2.0) * torch.erfinv(2.0 * quantiles - 1.0)
+    else:
+        raise ValueError(f"Unknown decay-pair sampler: {sampler}")
+    z = prior_mean[None, :] + z_unit * prior_std[None, :]
     theta = torch.exp(z)
     amplitude = theta[:, 0:1]
     decay_rate = theta[:, 1:2]
@@ -128,6 +184,53 @@ def sample_decay_pairs(
 
 def standardize(value: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
     return (value - mean[None, :]) / std[None, :]
+
+
+def decay_context_summary_features(x: np.ndarray) -> np.ndarray:
+    x = np.asarray(x, dtype=np.float64)
+    if x.ndim != 2:
+        raise ValueError(f"Expected 2D context array, got shape {x.shape}")
+    t = np.linspace(0.0, 6.0, x.shape[1], dtype=np.float64)
+    t_centered = t - float(np.mean(t))
+    t_var = float(np.sum(t_centered * t_centered))
+    clipped = np.clip(x, 1e-4, None)
+    log_y = np.log(clipped)
+    slope = (log_y @ t_centered) / max(t_var, 1e-12)
+    intercept = np.mean(log_y, axis=1) - slope * float(np.mean(t))
+    fitted = intercept[:, None] + slope[:, None] * t[None, :]
+    log_resid = log_y - fitted
+    early = np.mean(x[:, : max(1, x.shape[1] // 5)], axis=1)
+    late = np.mean(x[:, -max(1, x.shape[1] // 5) :], axis=1)
+    first = x[:, 0]
+    last = x[:, -1]
+    log_ratio = np.log(np.clip(first, 1e-4, None)) - np.log(np.clip(last, 1e-4, None))
+    return np.column_stack(
+        [
+            intercept,
+            -slope,
+            np.std(log_resid, axis=1),
+            np.mean(x, axis=1),
+            np.std(x, axis=1),
+            np.min(x, axis=1),
+            np.max(x, axis=1),
+            first,
+            last,
+            early,
+            late,
+            log_ratio,
+        ]
+    )
+
+
+def transform_context_features(x: np.ndarray, mode: str) -> np.ndarray:
+    if mode == "raw":
+        return np.asarray(x, dtype=np.float64)
+    summary = decay_context_summary_features(x)
+    if mode == "decay_summary":
+        return summary
+    if mode == "raw_decay_summary":
+        return np.concatenate([np.asarray(x, dtype=np.float64), summary], axis=1)
+    raise ValueError(f"Unknown context feature mode: {mode}")
 
 
 def lower_cholesky_from_params(params: torch.Tensor, dim: int = 3) -> torch.Tensor:
@@ -401,6 +504,15 @@ def make_model(family: str, config: Stage1Config, x_dim: int, z_dim: int) -> nn.
     raise ValueError(f"Unknown family: {family}")
 
 
+def first_tensor_dataset_batch(loader: DataLoader) -> tuple[torch.Tensor, torch.Tensor] | None:
+    dataset = getattr(loader, "dataset", None)
+    if not isinstance(dataset, TensorDataset) or len(dataset) == 0 or len(dataset.tensors) < 2:
+        return None
+    batch_size = int(loader.batch_size or len(dataset))
+    stop = min(batch_size, len(dataset))
+    return dataset.tensors[0][:stop], dataset.tensors[1][:stop]
+
+
 def train_one_model(
     *,
     family: str,
@@ -414,65 +526,320 @@ def train_one_model(
 ) -> tuple[nn.Module, dict[str, object]]:
     torch.manual_seed(config.seed + 1000 + FAMILIES.index(family))
     model = make_model(family, config, x_dim, z_dim).to(device)
+    if config.torch_compile == "default":
+        model = torch.compile(model)
+    elif config.torch_compile == "reduce_overhead":
+        model = torch.compile(model, mode="reduce-overhead")
+    elif config.torch_compile != "none":
+        raise ValueError(f"Unknown torch_compile mode: {config.torch_compile}")
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
     )
+    max_optimizer_steps = max(0, int(config.max_optimizer_steps))
+    scheduler = None
+    scheduler_step_unit = None
+    if config.lr_schedule == "cosine_epoch":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=max(1, config.epochs),
+            eta_min=float(config.lr_eta_min),
+        )
+        scheduler_step_unit = "epoch"
+    elif config.lr_schedule == "cosine_step":
+        total_steps = max(1, config.epochs * len(train_loader))
+        if max_optimizer_steps > 0:
+            total_steps = min(total_steps, max_optimizer_steps)
+        warmup_steps = max(0, min(int(config.lr_warmup_steps), total_steps - 1))
+        if warmup_steps > 0:
+            warmup = torch.optim.lr_scheduler.LinearLR(
+                optimizer,
+                start_factor=max(1.0 / warmup_steps, 1e-6),
+                end_factor=1.0,
+                total_iters=warmup_steps,
+            )
+            cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=max(1, total_steps - warmup_steps),
+                eta_min=float(config.lr_eta_min),
+            )
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                optimizer,
+                schedulers=[warmup, cosine],
+                milestones=[warmup_steps],
+            )
+        else:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=total_steps,
+                eta_min=float(config.lr_eta_min),
+            )
+        scheduler_step_unit = "step"
+    elif config.lr_schedule != "constant":
+        raise ValueError(f"Unknown lr_schedule: {config.lr_schedule}")
+    manual_batch_tensors = None
+    manual_batch_shuffle = False
+    if config.batching_mode in {"pre_shuffle", "sequential"}:
+        if not isinstance(train_loader.dataset, TensorDataset):
+            raise ValueError(
+                f"batching_mode={config.batching_mode!r} requires a TensorDataset train_loader."
+            )
+        tensors = train_loader.dataset.tensors
+        if len(tensors) < 2:
+            raise ValueError(f"batching_mode={config.batching_mode!r} requires x and z tensors.")
+        manual_batch_tensors = (tensors[0], tensors[1])
+        manual_batch_shuffle = config.batching_mode == "pre_shuffle"
+    elif config.batching_mode != "dataloader":
+        raise ValueError(f"Unknown batching_mode: {config.batching_mode}")
     history = {
         "train_nll": [],
         "val_nll": [],
+        "val_evaluated": [],
+        "lr": [],
+        "train_seconds": [],
+        "val_seconds": [],
+        "epoch_seconds": [],
+        "optimizer_steps": [],
     }
     best_state = copy.deepcopy(model.state_dict())
     best_val = float("inf")
     patience = max(20, config.epochs // 5)
     epochs_since_best = 0
+    ema_decay = float(config.ema_decay)
+    use_ema = 0.0 < ema_decay < 1.0
+    ema_params = [param.detach().clone() for param in model.parameters()] if use_ema else []
+    if config.progress_jsonl is not None:
+        config.progress_jsonl.parent.mkdir(parents=True, exist_ok=True)
+        config.progress_jsonl.write_text("", encoding="utf-8")
+
+    def evaluate_val_nll() -> float:
+        model.eval()
+        with torch.no_grad():
+            val_loss = -model.log_prob(val_z.to(device), val_x.to(device)).mean()
+            return float(val_loss.detach().cpu())
+
+    def evaluate_ema_val_nll() -> float:
+        if not use_ema:
+            return evaluate_val_nll()
+        backups = [param.detach().clone() for param in model.parameters()]
+        try:
+            with torch.no_grad():
+                for param, ema_param in zip(model.parameters(), ema_params, strict=True):
+                    param.copy_(ema_param)
+            return evaluate_val_nll()
+        finally:
+            with torch.no_grad():
+                for param, backup in zip(model.parameters(), backups, strict=True):
+                    param.copy_(backup)
+
+    def ema_state_dict() -> dict[str, torch.Tensor]:
+        if not use_ema:
+            return copy.deepcopy(model.state_dict())
+        backups = [param.detach().clone() for param in model.parameters()]
+        try:
+            with torch.no_grad():
+                for param, ema_param in zip(model.parameters(), ema_params, strict=True):
+                    param.copy_(ema_param)
+            return copy.deepcopy(model.state_dict())
+        finally:
+            with torch.no_grad():
+                for param, backup in zip(model.parameters(), backups, strict=True):
+                    param.copy_(backup)
 
     synchronize_device(device)
+    initial_eval_start = time.perf_counter()
+    model.eval()
+    with torch.no_grad():
+        initial_batch = first_tensor_dataset_batch(train_loader)
+        if initial_batch is None:
+            initial_train_batch_nll = float("nan")
+        else:
+            batch_x, batch_z = initial_batch[:2]
+            batch_x = batch_x.to(device)
+            batch_z = batch_z.to(device)
+            initial_train_batch_nll = float(
+                (-model.log_prob(batch_z, batch_x).mean()).detach().cpu()
+            )
+        initial_val_nll = evaluate_val_nll()
+    synchronize_device(device)
+    initial_eval_seconds = time.perf_counter() - initial_eval_start
+    append_progress_record(
+        config.progress_jsonl,
+        {
+            "event": "initial_eval",
+            "family": family,
+            "epoch": 0,
+            "optimizer_steps": 0,
+            "lr": float(optimizer.param_groups[0]["lr"]),
+            "initial_train_batch_nll_standardized": initial_train_batch_nll,
+            "initial_train_batch_nll_z_units": initial_train_batch_nll + config.progress_nll_offset,
+            "initial_val_nll_standardized": initial_val_nll,
+            "initial_val_nll_z_units": initial_val_nll + config.progress_nll_offset,
+            "initial_eval_seconds": initial_eval_seconds,
+            "lr_schedule": config.lr_schedule,
+            "lr_eta_min": float(config.lr_eta_min),
+            "lr_warmup_steps": int(config.lr_warmup_steps),
+            "validation_every_epochs": int(config.validation_every_epochs),
+            "torch_compile": config.torch_compile,
+            "grad_clip_norm": float(config.grad_clip_norm),
+            "ema_decay": float(config.ema_decay),
+            "batching_mode": config.batching_mode,
+            "max_optimizer_steps": int(config.max_optimizer_steps),
+        },
+    )
+
     start = time.perf_counter()
+    optimizer_steps = 0
     for epoch in range(config.epochs):
+        reached_max_optimizer_steps = False
+        epoch_start = time.perf_counter()
         model.train()
+        train_start = time.perf_counter()
         train_loss_sum = 0.0
         train_count = 0
-        for batch_x, batch_z in train_loader:
+        epoch_start_lr = float(optimizer.param_groups[0]["lr"])
+        if manual_batch_tensors is None:
+            batch_iterable = train_loader
+        else:
+            train_x_tensor, train_z_tensor = manual_batch_tensors
+            if manual_batch_shuffle:
+                generator = torch.Generator(device="cpu").manual_seed(
+                    int(config.seed + 2 + config.train_simulations + epoch)
+                )
+                permutation = torch.randperm(train_x_tensor.shape[0], generator=generator)
+                batch_x_source = train_x_tensor[permutation]
+                batch_z_source = train_z_tensor[permutation]
+            else:
+                batch_x_source = train_x_tensor
+                batch_z_source = train_z_tensor
+            batch_size = int(train_loader.batch_size or config.batch_size)
+            batch_iterable = (
+                (
+                    batch_x_source[start_index : start_index + batch_size],
+                    batch_z_source[start_index : start_index + batch_size],
+                )
+                for start_index in range(0, batch_x_source.shape[0], batch_size)
+            )
+        for batch_x, batch_z in batch_iterable:
             batch_x = batch_x.to(device)
             batch_z = batch_z.to(device)
             loss = -model.log_prob(batch_z, batch_x).mean()
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=20.0)
+            if config.grad_clip_norm > 0.0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.grad_clip_norm)
             optimizer.step()
+            if use_ema:
+                with torch.no_grad():
+                    for ema_param, param in zip(ema_params, model.parameters(), strict=True):
+                        ema_param.mul_(ema_decay).add_(param.detach(), alpha=1.0 - ema_decay)
+            optimizer_steps += 1
+            if scheduler is not None and scheduler_step_unit == "step":
+                scheduler.step()
             train_loss_sum += float(loss.detach().cpu()) * batch_x.shape[0]
             train_count += batch_x.shape[0]
+            if max_optimizer_steps > 0 and optimizer_steps >= max_optimizer_steps:
+                reached_max_optimizer_steps = True
+                break
+        train_seconds = time.perf_counter() - train_start
 
-        model.eval()
-        with torch.no_grad():
-            val_loss = -model.log_prob(val_z.to(device), val_x.to(device)).mean()
-            val_loss_float = float(val_loss.detach().cpu())
         train_loss = train_loss_sum / train_count
+        should_validate = (
+            epoch == 0
+            or (epoch + 1) % max(1, int(config.validation_every_epochs)) == 0
+            or epoch == config.epochs - 1
+            or reached_max_optimizer_steps
+        )
+        if should_validate:
+            val_start = time.perf_counter()
+            val_loss_float = evaluate_ema_val_nll()
+            val_seconds = time.perf_counter() - val_start
+        else:
+            val_loss_float = float("nan")
+            val_seconds = 0.0
+
         history["train_nll"].append(train_loss)
         history["val_nll"].append(val_loss_float)
+        history["val_evaluated"].append(bool(should_validate))
+        history["lr"].append(epoch_start_lr)
+        history["train_seconds"].append(train_seconds)
+        history["val_seconds"].append(val_seconds)
+        history["epoch_seconds"].append(time.perf_counter() - epoch_start)
+        history["optimizer_steps"].append(optimizer_steps)
 
-        if val_loss_float < best_val:
-            best_val = val_loss_float
-            best_state = copy.deepcopy(model.state_dict())
-            epochs_since_best = 0
-        else:
-            epochs_since_best += 1
-        if epochs_since_best >= patience:
+        if should_validate:
+            if val_loss_float < best_val:
+                best_val = val_loss_float
+                best_state = ema_state_dict()
+                epochs_since_best = 0
+            else:
+                epochs_since_best += 1
+        append_progress_record(
+            config.progress_jsonl,
+            {
+                "event": "epoch",
+                "family": family,
+                "epoch": epoch + 1,
+                "optimizer_steps": optimizer_steps,
+                "lr": epoch_start_lr,
+                "train_nll_standardized": train_loss,
+                "train_nll_z_units": train_loss + config.progress_nll_offset,
+                "val_evaluated": bool(should_validate),
+                "val_nll_standardized": val_loss_float,
+                "val_nll_z_units": val_loss_float + config.progress_nll_offset
+                if math.isfinite(val_loss_float)
+                else float("nan"),
+                "best_val_nll_standardized": best_val,
+                "best_val_nll_z_units": best_val + config.progress_nll_offset
+                if math.isfinite(best_val)
+                else float("nan"),
+                "train_seconds": train_seconds,
+                "val_seconds": val_seconds,
+                "epoch_seconds": history["epoch_seconds"][-1],
+                "elapsed_training_seconds": time.perf_counter() - start,
+                "max_optimizer_steps": int(config.max_optimizer_steps),
+            },
+        )
+        if scheduler is not None and scheduler_step_unit == "epoch" and not reached_max_optimizer_steps:
+            scheduler.step()
+        if reached_max_optimizer_steps or epochs_since_best >= patience:
             break
 
     synchronize_device(device)
     runtime = time.perf_counter() - start
     model.load_state_dict(best_state)
     model.eval()
+    final_val_nll = next(
+        value for value in reversed(history["val_nll"]) if math.isfinite(float(value))
+    )
     metrics = {
         "family": family,
         "label": FAMILY_LABELS[family],
+        "initial_train_batch_nll": initial_train_batch_nll,
+        "initial_val_nll": initial_val_nll,
+        "initial_losses_finite": bool(
+            math.isfinite(initial_train_batch_nll) and math.isfinite(initial_val_nll)
+        ),
+        "initial_eval_seconds": initial_eval_seconds,
+        "lr_schedule": config.lr_schedule,
+        "lr_eta_min": float(config.lr_eta_min),
+        "lr_warmup_steps": int(config.lr_warmup_steps),
+        "lr_scheduler_step_unit": scheduler_step_unit,
+        "validation_every_epochs": int(config.validation_every_epochs),
+        "validation_evaluations": int(sum(history["val_evaluated"])),
+        "torch_compile": config.torch_compile,
+        "grad_clip_norm": float(config.grad_clip_norm),
+        "ema_decay": float(config.ema_decay),
+        "batching_mode": config.batching_mode,
+        "max_optimizer_steps": int(config.max_optimizer_steps),
+        "progress_jsonl": str(config.progress_jsonl) if config.progress_jsonl is not None else None,
+        "optimizer_steps": int(optimizer_steps),
+        "batches_per_epoch": int(len(train_loader)),
         "epochs_completed": len(history["train_nll"]),
         "best_val_nll": best_val,
         "final_train_nll": history["train_nll"][-1],
-        "final_val_nll": history["val_nll"][-1],
+        "final_val_nll": final_val_nll,
         "training_seconds": runtime,
         "history": history,
     }
@@ -643,9 +1010,72 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train Stage 1 NPE models on the decay simulator.")
     parser.add_argument("--train-simulations", type=int, default=20_000)
     parser.add_argument("--val-simulations", type=int, default=5_000)
+    parser.add_argument(
+        "--train-sampler",
+        choices=TRAIN_SAMPLERS,
+        default="random",
+        help="Sampler for training simulations. Validation remains random prior predictive.",
+    )
     parser.add_argument("--epochs", type=int, default=120)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--learning-rate", type=float, default=2e-3)
+    parser.add_argument(
+        "--lr-schedule",
+        choices=("constant", "cosine_epoch", "cosine_step"),
+        default="constant",
+        help="Learning-rate schedule. Default preserves the historical fixed-rate trainer.",
+    )
+    parser.add_argument(
+        "--lr-eta-min",
+        type=float,
+        default=0.0,
+        help="Minimum learning rate for cosine schedules. Default 0.0 preserves prior behavior.",
+    )
+    parser.add_argument(
+        "--lr-warmup-steps",
+        type=int,
+        default=0,
+        help="Optimizer steps for linear LR warmup before cosine_step decay.",
+    )
+    parser.add_argument(
+        "--validation-every-epochs",
+        type=int,
+        default=1,
+        help="Evaluate validation loss every N epochs, plus epoch 1 and the final epoch.",
+    )
+    parser.add_argument(
+        "--max-optimizer-steps",
+        type=int,
+        default=0,
+        help="Stop training after this many optimizer steps. Use 0 to train full epochs.",
+    )
+    parser.add_argument(
+        "--torch-compile",
+        choices=("none", "default", "reduce_overhead"),
+        default="none",
+        help="Optional torch.compile mode for the NPE model.",
+    )
+    parser.add_argument(
+        "--grad-clip-norm",
+        type=float,
+        default=20.0,
+        help="Gradient clipping norm. Use 0 to disable clipping.",
+    )
+    parser.add_argument(
+        "--ema-decay",
+        type=float,
+        default=0.0,
+        help="Optional weight EMA decay in [0, 1). Use 0 to disable EMA.",
+    )
+    parser.add_argument(
+        "--batching-mode",
+        choices=("dataloader", "pre_shuffle", "sequential"),
+        default="dataloader",
+        help=(
+            "Batch source for training. pre_shuffle uses contiguous tensor slices after "
+            "per-epoch shuffling; sequential slices the existing random simulation order."
+        ),
+    )
     parser.add_argument("--weight-decay", type=float, default=1e-5)
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--hidden-layers", type=int, default=3)
@@ -659,6 +1089,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--families", type=parse_families, default=list(FAMILIES))
     parser.add_argument("--posterior-samples", type=int, default=60_000)
     parser.add_argument("--reference-grid-size", type=int, default=90)
+    parser.add_argument(
+        "--context-features",
+        choices=CONTEXT_FEATURE_MODES,
+        default="raw",
+        help="Context representation used by the NPE.",
+    )
     parser.add_argument("--output-dir", type=Path, default=ap.NPE_STAGE1_RESULTS)
     parser.add_argument("--figure-dir", type=Path, default=ap.NPE_STAGE1_FIGURES)
     parser.add_argument("--mcmc-samples", type=Path, default=ap.MCMC_DECAY_SAMPLES)
@@ -677,6 +1113,15 @@ def main() -> None:
         epochs=args.epochs,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
+        lr_schedule=args.lr_schedule,
+        lr_eta_min=args.lr_eta_min,
+        lr_warmup_steps=args.lr_warmup_steps,
+        validation_every_epochs=args.validation_every_epochs,
+        torch_compile=args.torch_compile,
+        grad_clip_norm=args.grad_clip_norm,
+        ema_decay=args.ema_decay,
+        batching_mode=args.batching_mode,
+        max_optimizer_steps=args.max_optimizer_steps,
         weight_decay=args.weight_decay,
         hidden_dim=args.hidden_dim,
         hidden_layers=args.hidden_layers,
@@ -689,23 +1134,32 @@ def main() -> None:
         families=args.families,
         posterior_samples=args.posterior_samples,
         reference_grid_size=args.reference_grid_size,
+        train_sampler=args.train_sampler,
+        context_features=args.context_features,
         spline_bins=args.spline_bins,
     )
 
     data_start = time.perf_counter()
-    train_x, train_z, _ = sample_decay_pairs(n=args.train_simulations, seed=args.seed)
+    train_x, train_z, _ = sample_decay_pairs(
+        n=args.train_simulations,
+        seed=args.seed,
+        sampler=args.train_sampler,
+    )
     val_x, val_z, _ = sample_decay_pairs(n=args.val_simulations, seed=args.seed + 1)
     t_obs, y_obs, true_theta = simulate_decay_data(seed=args.observed_seed)
-    observed_x = y_obs.numpy()
+    observed_x_raw = y_obs.numpy()
     true_theta_np = true_theta.numpy()
+    train_x_context = transform_context_features(train_x, args.context_features)
+    val_x_context = transform_context_features(val_x, args.context_features)
+    observed_x_context = transform_context_features(observed_x_raw[None, :], args.context_features)[0]
 
-    x_mean = train_x.mean(axis=0)
-    x_std = np.maximum(train_x.std(axis=0), 1e-6)
+    x_mean = train_x_context.mean(axis=0)
+    x_std = np.maximum(train_x_context.std(axis=0), 1e-6)
     z_mean = train_z.mean(axis=0)
     z_std = np.maximum(train_z.std(axis=0), 1e-6)
 
-    train_x_std = standardize(train_x, x_mean, x_std).astype(np.float32)
-    val_x_std = standardize(val_x, x_mean, x_std).astype(np.float32)
+    train_x_std = standardize(train_x_context, x_mean, x_std).astype(np.float32)
+    val_x_std = standardize(val_x_context, x_mean, x_std).astype(np.float32)
     train_z_std = standardize(train_z, z_mean, z_std).astype(np.float32)
     val_z_std = standardize(val_z, z_mean, z_std).astype(np.float32)
     data_seconds = time.perf_counter() - data_start
@@ -727,9 +1181,14 @@ def main() -> None:
 
     for family in args.families:
         print(f"training {family} on {device}")
+        family_config = replace(
+            config,
+            progress_jsonl=args.output_dir / f"{family}_training_progress.jsonl",
+            progress_nll_offset=float(np.log(z_std).sum()),
+        )
         model, metrics = train_one_model(
             family=family,
-            config=config,
+            config=family_config,
             train_loader=train_loader,
             val_x=val_x_tensor,
             val_z=val_z_tensor,
@@ -739,7 +1198,7 @@ def main() -> None:
         )
         z_samples, theta_samples = sample_posterior_for_observation(
             model=model,
-            observed_x=observed_x,
+            observed_x=observed_x_context,
             x_mean=x_mean,
             x_std=x_std,
             z_mean=z_mean,
@@ -790,9 +1249,10 @@ def main() -> None:
     samples_npz = args.output_dir / "npe_stage1_samples.npz"
     np.savez_compressed(
         samples_npz,
-        observed_x=observed_x,
+        observed_x=observed_x_context,
+        observed_x_raw=observed_x_raw,
         t=t_obs.numpy(),
-        y=observed_x,
+        y=observed_x_raw,
         true_theta=true_theta_np,
         x_mean=x_mean,
         x_std=x_std,

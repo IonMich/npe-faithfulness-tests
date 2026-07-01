@@ -36,6 +36,12 @@ DEFAULT_TRAIN_SIMULATIONS = [64_000, 128_000, 256_000, 512_000, 1_000_000]
 DEFAULT_SEEDS = [20260901, 20260902, 20260903]
 FAMILY_CHOICES = {"mdn", "affine_flow", "spline_flow", "full_gaussian", "diag_gaussian"}
 DEVICE_CHOICES = {"cpu", "mps", "auto", "cuda"}
+LR_SCHEDULE_CHOICES = {"constant", "cosine_epoch", "cosine_step"}
+TORCH_COMPILE_CHOICES = {"none", "default", "reduce_overhead"}
+CONTEXT_VARIANT_CHOICES = {"real", "zero_x", "shuffled_x"}
+CONTEXT_FEATURE_CHOICES = {"raw", "decay_summary", "raw_decay_summary"}
+BATCHING_MODE_CHOICES = {"dataloader", "pre_shuffle", "sequential"}
+TRAIN_SAMPLER_CHOICES = {"random", "lhs", "sobol"}
 RUN_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -127,6 +133,13 @@ def parse_int(value: object, *, default: int, name: str, minimum: int = 1) -> in
     return output
 
 
+def parse_float(value: object, *, default: float, name: str, minimum: float | None = None) -> float:
+    output = default if value is None else float(value)
+    if minimum is not None and output < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
+    return output
+
+
 def parse_int_list(value: object, *, default: list[int], name: str) -> list[int]:
     if value is None:
         values = list(default)
@@ -149,6 +162,31 @@ def parse_choice(value: object, *, default: str, name: str, choices: set[str]) -
         allowed = ", ".join(sorted(choices))
         raise ValueError(f"{name} must be one of: {allowed}")
     return output
+
+
+def parse_str_list(
+    value: object,
+    *,
+    default: list[str],
+    name: str,
+    choices: set[str] | None = None,
+) -> list[str]:
+    if value is None:
+        values = list(default)
+    elif isinstance(value, str):
+        values = [piece.strip() for piece in value.split(",") if piece.strip()]
+    elif isinstance(value, list):
+        values = [str(item) for item in value]
+    else:
+        raise ValueError(f"{name} must be a comma-separated string or list of strings")
+    if not values:
+        raise ValueError(f"{name} must contain at least one value")
+    if choices is not None:
+        invalid = sorted(set(values) - choices)
+        if invalid:
+            allowed = ", ".join(sorted(choices))
+            raise ValueError(f"{name} contains invalid values {invalid}; allowed: {allowed}")
+    return values
 
 
 def repo_relative_path(value: object, *, default: Path, name: str) -> Path:
@@ -212,12 +250,81 @@ def broad_scaling_config(payload: dict[str, object]) -> dict[str, object]:
         "seeds": parse_int_list(payload.get("seeds"), default=DEFAULT_SEEDS, name="seeds"),
         "family": parse_choice(payload.get("family"), default="mdn", name="family", choices=FAMILY_CHOICES),
         "device": parse_choice(payload.get("device"), default="cpu", name="device", choices=DEVICE_CHOICES),
+        "standardization_simulations": parse_int(
+            payload.get("standardization_simulations"),
+            default=60_000,
+            name="standardization_simulations",
+        ),
+        "train_sampler": parse_choice(
+            payload.get("train_sampler"),
+            default="random",
+            name="train_sampler",
+            choices=TRAIN_SAMPLER_CHOICES,
+        ),
+        "epochs": parse_int(payload.get("epochs"), default=90, name="epochs"),
+        "batch_size": parse_int(payload.get("batch_size"), default=512, name="batch_size"),
+        "learning_rate": parse_float(payload.get("learning_rate"), default=2e-3, name="learning_rate", minimum=0.0),
+        "lr_schedule": parse_choice(
+            payload.get("lr_schedule"),
+            default="constant",
+            name="lr_schedule",
+            choices=LR_SCHEDULE_CHOICES,
+        ),
+        "lr_eta_min": parse_float(payload.get("lr_eta_min"), default=0.0, name="lr_eta_min", minimum=0.0),
+        "lr_warmup_steps": parse_int(
+            payload.get("lr_warmup_steps"),
+            default=0,
+            name="lr_warmup_steps",
+            minimum=0,
+        ),
+        "validation_every_epochs": parse_int(
+            payload.get("validation_every_epochs"),
+            default=1,
+            name="validation_every_epochs",
+        ),
+        "max_optimizer_steps": parse_int(
+            payload.get("max_optimizer_steps"),
+            default=0,
+            name="max_optimizer_steps",
+            minimum=0,
+        ),
+        "torch_compile": parse_choice(
+            payload.get("torch_compile"),
+            default="none",
+            name="torch_compile",
+            choices=TORCH_COMPILE_CHOICES,
+        ),
+        "grad_clip_norm": parse_float(
+            payload.get("grad_clip_norm"),
+            default=20.0,
+            name="grad_clip_norm",
+            minimum=0.0,
+        ),
+        "ema_decay": parse_float(
+            payload.get("ema_decay"),
+            default=0.0,
+            name="ema_decay",
+            minimum=0.0,
+        ),
+        "batching_mode": parse_choice(
+            payload.get("batching_mode"),
+            default="dataloader",
+            name="batching_mode",
+            choices=BATCHING_MODE_CHOICES,
+        ),
+        "weight_decay": parse_float(payload.get("weight_decay"), default=1e-5, name="weight_decay", minimum=0.0),
         "hidden_dim": parse_int(payload.get("hidden_dim"), default=128, name="hidden_dim"),
         "hidden_layers": parse_int(payload.get("hidden_layers"), default=3, name="hidden_layers"),
         "mdn_components": parse_int(payload.get("mdn_components"), default=5, name="mdn_components"),
         "flow_layers": parse_int(payload.get("flow_layers"), default=6, name="flow_layers"),
         "flow_context_dim": parse_int(payload.get("flow_context_dim"), default=64, name="flow_context_dim"),
         "spline_bins": parse_int(payload.get("spline_bins"), default=12, name="spline_bins", minimum=2),
+        "context_features": parse_choice(
+            payload.get("context_features"),
+            default="raw",
+            name="context_features",
+            choices=CONTEXT_FEATURE_CHOICES,
+        ),
         "jobs": parse_int(payload.get("jobs"), default=2, name="jobs"),
         "torch_threads": parse_int(payload.get("torch_threads"), default=2, name="torch_threads"),
         "eval_batch_size": parse_int(payload.get("eval_batch_size"), default=16_384, name="eval_batch_size"),
@@ -232,6 +339,12 @@ def broad_scaling_config(payload: dict[str, object]) -> dict[str, object]:
             default=1_000_000,
             name="validation_cache_simulations",
         ),
+        "early_val_cache_simulations": parse_int(
+            payload.get("early_val_cache_simulations"),
+            default=0,
+            name="early_val_cache_simulations",
+            minimum=0,
+        ),
         "panel_marginal_cache": panel_cache,
         "panel_size": parse_int(payload.get("panel_size"), default=16, name="panel_size"),
         "panel_grid_size": parse_int(payload.get("panel_grid_size"), default=180, name="panel_grid_size", minimum=2),
@@ -245,6 +358,18 @@ def broad_scaling_config(payload: dict[str, object]) -> dict[str, object]:
             default=20_000,
             name="panel_posterior_samples",
         ),
+        "posterior_samples": parse_int(
+            payload.get("posterior_samples"),
+            default=20_000,
+            name="posterior_samples",
+        ),
+        "context_variants": parse_str_list(
+            payload.get("context_variants"),
+            default=["real"],
+            name="context_variants",
+            choices=CONTEXT_VARIANT_CHOICES,
+        ),
+        "tail_top_k": parse_int(payload.get("tail_top_k"), default=20, name="tail_top_k", minimum=0),
         "prepare_caches": parse_bool(payload.get("prepare_caches"), default=True, name="prepare_caches"),
         "save_models": parse_bool(payload.get("save_models"), default=True, name="save_models"),
         "sync": parse_bool(payload.get("sync"), default=True, name="sync"),
@@ -323,6 +448,36 @@ def broad_scaling_commands(config: dict[str, object], *, uv: str) -> tuple[list[
         str(config["family"]),
         "--val-simulations",
         str(config["early_stop_val_simulations"]),
+        "--standardization-simulations",
+        str(config["standardization_simulations"]),
+        "--train-sampler",
+        str(config["train_sampler"]),
+        "--epochs",
+        str(config["epochs"]),
+        "--batch-size",
+        str(config["batch_size"]),
+        "--learning-rate",
+        str(config["learning_rate"]),
+        "--lr-schedule",
+        str(config["lr_schedule"]),
+        "--lr-eta-min",
+        str(config["lr_eta_min"]),
+        "--lr-warmup-steps",
+        str(config["lr_warmup_steps"]),
+        "--validation-every-epochs",
+        str(config["validation_every_epochs"]),
+        "--max-optimizer-steps",
+        str(config["max_optimizer_steps"]),
+        "--torch-compile",
+        str(config["torch_compile"]),
+        "--grad-clip-norm",
+        str(config["grad_clip_norm"]),
+        "--ema-decay",
+        str(config["ema_decay"]),
+        "--batching-mode",
+        str(config["batching_mode"]),
+        "--weight-decay",
+        str(config["weight_decay"]),
         "--hidden-dim",
         str(config["hidden_dim"]),
         "--hidden-layers",
@@ -335,10 +490,18 @@ def broad_scaling_commands(config: dict[str, object], *, uv: str) -> tuple[list[
         str(config["flow_context_dim"]),
         "--spline-bins",
         str(config["spline_bins"]),
+        "--context-features",
+        str(config["context_features"]),
+        "--context-variants",
+        ",".join(str(value) for value in config["context_variants"]),
+        "--posterior-samples",
+        str(config["posterior_samples"]),
         "--device",
         str(config["device"]),
         "--validation-cache",
         str(validation_cache),
+        "--early-val-cache-simulations",
+        str(config["early_val_cache_simulations"]),
         "--panel-marginal-cache",
         str(panel_cache),
         "--panel-posterior-samples",
@@ -351,6 +514,8 @@ def broad_scaling_commands(config: dict[str, object], *, uv: str) -> tuple[list[
         str(config["torch_threads"]),
         "--eval-batch-size",
         str(config["eval_batch_size"]),
+        "--tail-top-k",
+        str(config["tail_top_k"]),
     ]
     if not config["save_models"]:
         command.append("--no-save-models")

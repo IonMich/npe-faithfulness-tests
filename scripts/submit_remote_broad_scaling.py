@@ -34,23 +34,43 @@ def build_payload(args: argparse.Namespace) -> dict[str, object]:
         "seeds": args.seeds,
         "family": args.family,
         "device": args.device,
+        "standardization_simulations": args.standardization_simulations,
+        "train_sampler": args.train_sampler,
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "learning_rate": args.learning_rate,
+        "lr_schedule": args.lr_schedule,
+        "lr_eta_min": args.lr_eta_min,
+        "lr_warmup_steps": args.lr_warmup_steps,
+        "validation_every_epochs": args.validation_every_epochs,
+        "max_optimizer_steps": args.max_optimizer_steps,
+        "torch_compile": args.torch_compile,
+        "grad_clip_norm": args.grad_clip_norm,
+        "ema_decay": args.ema_decay,
+        "batching_mode": args.batching_mode,
+        "weight_decay": args.weight_decay,
         "hidden_dim": args.hidden_dim,
         "hidden_layers": args.hidden_layers,
         "mdn_components": args.mdn_components,
         "flow_layers": args.flow_layers,
         "flow_context_dim": args.flow_context_dim,
         "spline_bins": args.spline_bins,
+        "context_features": args.context_features,
         "jobs": args.jobs,
         "torch_threads": args.torch_threads,
         "eval_batch_size": args.eval_batch_size,
         "early_stop_val_simulations": args.early_stop_val_simulations,
         "validation_cache": str(args.validation_cache),
         "validation_cache_simulations": args.validation_cache_simulations,
+        "early_val_cache_simulations": args.early_val_cache_simulations,
         "panel_marginal_cache": str(args.panel_marginal_cache),
         "panel_size": args.panel_size,
         "panel_grid_size": args.panel_grid_size,
         "panel_target_sample_count": args.panel_target_sample_count,
         "panel_posterior_samples": args.panel_posterior_samples,
+        "posterior_samples": args.posterior_samples,
+        "context_variants": args.context_variants,
+        "tail_top_k": args.tail_top_k,
         "prepare_caches": args.prepare_caches,
         "save_models": not args.no_save_models,
         "sync": not args.no_sync,
@@ -96,23 +116,51 @@ def parse_args() -> argparse.Namespace:
         default="mdn",
     )
     parser.add_argument("--device", choices=("cpu", "mps", "auto", "cuda"), default="cpu")
+    parser.add_argument("--standardization-simulations", type=int, default=60_000)
+    parser.add_argument("--train-sampler", choices=("random", "lhs", "sobol"), default="random")
+    parser.add_argument("--epochs", type=int, default=90)
+    parser.add_argument("--batch-size", type=int, default=512)
+    parser.add_argument("--learning-rate", type=float, default=2e-3)
+    parser.add_argument("--lr-schedule", choices=("constant", "cosine_epoch", "cosine_step"), default="constant")
+    parser.add_argument("--lr-eta-min", type=float, default=0.0)
+    parser.add_argument("--lr-warmup-steps", type=int, default=0)
+    parser.add_argument("--validation-every-epochs", type=int, default=1)
+    parser.add_argument("--max-optimizer-steps", type=int, default=0)
+    parser.add_argument("--torch-compile", choices=("none", "default", "reduce_overhead"), default="none")
+    parser.add_argument("--grad-clip-norm", type=float, default=20.0)
+    parser.add_argument("--ema-decay", type=float, default=0.0)
+    parser.add_argument(
+        "--batching-mode",
+        choices=("dataloader", "pre_shuffle", "sequential"),
+        default="dataloader",
+    )
+    parser.add_argument("--weight-decay", type=float, default=1e-5)
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--hidden-layers", type=int, default=3)
     parser.add_argument("--mdn-components", type=int, default=5)
     parser.add_argument("--flow-layers", type=int, default=6)
     parser.add_argument("--flow-context-dim", type=int, default=64)
     parser.add_argument("--spline-bins", type=int, default=12)
+    parser.add_argument(
+        "--context-features",
+        choices=("raw", "decay_summary", "raw_decay_summary"),
+        default="raw",
+    )
     parser.add_argument("--jobs", type=int, default=2)
     parser.add_argument("--torch-threads", type=int, default=2)
     parser.add_argument("--eval-batch-size", type=int, default=16384)
     parser.add_argument("--early-stop-val-simulations", type=int, default=100000)
     parser.add_argument("--validation-cache", type=Path, default=DEFAULT_VALIDATION_CACHE)
     parser.add_argument("--validation-cache-simulations", type=int, default=1_000_000)
+    parser.add_argument("--early-val-cache-simulations", type=int, default=0)
     parser.add_argument("--panel-marginal-cache", type=Path, default=DEFAULT_PANEL_CACHE)
     parser.add_argument("--panel-size", type=int, default=16)
     parser.add_argument("--panel-grid-size", type=int, default=180)
     parser.add_argument("--panel-target-sample-count", type=int, default=20_000)
     parser.add_argument("--panel-posterior-samples", type=int, default=20_000)
+    parser.add_argument("--posterior-samples", type=int, default=20_000)
+    parser.add_argument("--context-variants", default="real")
+    parser.add_argument("--tail-top-k", type=int, default=20)
     parser.add_argument("--no-prepare-caches", dest="prepare_caches", action="store_false")
     parser.set_defaults(prepare_caches=True)
     parser.add_argument("--no-save-models", action="store_true")

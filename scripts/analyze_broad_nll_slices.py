@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 
+import matplotlib
 import numpy as np
 import torch
 
@@ -15,6 +16,9 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from mcmc_decay_inference import PARAMETER_NAMES  # noqa: E402
 from npe_posterior_viewer import DEFAULT_BEST_BROAD_MODEL, DEFAULT_BEST_BROAD_SPLINE_MODEL, load_stage1_checkpoint  # noqa: E402
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
 
 
 DEFAULT_CACHE = Path("runs/01_exponential_decay/15_broad_scaling/validation_cache/broad_prior_val_1m_float32.npz")
@@ -72,6 +76,111 @@ def summarize(values: np.ndarray, mask: np.ndarray) -> dict[str, float | int]:
     }
 
 
+def top_indices(values: np.ndarray, top_k: int) -> np.ndarray:
+    count = min(int(top_k), int(values.size))
+    ranking_values = np.nan_to_num(values, nan=-np.inf, posinf=np.inf, neginf=-np.inf)
+    candidate = np.argpartition(ranking_values, -count)[-count:]
+    return candidate[np.argsort(ranking_values[candidate])[::-1]]
+
+
+def top_rows(
+    *,
+    values: np.ndarray,
+    theta: np.ndarray,
+    indices: np.ndarray,
+    masks: dict[str, np.ndarray],
+    value_name: str,
+) -> list[dict[str, object]]:
+    rows = []
+    for rank, index in enumerate(indices, start=1):
+        row: dict[str, object] = {
+            "rank": rank,
+            "index": int(index),
+            value_name: float(values[index]),
+        }
+        for param_name, param_value in zip(PARAMETER_NAMES, theta[index], strict=True):
+            row[param_name] = float(param_value)
+        for name, mask in masks.items():
+            if name != "all":
+                row[f"slice_{name}"] = bool(mask[index])
+        rows.append(row)
+    return rows
+
+
+def top_slice_enrichment(
+    *,
+    indices: np.ndarray,
+    masks: dict[str, np.ndarray],
+    total_count: int,
+) -> dict[str, dict[str, float | int]]:
+    selected = np.zeros(total_count, dtype=bool)
+    selected[indices] = True
+    output = {}
+    for name, mask in masks.items():
+        if name == "all":
+            continue
+        population_fraction = float(mask.mean())
+        top_fraction = float(mask[selected].mean()) if selected.any() else float("nan")
+        output[name] = {
+            "population_n": int(mask.sum()),
+            "population_fraction": population_fraction,
+            "top_n": int(np.count_nonzero(mask & selected)),
+            "top_fraction": top_fraction,
+            "enrichment": (
+                float(top_fraction / population_fraction)
+                if population_fraction > 0.0 and np.isfinite(top_fraction)
+                else float("nan")
+            ),
+        }
+    return output
+
+
+def write_dict_rows(rows: list[dict[str, object]], path: Path) -> None:
+    if not rows:
+        return
+    fields = sorted({field for row in rows for field in row})
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def plot_top_signals(
+    *,
+    x_val: np.ndarray,
+    theta: np.ndarray,
+    values: np.ndarray,
+    indices: np.ndarray,
+    output_path: Path,
+    title: str,
+    max_panels: int = 12,
+) -> None:
+    panel_indices = indices[:max_panels]
+    if panel_indices.size == 0:
+        return
+    cols = min(3, int(panel_indices.size))
+    rows = int(np.ceil(panel_indices.size / cols))
+    t = np.linspace(0.0, 6.0, x_val.shape[1])
+    fig, axes = plt.subplots(rows, cols, figsize=(4.2 * cols, 2.8 * rows), squeeze=False)
+    for plot_index, ax in enumerate(axes.flat):
+        if plot_index >= panel_indices.size:
+            ax.axis("off")
+            continue
+        index = int(panel_indices[plot_index])
+        params = theta[index]
+        mean = params[0] * np.exp(-params[1] * t)
+        ax.plot(t, x_val[index], color="#2f6fbb", linewidth=1.25, label="x")
+        ax.plot(t, mean, color="#b85c38", linewidth=1.1, linestyle="--", label="true mean")
+        ax.set_title(f"rank {plot_index + 1}; value={values[index]:.2f}", fontsize=9)
+        ax.tick_params(labelsize=8)
+    handles, labels = axes.flat[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False)
+    fig.suptitle(title, y=0.995)
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    fig.savefig(output_path, dpi=170)
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Analyze broad NPE validation NLL by rare prior slices.")
     parser.add_argument("--validation-cache", type=Path, default=DEFAULT_CACHE)
@@ -79,6 +188,7 @@ def main() -> None:
     parser.add_argument("--spline-model", type=Path, default=DEFAULT_BEST_BROAD_SPLINE_MODEL)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--batch-size", type=int, default=65_536)
+    parser.add_argument("--top-k", type=int, default=50)
     parser.add_argument("--device", choices=["cpu", "mps", "cuda"], default="cpu")
     args = parser.parse_args()
 
@@ -90,17 +200,29 @@ def main() -> None:
     A = theta[:, 0]
     k = theta[:, 1]
     sigma = theta[:, 2]
+    snr = A / np.maximum(sigma, 1e-12)
 
     masks = {
         "all": np.ones(theta.shape[0], dtype=bool),
         "sigma_lt_0p05": sigma < 0.05,
         "sigma_lt_0p075": sigma < 0.075,
+        "sigma_gt_2": sigma > 2.0,
+        "sigma_gt_5": sigma > 5.0,
+        "A_lt_0p2": A < 0.2,
+        "A_lt_1": A < 1.0,
         "A_gt_40": A > 40.0,
         "A_gt_50": A > 50.0,
+        "k_lt_0p1": k < 0.1,
+        "k_gt_5": k > 5.0,
+        "snr_lt_0p2": snr < 0.2,
+        "snr_lt_1": snr < 1.0,
+        "snr_gt_500": snr > 500.0,
         "A_gt_50_sigma_lt_0p05": (A > 50.0) & (sigma < 0.05),
         "A_gt_40_sigma_lt_0p075": (A > 40.0) & (sigma < 0.075),
         "low_sigma_mid_high_A": (A > 20.0) & (sigma < 0.075),
         "low_sigma_k_near_0p3": (sigma < 0.075) & (k > 0.22) & (k < 0.42),
+        "low_snr_low_A": (snr < 1.0) & (A < 1.0),
+        "high_noise_low_snr": (sigma > 2.0) & (snr < 1.0),
     }
 
     device = torch.device(args.device)
@@ -110,6 +232,8 @@ def main() -> None:
     }
     nll_by_model = {}
     model_summaries = {}
+    top_failure_summary = {}
+    top_failure_outputs = {}
     for model_id, path in model_specs.items():
         model, state = load_stage1_checkpoint(path, device)
         values = nll_values(
@@ -125,11 +249,80 @@ def main() -> None:
             name: summarize(values, mask)
             for name, mask in masks.items()
         }
+        indices = top_indices(values, args.top_k)
+        rows = top_rows(
+            values=values,
+            theta=theta,
+            indices=indices,
+            masks=masks,
+            value_name="nll_z_units",
+        )
+        top_csv = args.output.with_name(f"{args.output.stem}_{model_id}_top{len(indices)}.csv")
+        top_npz = args.output.with_name(f"{args.output.stem}_{model_id}_top{len(indices)}.npz")
+        top_png = args.output.with_name(f"{args.output.stem}_{model_id}_top{min(len(indices), 12)}.png")
+        write_dict_rows(rows, top_csv)
+        np.savez_compressed(
+            top_npz,
+            index=indices.astype(np.int64),
+            nll_z_units=values[indices],
+            x=x_val[indices],
+            z=z_val[indices],
+            theta=theta[indices],
+        )
+        plot_top_signals(
+            x_val=x_val,
+            theta=theta,
+            values=values,
+            indices=indices,
+            output_path=top_png,
+            title=f"{model_id} worst validation examples",
+        )
+        top_failure_summary[model_id] = {
+            "top_k": int(len(indices)),
+            "worst_nll_z_units": float(values[indices[0]]) if indices.size else float("nan"),
+            "best_of_top_nll_z_units": float(values[indices[-1]]) if indices.size else float("nan"),
+            "slice_enrichment": top_slice_enrichment(
+                indices=indices,
+                masks=masks,
+                total_count=theta.shape[0],
+            ),
+            "top_rows_preview": rows[:10],
+        }
+        top_failure_outputs[model_id] = {
+            "csv": str(top_csv),
+            "npz": str(top_npz),
+            "figure": str(top_png),
+        }
 
     deltas = {}
     spline_minus_mdn = nll_by_model["broad_spline_4m"].astype(np.float64) - nll_by_model["broad_mdn_512k"].astype(np.float64)
     for name, mask in masks.items():
         deltas[name] = summarize(spline_minus_mdn, mask)
+    delta_tail_summary = {}
+    for label, values in {
+        "spline_much_worse": spline_minus_mdn,
+        "spline_much_better": -spline_minus_mdn,
+    }.items():
+        indices = top_indices(values, args.top_k)
+        rows = top_rows(
+            values=spline_minus_mdn,
+            theta=theta,
+            indices=indices,
+            masks=masks,
+            value_name="spline_minus_mdn_nll_z_units",
+        )
+        delta_csv = args.output.with_name(f"{args.output.stem}_{label}_top{len(indices)}.csv")
+        write_dict_rows(rows, delta_csv)
+        delta_tail_summary[label] = {
+            "top_k": int(len(indices)),
+            "csv": str(delta_csv),
+            "slice_enrichment": top_slice_enrichment(
+                indices=indices,
+                masks=masks,
+                total_count=theta.shape[0],
+            ),
+            "top_rows_preview": rows[:10],
+        }
 
     prior_slice_summary = {
         name: {
@@ -145,6 +338,9 @@ def main() -> None:
         "prior_slice_summary": prior_slice_summary,
         "nll_z_units": model_summaries,
         "nll_delta_spline_minus_mdn": deltas,
+        "top_failures": top_failure_summary,
+        "top_failure_outputs": top_failure_outputs,
+        "delta_tail_summary": delta_tail_summary,
     }
     args.output.write_text(json.dumps(result, indent=2), encoding="utf-8")
 

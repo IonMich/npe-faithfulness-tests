@@ -9,7 +9,7 @@ import platform
 import subprocess
 import sys
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import matplotlib
@@ -74,11 +74,30 @@ PRESETS: dict[str, dict[str, object]] = {
     },
 }
 
+CONTEXT_VARIANTS = ("real", "zero_x", "shuffled_x")
+BASELINE_GATE_METRICS = (
+    ("full_val_nll_z_units", "final_validation_nll"),
+    ("panel_marginal_wasserstein_mean", "panel_mean_marginal_wasserstein"),
+    ("x0_grid300_wasserstein", "x0_grid300_wasserstein"),
+)
+
 
 def parse_int_list(value: str) -> tuple[int, ...]:
     items = tuple(int(piece.strip()) for piece in value.split(",") if piece.strip())
     if not items:
         raise argparse.ArgumentTypeError("Expected at least one integer.")
+    return items
+
+
+def parse_context_variants(value: str) -> tuple[str, ...]:
+    items = tuple(piece.strip() for piece in value.split(",") if piece.strip())
+    if not items:
+        raise argparse.ArgumentTypeError("Expected at least one context variant.")
+    invalid = sorted(set(items) - set(CONTEXT_VARIANTS))
+    if invalid:
+        raise argparse.ArgumentTypeError(
+            f"Unknown context variants: {invalid}. Expected a comma-separated subset of {CONTEXT_VARIANTS}."
+        )
     return items
 
 
@@ -231,6 +250,15 @@ def make_stage1_config(args: argparse.Namespace, seed: int, train_simulations: i
         epochs=int(args.epochs),
         batch_size=int(args.batch_size),
         learning_rate=float(args.learning_rate),
+        lr_schedule=str(args.lr_schedule),
+        lr_eta_min=float(args.lr_eta_min),
+        lr_warmup_steps=int(args.lr_warmup_steps),
+        validation_every_epochs=int(args.validation_every_epochs),
+        torch_compile=str(args.torch_compile),
+        grad_clip_norm=float(args.grad_clip_norm),
+        ema_decay=float(args.ema_decay),
+        batching_mode=str(args.batching_mode),
+        max_optimizer_steps=int(args.max_optimizer_steps),
         weight_decay=float(args.weight_decay),
         hidden_dim=int(args.hidden_dim),
         hidden_layers=int(args.hidden_layers),
@@ -243,6 +271,8 @@ def make_stage1_config(args: argparse.Namespace, seed: int, train_simulations: i
         families=[str(args.family)],
         posterior_samples=int(args.posterior_samples),
         reference_grid_size=300,
+        train_sampler=str(args.train_sampler),
+        context_features=str(args.context_features),
         spline_bins=int(args.spline_bins),
     )
 
@@ -252,6 +282,7 @@ def standardization_stats(args: argparse.Namespace) -> dict[str, np.ndarray]:
         n=int(args.standardization_simulations),
         seed=int(args.standardization_seed),
     )
+    x_std_sample = stage1.transform_context_features(x_std_sample, str(args.context_features))
     z_mean = PRIOR_LOG_MEAN.detach().cpu().numpy().astype(np.float64)
     z_std = PRIOR_LOG_STD.detach().cpu().numpy().astype(np.float64)
     return {
@@ -260,6 +291,64 @@ def standardization_stats(args: argparse.Namespace) -> dict[str, np.ndarray]:
         "z_mean": z_mean,
         "z_std": np.maximum(z_std, 1e-8),
     }
+
+
+def context_variant_description(variant: str) -> str:
+    if variant == "real":
+        return "Paired real standardized context."
+    if variant == "zero_x":
+        return "All standardized context values are zero; input-independent baseline."
+    if variant == "shuffled_x":
+        return "Training contexts are shuffled against targets; evaluation contexts stay real."
+    raise ValueError(f"Unknown context variant: {variant}")
+
+
+def run_dir_name(train_simulations: int, seed: int, context_variant: str) -> str:
+    base = f"n{int(train_simulations)}_seed{int(seed)}"
+    if context_variant == "real":
+        return base
+    return f"{base}_{context_variant}"
+
+
+def apply_training_context_variant(x_std: np.ndarray, context_variant: str, seed: int) -> np.ndarray:
+    if context_variant == "real":
+        return x_std
+    if context_variant == "zero_x":
+        return np.zeros_like(x_std)
+    if context_variant == "shuffled_x":
+        if x_std.shape[0] <= 1:
+            return x_std.copy()
+        rng = np.random.default_rng(int(seed))
+        permutation = rng.permutation(x_std.shape[0])
+        if np.array_equal(permutation, np.arange(x_std.shape[0])):
+            permutation = np.roll(permutation, 1)
+        return x_std[permutation].copy()
+    raise ValueError(f"Unknown context variant: {context_variant}")
+
+
+def apply_evaluation_context_variant(x_std: np.ndarray, context_variant: str) -> np.ndarray:
+    if context_variant in {"real", "shuffled_x"}:
+        return x_std
+    if context_variant == "zero_x":
+        return np.zeros_like(x_std)
+    raise ValueError(f"Unknown context variant: {context_variant}")
+
+
+@torch.no_grad()
+def sample_posterior_for_standardized_context(
+    *,
+    model: torch.nn.Module,
+    x_standardized: np.ndarray,
+    z_mean: np.ndarray,
+    z_std: np.ndarray,
+    n: int,
+    device: torch.device,
+) -> tuple[np.ndarray, np.ndarray]:
+    x_tensor = torch.from_numpy(x_standardized[None, :].astype(np.float32)).to(device)
+    z_standardized = model.sample(n, x_tensor).detach().cpu().numpy()
+    z = z_standardized * z_std[None, :] + z_mean[None, :]
+    theta = np.exp(z)
+    return z, theta
 
 
 def evaluate_val_nll_z_units(
@@ -290,7 +379,7 @@ def evaluate_val_nll_z_units(
     return float(nll_standardized + np.log(z_std).sum())
 
 
-def evaluate_val_nll_z_summary(
+def evaluate_val_nll_z_values(
     *,
     model: torch.nn.Module,
     val_x_std: np.ndarray,
@@ -298,7 +387,7 @@ def evaluate_val_nll_z_summary(
     z_std: np.ndarray,
     device: torch.device,
     batch_size: int,
-) -> dict[str, float | int]:
+) -> np.ndarray:
     loader = DataLoader(
         TensorDataset(torch.from_numpy(val_x_std), torch.from_numpy(val_z_std)),
         batch_size=batch_size,
@@ -315,7 +404,11 @@ def evaluate_val_nll_z_summary(
             stop = offset + loss.shape[0]
             values[offset:stop] = loss
             offset = stop
-    values = values[:offset].astype(np.float64, copy=False) + float(np.log(z_std).sum())
+    return values[:offset].astype(np.float64, copy=False) + float(np.log(z_std).sum())
+
+
+def summarize_val_nll_z_values(values: np.ndarray) -> dict[str, float | int]:
+    values = np.asarray(values, dtype=np.float64)
     return {
         "n": int(values.size),
         "mean": float(np.mean(values)),
@@ -328,6 +421,118 @@ def evaluate_val_nll_z_summary(
         "q999": float(np.quantile(values, 0.999)),
         "max": float(np.max(values)),
     }
+
+
+def evaluate_val_nll_z_summary(
+    *,
+    model: torch.nn.Module,
+    val_x_std: np.ndarray,
+    val_z_std: np.ndarray,
+    z_std: np.ndarray,
+    device: torch.device,
+    batch_size: int,
+) -> dict[str, float | int]:
+    values = evaluate_val_nll_z_values(
+        model=model,
+        val_x_std=val_x_std,
+        val_z_std=val_z_std,
+        z_std=z_std,
+        device=device,
+        batch_size=batch_size,
+    )
+    return summarize_val_nll_z_values(values)
+
+
+def plot_top_validation_failures(
+    *,
+    x_values: np.ndarray,
+    theta_values: np.ndarray,
+    nll_values: np.ndarray,
+    output_path: Path,
+) -> None:
+    if x_values.size == 0:
+        return
+    panel_count = min(int(x_values.shape[0]), 12)
+    cols = min(3, panel_count)
+    rows = int(math.ceil(panel_count / cols))
+    t = np.linspace(0.0, 6.0, x_values.shape[1])
+    fig, axes = plt.subplots(rows, cols, figsize=(4.2 * cols, 2.8 * rows), squeeze=False)
+    for index, ax in enumerate(axes.flat):
+        if index >= panel_count:
+            ax.axis("off")
+            continue
+        x = x_values[index]
+        theta = theta_values[index]
+        mean = theta[0] * np.exp(-theta[1] * t)
+        ax.plot(t, x, color="#2f6fbb", linewidth=1.3, label="x")
+        ax.plot(t, mean, color="#b85c38", linewidth=1.2, linestyle="--", label="mean")
+        ax.set_title(f"rank {index + 1} NLL={nll_values[index]:.2f}", fontsize=9)
+        ax.tick_params(labelsize=8)
+    handles, labels = axes.flat[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False)
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+
+
+def save_top_validation_failures(
+    *,
+    results_dir: Path,
+    nll_values: np.ndarray,
+    val_x_std_original: np.ndarray,
+    val_z_std: np.ndarray,
+    stats: dict[str, np.ndarray],
+    top_k: int,
+    context_variant: str,
+) -> dict[str, object] | None:
+    if top_k <= 0 or nll_values.size == 0:
+        return None
+    count = min(int(top_k), int(nll_values.size))
+    ranking_values = np.nan_to_num(nll_values, nan=-np.inf, posinf=np.inf, neginf=-np.inf)
+    candidate = np.argpartition(ranking_values, -count)[-count:]
+    order = candidate[np.argsort(ranking_values[candidate])[::-1]]
+    x_values = (
+        val_x_std_original[order].astype(np.float64) * stats["x_std"][None, :]
+        + stats["x_mean"][None, :]
+    )
+    z_values = (
+        val_z_std[order].astype(np.float64) * stats["z_std"][None, :]
+        + stats["z_mean"][None, :]
+    )
+    theta_values = np.exp(z_values)
+    selected_nll = np.asarray(nll_values[order], dtype=np.float64)
+    npz_path = results_dir / "validation_top_failures.npz"
+    json_path = results_dir / "validation_top_failures.json"
+    figure_path = results_dir / "validation_top_failures.png"
+    np.savez_compressed(
+        npz_path,
+        index=order.astype(np.int64),
+        nll_z_units=selected_nll,
+        x=x_values,
+        z=z_values,
+        theta=theta_values,
+        context_variant=np.asarray(context_variant),
+    )
+    plot_top_validation_failures(
+        x_values=x_values,
+        theta_values=theta_values,
+        nll_values=selected_nll,
+        output_path=figure_path,
+    )
+    summary = {
+        "context_variant": context_variant,
+        "top_k": count,
+        "source_count": int(nll_values.size),
+        "worst_nll_z_units": float(selected_nll[0]),
+        "best_of_top_nll_z_units": float(selected_nll[-1]),
+        "indices": order.astype(int).tolist(),
+        "nll_z_units": selected_nll.tolist(),
+        "npz": str(npz_path),
+        "figure": str(figure_path),
+    }
+    json_path.write_text(json.dumps(json_ready(summary), indent=2), encoding="utf-8")
+    summary["json"] = str(json_path)
+    return summary
 
 
 def compare_samples_to_marginals(
@@ -357,8 +562,13 @@ def evaluate_panel_marginal_wasserstein(
     z_std: np.ndarray,
     n: int,
     device: torch.device,
+    context_variant: str = "real",
+    context_features: str = "raw",
 ) -> dict[str, object]:
-    x_panel = np.asarray(panel["x_panel"], dtype=np.float64)
+    x_panel = stage1.transform_context_features(
+        np.asarray(panel["x_panel"], dtype=np.float64),
+        context_features,
+    )
     theta_axes = np.asarray(panel["theta_axes"], dtype=np.float64)
     marginal_weights = np.asarray(panel["marginal_weights"], dtype=np.float64)
     targets = np.asarray(panel["target_wasserstein"], dtype=np.float64)
@@ -367,13 +577,20 @@ def evaluate_panel_marginal_wasserstein(
     w_values = []
     ratio_values = []
     for index, label in enumerate(labels):
-        _, theta_samples = stage1.sample_posterior_for_observation(
+        x_standardized = stage1.standardize(
+            x_panel[index][None, :],
+            x_mean,
+            x_std,
+        ).astype(np.float32)[0]
+        x_standardized = apply_evaluation_context_variant(
+            x_standardized[None, :],
+            context_variant,
+        )[0]
+        _, theta_samples = sample_posterior_for_standardized_context(
             model=model,
-            observed_x=x_panel[index],
-            x_mean=x_mean,
-            x_std=x_std,
             z_mean=z_mean,
             z_std=z_std,
+            x_standardized=x_standardized,
             n=n,
             device=device,
         )
@@ -394,6 +611,7 @@ def evaluate_panel_marginal_wasserstein(
             "target_ratio": ratio,
         })
     return {
+        "context_variant": context_variant,
         "posterior_samples_per_signal": int(n),
         "signal_count": int(len(rows)),
         "per_signal": rows,
@@ -459,11 +677,22 @@ def fit_decreasing_power_law(x: np.ndarray, y: np.ndarray) -> dict[str, object] 
     }
 
 
-def summarize_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+def row_context_variant(row: dict[str, object]) -> str:
+    return str(row.get("context_variant", "real"))
+
+
+def context_variant_sort_key(variant: str) -> tuple[int, str]:
+    if variant in CONTEXT_VARIANTS:
+        return (CONTEXT_VARIANTS.index(variant), variant)
+    return (len(CONTEXT_VARIANTS), variant)
+
+
+def summarize_rows(rows: list[dict[str, object]], *, context_variant: str | None = None) -> list[dict[str, object]]:
     output = []
     for train_count in sorted({int(row["train_simulations"]) for row in rows}):
         group = [row for row in rows if int(row["train_simulations"]) == train_count]
         item = {
+            "context_variant": context_variant if context_variant is not None else "mixed",
             "train_simulations": train_count,
             "seed_count": len(group),
             "x0_grid300_wasserstein": quantile_summary(
@@ -475,11 +704,26 @@ def summarize_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
             "best_val_nll_z_units": quantile_summary(
                 np.asarray([row["best_val_nll_z_units"] for row in group], dtype=np.float64)
             ),
+            "initial_train_batch_nll_z_units": quantile_summary(
+                np.asarray([row.get("initial_train_batch_nll_z_units", float("nan")) for row in group], dtype=np.float64)
+            ),
+            "initial_val_nll_z_units": quantile_summary(
+                np.asarray([row.get("initial_val_nll_z_units", float("nan")) for row in group], dtype=np.float64)
+            ),
+            "final_train_nll_z_units": quantile_summary(
+                np.asarray([row.get("final_train_nll_z_units", float("nan")) for row in group], dtype=np.float64)
+            ),
             "full_val_nll_z_units": quantile_summary(
                 np.asarray([row["full_val_nll_z_units"] for row in group], dtype=np.float64)
             ),
             "training_seconds": quantile_summary(
                 np.asarray([row["training_seconds"] for row in group], dtype=np.float64)
+            ),
+            "optimizer_steps": quantile_summary(
+                np.asarray([row.get("optimizer_steps", float("nan")) for row in group], dtype=np.float64)
+            ),
+            "batches_per_epoch": quantile_summary(
+                np.asarray([row.get("batches_per_epoch", float("nan")) for row in group], dtype=np.float64)
             ),
         }
         if all("panel_marginal_wasserstein_mean" in row for row in group):
@@ -496,6 +740,90 @@ def summarize_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
                 np.asarray([row["panel_marginal_target_ratio_median"] for row in group], dtype=np.float64)
             )
         output.append(item)
+    return output
+
+
+def summary_by_train(summary_rows: list[dict[str, object]]) -> dict[int, dict[str, object]]:
+    return {int(row["train_simulations"]): row for row in summary_rows}
+
+
+def metric_median(row: dict[str, object], metric: str) -> float:
+    value = row.get(metric)
+    if not isinstance(value, dict):
+        return float("nan")
+    return float(value.get("median", float("nan")))
+
+
+def build_baseline_gate_summary(
+    summary_rows_by_variant: dict[str, list[dict[str, object]]],
+) -> dict[str, object]:
+    if "real" not in summary_rows_by_variant:
+        return {
+            "reference_variant": "real",
+            "rows": [],
+            "all_pass": None,
+            "reason": "No real context variant rows available.",
+        }
+    real_by_train = summary_by_train(summary_rows_by_variant["real"])
+    rows = []
+    for variant in sorted(summary_rows_by_variant, key=context_variant_sort_key):
+        if variant == "real":
+            continue
+        baseline_by_train = summary_by_train(summary_rows_by_variant[variant])
+        for train_count in sorted(set(real_by_train) & set(baseline_by_train)):
+            checks = []
+            real_row = real_by_train[train_count]
+            baseline_row = baseline_by_train[train_count]
+            for metric, label in BASELINE_GATE_METRICS:
+                if metric not in real_row or metric not in baseline_row:
+                    continue
+                real_value = metric_median(real_row, metric)
+                baseline_value = metric_median(baseline_row, metric)
+                finite = bool(np.isfinite(real_value) and np.isfinite(baseline_value))
+                checks.append({
+                    "metric": metric,
+                    "label": label,
+                    "real_median": real_value,
+                    "baseline_median": baseline_value,
+                    "delta_baseline_minus_real": (
+                        float(baseline_value - real_value) if finite else float("nan")
+                    ),
+                    "passed": bool(real_value < baseline_value) if finite else None,
+                })
+            checked = [check for check in checks if check["passed"] is not None]
+            rows.append({
+                "context_variant": variant,
+                "train_simulations": int(train_count),
+                "check_count": int(len(checked)),
+                "passed": all(bool(check["passed"]) for check in checked) if checked else None,
+                "checks": checks,
+            })
+    checked_rows = [row for row in rows if row["passed"] is not None]
+    return {
+        "reference_variant": "real",
+        "checked_metrics": [
+            {"metric": metric, "label": label, "direction": "lower_is_better"}
+            for metric, label in BASELINE_GATE_METRICS
+        ],
+        "rows": rows,
+        "all_pass": all(bool(row["passed"]) for row in checked_rows) if checked_rows else None,
+    }
+
+
+def flatten_baseline_gate_rows(gates: dict[str, object]) -> list[dict[str, object]]:
+    output = []
+    for row in gates.get("rows", []):
+        if not isinstance(row, dict):
+            continue
+        for check in row.get("checks", []):
+            if not isinstance(check, dict):
+                continue
+            output.append({
+                "context_variant": row["context_variant"],
+                "train_simulations": row["train_simulations"],
+                "row_passed": row["passed"],
+                **check,
+            })
     return output
 
 
@@ -564,11 +892,28 @@ def plot_scaling(
     ]
     x_all = np.asarray([row["train_simulations"] for row in rows], dtype=np.float64)
     for metric, ylabel, ax, color, log_y in panels:
-        y_all = np.asarray([row[metric] for row in rows], dtype=np.float64)
-        ax.scatter(x_all, y_all, color=color, alpha=0.35, s=22, label="seed")
+        y_all = np.asarray([row.get(metric, float("nan")) for row in rows], dtype=np.float64)
         median = np.asarray([row[metric]["median"] for row in summary_rows], dtype=np.float64)
         q16 = np.asarray([row[metric]["q16"] for row in summary_rows], dtype=np.float64)
         q84 = np.asarray([row[metric]["q84"] for row in summary_rows], dtype=np.float64)
+        plotted_values = np.concatenate([y_all, median, q16, q84])
+        finite = np.isfinite(plotted_values)
+        positive = plotted_values > 0
+        if log_y and not np.any(finite & positive):
+            ax.set_xscale("log")
+            ax.set_xlabel("broad prior-predictive training signals")
+            ax.set_ylabel(ylabel)
+            ax.text(
+                0.5,
+                0.5,
+                "metric unavailable",
+                transform=ax.transAxes,
+                ha="center",
+                va="center",
+            )
+            ax.grid(alpha=0.22)
+            continue
+        ax.scatter(x_all, y_all, color=color, alpha=0.35, s=22, label="seed")
         ax.plot(x_summary, median, color=color, marker="o", linewidth=2.0, label="median")
         ax.fill_between(x_summary, q16, q84, color=color, alpha=0.16, label="q16-q84")
         fit = fits.get(metric)
@@ -676,6 +1021,10 @@ def format_int_list(values: tuple[int, ...] | list[int]) -> str:
     return ",".join(str(int(value)) for value in values)
 
 
+def format_context_variants(values: tuple[str, ...] | list[str]) -> str:
+    return ",".join(str(value) for value in values)
+
+
 def build_parallel_child_command(args: argparse.Namespace, seed: int) -> list[str]:
     command = [
         sys.executable,
@@ -692,6 +1041,8 @@ def build_parallel_child_command(args: argparse.Namespace, seed: int) -> list[st
         str(args.val_simulations),
         "--standardization-simulations",
         str(args.standardization_simulations),
+        "--train-sampler",
+        str(args.train_sampler),
         "--epochs",
         str(args.epochs),
         "--batch-size",
@@ -700,6 +1051,24 @@ def build_parallel_child_command(args: argparse.Namespace, seed: int) -> list[st
         str(args.eval_batch_size),
         "--learning-rate",
         str(args.learning_rate),
+        "--lr-schedule",
+        str(args.lr_schedule),
+        "--lr-eta-min",
+        str(args.lr_eta_min),
+        "--lr-warmup-steps",
+        str(args.lr_warmup_steps),
+        "--validation-every-epochs",
+        str(args.validation_every_epochs),
+        "--max-optimizer-steps",
+        str(args.max_optimizer_steps),
+        "--torch-compile",
+        str(args.torch_compile),
+        "--grad-clip-norm",
+        str(args.grad_clip_norm),
+        "--ema-decay",
+        str(args.ema_decay),
+        "--batching-mode",
+        str(args.batching_mode),
         "--weight-decay",
         str(args.weight_decay),
         "--hidden-dim",
@@ -714,8 +1083,12 @@ def build_parallel_child_command(args: argparse.Namespace, seed: int) -> list[st
         str(args.flow_context_dim),
         "--spline-bins",
         str(args.spline_bins),
+        "--context-features",
+        str(args.context_features),
         "--family",
         str(args.family),
+        "--context-variants",
+        format_context_variants(args.context_variants),
         "--posterior-samples",
         str(args.posterior_samples),
         "--observed-seed",
@@ -728,6 +1101,8 @@ def build_parallel_child_command(args: argparse.Namespace, seed: int) -> list[st
         str(args.device),
         "--jobs",
         "1",
+        "--tail-top-k",
+        str(args.tail_top_k),
         "--no-aggregate",
         "--print-every",
         str(args.print_every),
@@ -745,6 +1120,7 @@ def build_parallel_child_command(args: argparse.Namespace, seed: int) -> list[st
         command.extend(["--panel-posterior-samples", str(args.panel_posterior_samples)])
     if args.validation_cache is not None:
         command.extend(["--validation-cache", str(args.validation_cache)])
+    command.extend(["--early-val-cache-simulations", str(args.early_val_cache_simulations)])
     if args.skip_existing:
         command.append("--skip-existing")
     command.append("--save-models" if args.save_models else "--no-save-models")
@@ -770,6 +1146,20 @@ def run_parallel_by_seed(args: argparse.Namespace) -> None:
     active: dict[int, tuple[subprocess.Popen[bytes], object, Path]] = {}
     failed: list[tuple[int, int, Path]] = []
     print(f"parallel seeds={seeds} max_workers={max_workers}", flush=True)
+
+    def reap_finished_processes() -> None:
+        for seed, (process, log_handle, log_path) in list(active.items()):
+            return_code = process.poll()
+            if return_code is None:
+                continue
+            log_handle.close()
+            del active[seed]
+            if return_code != 0:
+                failed.append((seed, int(return_code), log_path))
+                print(f"failed seed={seed} rc={return_code} log={log_path}", flush=True)
+            else:
+                print(f"finished seed={seed} log={log_path}", flush=True)
+
     try:
         while pending or active:
             while pending and len(active) < max_workers:
@@ -790,17 +1180,7 @@ def run_parallel_by_seed(args: argparse.Namespace) -> None:
                 print(f"started seed={seed} pid={process.pid} log={log_path}", flush=True)
 
             time.sleep(1.0)
-            for seed, (process, log_handle, log_path) in list(active.items()):
-                return_code = process.poll()
-                if return_code is None:
-                    continue
-                log_handle.close()
-                del active[seed]
-                if return_code != 0:
-                    failed.append((seed, int(return_code), log_path))
-                    print(f"failed seed={seed} rc={return_code} log={log_path}", flush=True)
-                else:
-                    print(f"finished seed={seed} log={log_path}", flush=True)
+            reap_finished_processes()
     except KeyboardInterrupt:
         for process, log_handle, _ in active.values():
             process.terminate()
@@ -832,6 +1212,7 @@ def run_one(
     args: argparse.Namespace,
     seed: int,
     train_simulations: int,
+    context_variant: str,
     train_x_pool: np.ndarray,
     train_z_pool: np.ndarray,
     val_x_std: np.ndarray,
@@ -848,7 +1229,7 @@ def run_one(
     device: torch.device,
     output_root: Path,
 ) -> dict[str, object]:
-    run_dir = output_root / "runs" / f"n{train_simulations}_seed{seed}"
+    run_dir = output_root / "runs" / run_dir_name(train_simulations, seed, context_variant)
     results_dir = run_dir / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
     summary_path = results_dir / "broad_scaling_run_summary.json"
@@ -856,14 +1237,27 @@ def run_one(
     if args.skip_existing and summary_path.exists() and samples_path.exists():
         return json.loads(summary_path.read_text(encoding="utf-8"))
 
-    config = make_stage1_config(args, seed=seed, train_simulations=train_simulations)
-    train_x = train_x_pool[:train_simulations]
+    z_log_det = float(np.log(stats["z_std"]).sum())
+    config = replace(
+        make_stage1_config(args, seed=seed, train_simulations=train_simulations),
+        progress_jsonl=results_dir / "training_progress.jsonl",
+        progress_nll_offset=z_log_det,
+    )
+    train_x_raw = train_x_pool[:train_simulations]
     train_z = train_z_pool[:train_simulations]
+    train_x = stage1.transform_context_features(train_x_raw, str(args.context_features))
     train_x_std = stage1.standardize(train_x, stats["x_mean"], stats["x_std"]).astype(np.float32)
     train_z_std = stage1.standardize(train_z, stats["z_mean"], stats["z_std"]).astype(np.float32)
+    train_x_model_std = apply_training_context_variant(
+        train_x_std,
+        context_variant,
+        seed=int(seed + 30_000 + train_simulations),
+    ).astype(np.float32)
+    val_x_model_std = apply_evaluation_context_variant(val_x_std, context_variant).astype(np.float32)
+    nll_val_x_model_std = apply_evaluation_context_variant(nll_val_x_std, context_variant).astype(np.float32)
     generator = torch.Generator(device="cpu").manual_seed(seed + 2 + train_simulations)
     train_loader = DataLoader(
-        TensorDataset(torch.from_numpy(train_x_std), torch.from_numpy(train_z_std)),
+        TensorDataset(torch.from_numpy(train_x_model_std), torch.from_numpy(train_z_std)),
         batch_size=int(args.batch_size),
         shuffle=True,
         generator=generator,
@@ -872,28 +1266,36 @@ def run_one(
         family=str(args.family),
         config=config,
         train_loader=train_loader,
-        val_x=torch.from_numpy(val_x_std),
+        val_x=torch.from_numpy(val_x_model_std),
         val_z=torch.from_numpy(val_z_std),
         device=device,
         x_dim=train_x_std.shape[1],
         z_dim=train_z_std.shape[1],
     )
-    full_val_nll_z_summary = evaluate_val_nll_z_summary(
+    full_val_nll_z_values = evaluate_val_nll_z_values(
         model=model,
-        val_x_std=nll_val_x_std,
+        val_x_std=nll_val_x_model_std,
         val_z_std=nll_val_z_std,
         z_std=stats["z_std"],
         device=device,
         batch_size=int(args.eval_batch_size),
     )
+    full_val_nll_z_summary = summarize_val_nll_z_values(full_val_nll_z_values)
     full_val_nll_z = float(full_val_nll_z_summary["mean"])
-    z_log_det = float(np.log(stats["z_std"]).sum())
     best_val_nll_z = float(metrics["best_val_nll"] + z_log_det)
-    z_samples, theta_samples = stage1.sample_posterior_for_observation(
+    initial_train_batch_nll_z = float(metrics["initial_train_batch_nll"] + z_log_det)
+    initial_val_nll_z = float(metrics["initial_val_nll"] + z_log_det)
+    final_train_nll_z = float(metrics["final_train_nll"] + z_log_det)
+    observed_x_context = stage1.transform_context_features(observed_x[None, :], str(args.context_features))[0]
+    observed_x_std = stage1.standardize(
+        observed_x_context[None, :],
+        stats["x_mean"],
+        stats["x_std"],
+    ).astype(np.float32)
+    observed_x_model_std = apply_evaluation_context_variant(observed_x_std, context_variant)[0]
+    z_samples, theta_samples = sample_posterior_for_standardized_context(
         model=model,
-        observed_x=observed_x,
-        x_mean=stats["x_mean"],
-        x_std=stats["x_std"],
+        x_standardized=observed_x_model_std,
         z_mean=stats["z_mean"],
         z_std=stats["z_std"],
         n=int(args.posterior_samples),
@@ -917,12 +1319,25 @@ def run_one(
             z_std=stats["z_std"],
             n=int(args.panel_posterior_samples or args.posterior_samples),
             device=device,
+            context_variant=context_variant,
+            context_features=str(args.context_features),
         )
+    tail_failures = save_top_validation_failures(
+        results_dir=results_dir,
+        nll_values=full_val_nll_z_values,
+        val_x_std_original=nll_val_x_std,
+        val_z_std=nll_val_z_std,
+        stats=stats,
+        top_k=int(args.tail_top_k),
+        context_variant=context_variant,
+    )
     np.savez_compressed(
         samples_path,
         z_samples=z_samples,
         theta_samples=theta_samples,
         observed_x=observed_x,
+        observed_x_model_std=observed_x_model_std,
+        context_variant=np.asarray(context_variant),
         x_mean=stats["x_mean"],
         x_std=stats["x_std"],
         z_mean=stats["z_mean"],
@@ -934,6 +1349,8 @@ def run_one(
         torch.save(
             {
                 "family": args.family,
+                "context_variant": context_variant,
+                "context_variant_description": context_variant_description(context_variant),
                 "state_dict": model.state_dict(),
                 "x_mean": stats["x_mean"],
                 "x_std": stats["x_std"],
@@ -947,6 +1364,9 @@ def run_one(
     row = {
         "seed": int(seed),
         "family": str(args.family),
+        "context_variant": context_variant,
+        "context_variant_description": context_variant_description(context_variant),
+        "context_features": str(args.context_features),
         "train_simulations": int(train_simulations),
         "val_simulations": int(args.val_simulations),
         "nll_val_simulations": int(nll_val_x_std.shape[0]),
@@ -955,8 +1375,27 @@ def run_one(
         "model_parameters": int(sum(param.numel() for param in model.parameters())),
         "runtime": runtime_metadata(),
         "epochs_completed": int(metrics["epochs_completed"]),
+        "optimizer_steps": int(metrics["optimizer_steps"]),
+        "batches_per_epoch": int(metrics["batches_per_epoch"]),
+        "initial_train_batch_nll_standardized": float(metrics["initial_train_batch_nll"]),
+        "initial_train_batch_nll_z_units": initial_train_batch_nll_z,
+        "initial_val_nll_standardized": float(metrics["initial_val_nll"]),
+        "initial_val_nll_z_units": initial_val_nll_z,
+        "initial_losses_finite": bool(metrics["initial_losses_finite"]),
+        "initial_eval_seconds": float(metrics["initial_eval_seconds"]),
+        "validation_every_epochs": int(metrics["validation_every_epochs"]),
+        "validation_evaluations": int(metrics["validation_evaluations"]),
+        "max_optimizer_steps": int(metrics["max_optimizer_steps"]),
+        "torch_compile": str(metrics["torch_compile"]),
+        "grad_clip_norm": float(metrics["grad_clip_norm"]),
+        "ema_decay": float(metrics["ema_decay"]),
+        "batching_mode": str(metrics["batching_mode"]),
+        "progress_jsonl": metrics["progress_jsonl"],
+        "lr_warmup_steps": int(metrics["lr_warmup_steps"]),
         "best_val_nll_standardized": float(metrics["best_val_nll"]),
         "best_val_nll_z_units": best_val_nll_z,
+        "final_train_nll_standardized": float(metrics["final_train_nll"]),
+        "final_train_nll_z_units": final_train_nll_z,
         "final_val_nll_standardized": float(metrics["final_val_nll"]),
         "full_val_nll_z_units": float(full_val_nll_z),
         "full_val_nll_z_summary": full_val_nll_z_summary,
@@ -967,6 +1406,7 @@ def run_one(
         "summary_json": str(summary_path),
         "samples_npz": str(samples_path),
         "model_pt": str(model_path) if model_path is not None else None,
+        "validation_top_failures": tail_failures,
         "wasserstein_metrics": w_metrics,
         "history": metrics["history"],
         "config": asdict(config),
@@ -997,17 +1437,40 @@ def aggregate_and_write(
     target_wasserstein = (
         float(reference["metadata"]["recommended_target"]) if reference is not None else float("nan")
     )
-    summary_rows = summarize_rows(rows)
-    fits = fit_summary(summary_rows)
+    variants = sorted({row_context_variant(row) for row in rows}, key=context_variant_sort_key)
+    rows_by_variant = {
+        variant: [row for row in rows if row_context_variant(row) == variant]
+        for variant in variants
+    }
+    summary_rows_by_variant = {
+        variant: summarize_rows(variant_rows, context_variant=variant)
+        for variant, variant_rows in rows_by_variant.items()
+    }
+    primary_variant = "real" if "real" in summary_rows_by_variant else variants[0]
+    summary_rows = summary_rows_by_variant[primary_variant]
+    fits_by_variant = {
+        variant: fit_summary(variant_summary_rows)
+        for variant, variant_summary_rows in summary_rows_by_variant.items()
+        if variant_summary_rows
+    }
+    fits = fits_by_variant[primary_variant]
+    baseline_gates = build_baseline_gate_summary(summary_rows_by_variant)
     rows_csv = results_dir / "broad_scaling_rows.csv"
     summary_csv = results_dir / "broad_scaling_summary.csv"
+    baseline_gates_csv = results_dir / "broad_scaling_baseline_gates.csv"
     summary_json = results_dir / "broad_scaling_summary.json"
     figure_path = figures_dir / "broad_scaling_law.png"
     log_excess_path = figures_dir / "broad_scaling_log_excess.png"
     write_csv([flatten_summary(row) for row in rows], rows_csv)
-    write_csv([flatten_summary(row) for row in summary_rows], summary_csv)
+    all_summary_rows = [
+        row
+        for variant in variants
+        for row in summary_rows_by_variant[variant]
+    ]
+    write_csv([flatten_summary(row) for row in all_summary_rows], summary_csv)
+    write_csv(flatten_baseline_gate_rows(baseline_gates), baseline_gates_csv)
     plot_scaling(
-        rows=rows,
+        rows=rows_by_variant[primary_variant],
         summary_rows=summary_rows,
         fits=fits,
         target_wasserstein=target_wasserstein,
@@ -1032,10 +1495,15 @@ def aggregate_and_write(
         ),
         "rows": rows,
         "summary_rows": summary_rows,
+        "summary_rows_by_context_variant": summary_rows_by_variant,
+        "primary_context_variant": primary_variant,
         "power_law_fits": fits,
+        "power_law_fits_by_context_variant": fits_by_variant,
+        "baseline_gates": baseline_gates,
         "outputs": {
             "rows_csv": str(rows_csv),
             "summary_csv": str(summary_csv),
+            "baseline_gates_csv": str(baseline_gates_csv),
             "summary_json": str(summary_json),
             "figure": str(figure_path),
             "log_excess_figure": str(log_excess_path),
@@ -1053,6 +1521,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seeds", type=parse_int_list, default=None)
     parser.add_argument("--val-simulations", type=int, default=None)
     parser.add_argument("--standardization-simulations", type=int, default=None)
+    parser.add_argument(
+        "--train-sampler",
+        choices=stage1.TRAIN_SAMPLERS,
+        default="random",
+        help="Sampler for training simulations. Validation and standardization stay random.",
+    )
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument(
@@ -1062,6 +1536,63 @@ def parse_args() -> argparse.Namespace:
         help="Batch size for final validation-NLL evaluation. Defaults to --batch-size.",
     )
     parser.add_argument("--learning-rate", type=float, default=None)
+    parser.add_argument(
+        "--lr-schedule",
+        choices=("constant", "cosine_epoch", "cosine_step"),
+        default="constant",
+        help="Learning-rate schedule for broad-stage training.",
+    )
+    parser.add_argument(
+        "--lr-eta-min",
+        type=float,
+        default=0.0,
+        help="Minimum learning rate for cosine schedules. Default 0.0 preserves prior behavior.",
+    )
+    parser.add_argument(
+        "--lr-warmup-steps",
+        type=int,
+        default=0,
+        help="Optimizer steps for linear LR warmup before cosine_step decay.",
+    )
+    parser.add_argument(
+        "--validation-every-epochs",
+        type=int,
+        default=1,
+        help="Evaluate early-stop validation every N epochs, plus epoch 1 and final epoch.",
+    )
+    parser.add_argument(
+        "--max-optimizer-steps",
+        type=int,
+        default=0,
+        help="Stop training after this many optimizer steps. Use 0 to train full epochs.",
+    )
+    parser.add_argument(
+        "--torch-compile",
+        choices=("none", "default", "reduce_overhead"),
+        default="none",
+        help="Optional torch.compile mode for the NPE model.",
+    )
+    parser.add_argument(
+        "--grad-clip-norm",
+        type=float,
+        default=20.0,
+        help="Gradient clipping norm. Use 0 to disable clipping.",
+    )
+    parser.add_argument(
+        "--ema-decay",
+        type=float,
+        default=0.0,
+        help="Optional weight EMA decay in [0, 1). Use 0 to disable EMA.",
+    )
+    parser.add_argument(
+        "--batching-mode",
+        choices=("dataloader", "pre_shuffle", "sequential"),
+        default="dataloader",
+        help=(
+            "Batch source for training. pre_shuffle uses contiguous tensor slices after "
+            "per-epoch shuffling; sequential slices the existing random simulation order."
+        ),
+    )
     parser.add_argument("--weight-decay", type=float, default=None)
     parser.add_argument("--hidden-dim", type=int, default=None)
     parser.add_argument("--hidden-layers", type=int, default=None)
@@ -1070,9 +1601,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--flow-context-dim", type=int, default=64)
     parser.add_argument("--spline-bins", type=int, default=12)
     parser.add_argument(
+        "--context-features",
+        choices=stage1.CONTEXT_FEATURE_MODES,
+        default="raw",
+        help="Context representation used by the NPE.",
+    )
+    parser.add_argument(
         "--family",
         choices=("mdn", "affine_flow", "spline_flow", "full_gaussian", "diag_gaussian"),
         default="mdn",
+    )
+    parser.add_argument(
+        "--context-variants",
+        type=parse_context_variants,
+        default=("real",),
+        help=(
+            "Comma-separated context variants to run. "
+            "real keeps paired contexts, zero_x uses an input-independent baseline, "
+            "and shuffled_x breaks training context-target pairing."
+        ),
     )
     parser.add_argument("--posterior-samples", type=int, default=None)
     parser.add_argument("--observed-seed", type=int, default=20260622)
@@ -1118,6 +1665,21 @@ def parse_args() -> argparse.Namespace:
             "Optional cached broad prior-predictive validation npz with x_val and z_val arrays. "
             "Used for the final reported NLL only; early stopping still uses --val-simulations."
         ),
+    )
+    parser.add_argument(
+        "--early-val-cache-simulations",
+        type=int,
+        default=0,
+        help=(
+            "Use the first N validation-cache examples for checkpoint selection. "
+            "Use 0 to keep the generated --val-simulations set."
+        ),
+    )
+    parser.add_argument(
+        "--tail-top-k",
+        type=int,
+        default=20,
+        help="Save the top-k final-validation NLL failures for each run. Use 0 to disable.",
     )
     parser.add_argument("--skip-existing", action="store_true")
     parser.add_argument(
@@ -1186,6 +1748,7 @@ def main() -> None:
             n=int(args.val_simulations),
             seed=int(args.validation_seed),
         )
+        val_x_context = stage1.transform_context_features(val_x, str(args.context_features))
         early_stop_validation_metadata = {
             "path": None,
             "simulations": int(args.val_simulations),
@@ -1193,15 +1756,28 @@ def main() -> None:
             "generated_in_sweep": True,
             "use": "early_stopping",
         }
-        val_x_std = stage1.standardize(val_x, stats["x_mean"], stats["x_std"]).astype(np.float32)
+        val_x_std = stage1.standardize(val_x_context, stats["x_mean"], stats["x_std"]).astype(np.float32)
         val_z_std = stage1.standardize(val_z, stats["z_mean"], stats["z_std"]).astype(np.float32)
 
         if args.validation_cache is not None:
             nll_val_x, nll_val_z, nll_validation_metadata = load_validation_cache(args.validation_cache)
             nll_validation_metadata["use"] = "final_reported_nll"
-            nll_val_x_std = stage1.standardize(nll_val_x, stats["x_mean"], stats["x_std"]).astype(np.float32)
+            nll_val_x_context = stage1.transform_context_features(nll_val_x, str(args.context_features))
+            nll_val_x_std = stage1.standardize(nll_val_x_context, stats["x_mean"], stats["x_std"]).astype(np.float32)
             nll_val_z_std = stage1.standardize(nll_val_z, stats["z_mean"], stats["z_std"]).astype(np.float32)
-            del nll_val_x, nll_val_z
+            del nll_val_x, nll_val_x_context, nll_val_z
+            if int(args.early_val_cache_simulations) > 0:
+                early_count = min(int(args.early_val_cache_simulations), int(nll_val_x_std.shape[0]))
+                val_x_std = nll_val_x_std[:early_count]
+                val_z_std = nll_val_z_std[:early_count]
+                early_stop_validation_metadata = {
+                    "path": str(args.validation_cache),
+                    "simulations": int(early_count),
+                    "source_simulations": int(nll_val_x_std.shape[0]),
+                    "seed": None,
+                    "generated_in_sweep": False,
+                    "use": "early_stopping",
+                }
         else:
             nll_val_x_std = val_x_std
             nll_val_z_std = val_z_std
@@ -1216,56 +1792,62 @@ def main() -> None:
         observed_x = y_obs.detach().cpu().numpy()
         device = stage1.choose_training_device(str(args.device))
         max_train = max(int(value) for value in args.train_simulations)
-        total_runs = len(args.seeds) * len(args.train_simulations)
+        total_runs = len(args.seeds) * len(args.train_simulations) * len(args.context_variants)
         completed = 0
         for seed in args.seeds:
-            train_x_pool, train_z_pool, _ = stage1.sample_decay_pairs(n=max_train, seed=int(seed))
+            train_x_pool, train_z_pool, _ = stage1.sample_decay_pairs(
+                n=max_train,
+                seed=int(seed),
+                sampler=str(args.train_sampler),
+            )
             for train_simulations in args.train_simulations:
-                completed += 1
-                print(
-                    f"[{completed}/{total_runs}] training {args.family} "
-                    f"seed={seed} train={train_simulations}",
-                    flush=True,
-                )
-                row = run_one(
-                    args=args,
-                    seed=int(seed),
-                    train_simulations=int(train_simulations),
-                    train_x_pool=train_x_pool,
-                    train_z_pool=train_z_pool,
-                    val_x_std=val_x_std,
-                    val_z_std=val_z_std,
-                    nll_val_x_std=nll_val_x_std,
-                    nll_val_z_std=nll_val_z_std,
-                    nll_validation_metadata=nll_validation_metadata,
-                    observed_x=observed_x,
-                    stats=stats,
-                    reference=reference,
-                    reference_cache=reference_cache,
-                    panel_reference=panel_reference,
-                    target_wasserstein=target_wasserstein,
-                    device=device,
-                    output_root=output_root,
-                )
-                rows.append(row)
-                if "panel_marginal_wasserstein_mean" in row:
-                    w_log_label = "panelW"
-                    w_log_value = float(row["panel_marginal_wasserstein_mean"])
-                    ratio_log_label = "panelRatio"
-                    ratio_log_value = float(row["panel_marginal_target_ratio_mean"])
-                else:
-                    w_log_label = "x0W"
-                    w_log_value = float(row["x0_grid300_wasserstein"])
-                    ratio_log_label = "x0Ratio"
-                    ratio_log_value = float(row["x0_grid300_target_ratio"])
-                print(
-                    "  "
-                    f"{w_log_label}={w_log_value:.5f} "
-                    f"{ratio_log_label}={ratio_log_value:.2f} "
-                    f"NLLz={row['full_val_nll_z_units']:.4f} "
-                    f"seconds={row['training_seconds']:.1f}",
-                    flush=True,
-                )
+                for context_variant in args.context_variants:
+                    completed += 1
+                    print(
+                        f"[{completed}/{total_runs}] training {args.family} "
+                        f"variant={context_variant} seed={seed} train={train_simulations}",
+                        flush=True,
+                    )
+                    row = run_one(
+                        args=args,
+                        seed=int(seed),
+                        train_simulations=int(train_simulations),
+                        context_variant=str(context_variant),
+                        train_x_pool=train_x_pool,
+                        train_z_pool=train_z_pool,
+                        val_x_std=val_x_std,
+                        val_z_std=val_z_std,
+                        nll_val_x_std=nll_val_x_std,
+                        nll_val_z_std=nll_val_z_std,
+                        nll_validation_metadata=nll_validation_metadata,
+                        observed_x=observed_x,
+                        stats=stats,
+                        reference=reference,
+                        reference_cache=reference_cache,
+                        panel_reference=panel_reference,
+                        target_wasserstein=target_wasserstein,
+                        device=device,
+                        output_root=output_root,
+                    )
+                    rows.append(row)
+                    if "panel_marginal_wasserstein_mean" in row:
+                        w_log_label = "panelW"
+                        w_log_value = float(row["panel_marginal_wasserstein_mean"])
+                        ratio_log_label = "panelRatio"
+                        ratio_log_value = float(row["panel_marginal_target_ratio_mean"])
+                    else:
+                        w_log_label = "x0W"
+                        w_log_value = float(row["x0_grid300_wasserstein"])
+                        ratio_log_label = "x0Ratio"
+                        ratio_log_value = float(row["x0_grid300_target_ratio"])
+                    print(
+                        "  "
+                        f"{w_log_label}={w_log_value:.5f} "
+                        f"{ratio_log_label}={ratio_log_value:.2f} "
+                        f"NLLz={row['full_val_nll_z_units']:.4f} "
+                        f"seconds={row['training_seconds']:.1f}",
+                        flush=True,
+                    )
         metadata = {
             "total_seconds_before_aggregation": time.perf_counter() - start,
             "runtime": runtime_metadata(),
@@ -1283,6 +1865,19 @@ def main() -> None:
             ),
             "torch_threads": torch.get_num_threads(),
             "eval_batch_size": int(args.eval_batch_size),
+            "context_variants": list(args.context_variants),
+            "context_features": str(args.context_features),
+            "tail_top_k": int(args.tail_top_k),
+            "early_val_cache_simulations": int(args.early_val_cache_simulations),
+            "train_sampler": str(args.train_sampler),
+            "lr_eta_min": float(args.lr_eta_min),
+            "lr_warmup_steps": int(args.lr_warmup_steps),
+            "validation_every_epochs": int(args.validation_every_epochs),
+            "max_optimizer_steps": int(args.max_optimizer_steps),
+            "torch_compile": str(args.torch_compile),
+            "grad_clip_norm": float(args.grad_clip_norm),
+            "ema_decay": float(args.ema_decay),
+            "batching_mode": str(args.batching_mode),
             "standardization": {key: value for key, value in stats.items()},
         }
         metadata_name = (
