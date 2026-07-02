@@ -16,9 +16,6 @@ Monte Carlo SE        =  0.0025331503100
 Reported uncertainty  = +/-0.0026
 ```
 
-The previous working value, `-3.64122 +/- 0.008`, was consistent but materially
-less precise.
-
 ## Method
 
 For validation pairs `(z_i, x_i)` sampled from `p(z)p(x|z)`, the target is:
