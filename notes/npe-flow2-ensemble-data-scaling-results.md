@@ -13,8 +13,8 @@ most defensible headline is the raw validation NLL trend, not a precisely
 floor-subtracted exponent.
 
 A raw-NLL asymptote fit gives exponent `0.82`, but the fitted asymptote is only
-`0.00512` above the current Bayes entropy estimate. That gap is smaller than
-the entropy-floor uncertainty (`+/-0.008`), so it should not be interpreted as a
+`0.00255` above the current Bayes entropy estimate. That gap is comparable to
+the entropy-floor uncertainty (`+/-0.0026`), so it should not be interpreted as a
 resolved residual training floor.
 
 The Wasserstein panel also improves monotonically, but it is a posterior
@@ -51,17 +51,18 @@ The x-axis is per-member training simulations `D`; total simulator calls are
 ## Results
 
 The validation loss is exact equal-weight log-mean-exp ensemble NLL on the
-fixed 1M validation cache. The entropy-floor estimate is `-3.64122` in `z`
-units.
+fixed 1M validation cache. The entropy-floor estimate is
+`-3.63865 +/- 0.0026` in `z` units after the high-precision adaptive
+Gauss-Hermite rerun.
 
 | D per member | Total simulator calls | Ensemble NLL | NLL excess | Panel mean W |
 | ---: | ---: | ---: | ---: | ---: |
-| 64,000 | 256,000 | -3.54993 | 0.09129 | 0.11046 |
-| 128,000 | 512,000 | -3.58579 | 0.05543 | 0.08862 |
-| 256,000 | 1,024,000 | -3.60923 | 0.03199 | 0.06506 |
-| 512,000 | 2,048,000 | -3.62163 | 0.01959 | 0.05188 |
-| 1,024,000 | 4,096,000 | -3.62676 | 0.01446 | 0.04179 |
-| 2,048,000 | 8,192,000 | -3.63069 | 0.01053 | 0.03613 |
+| 64,000 | 256,000 | -3.54993 | 0.08872 | 0.11046 |
+| 128,000 | 512,000 | -3.58579 | 0.05286 | 0.08862 |
+| 256,000 | 1,024,000 | -3.60923 | 0.02942 | 0.06506 |
+| 512,000 | 2,048,000 | -3.62163 | 0.01703 | 0.05188 |
+| 1,024,000 | 4,096,000 | -3.62676 | 0.01190 | 0.04179 |
+| 2,048,000 | 8,192,000 | -3.63069 | 0.00796 | 0.03613 |
 
 Power-law fits:
 
@@ -70,10 +71,10 @@ Raw-NLL asymptote = -3.63610
 Raw-NLL alpha     = 0.823
 Raw-NLL R2        = 0.999
 
-Fixed-entropy excess alpha = 0.631
-Fixed-entropy log R2       = 0.986
-Excess-alpha sensitivity   = 0.490 to 0.997
-                              for entropy_floor +/- 0.008
+Fixed-entropy excess alpha = 0.704
+Fixed-entropy log R2       = 0.992
+Excess-alpha sensitivity   = 0.631 to 0.806
+                              for entropy_floor +/- 0.0026
 
 Panel W floor     = 0.01457
 Panel W alpha     = 0.449

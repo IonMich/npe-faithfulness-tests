@@ -17,7 +17,7 @@ DEFAULT_OUTPUT = (
     ROOT
     / "runs/00_shared_assets/readme_scaling/decay_population_npe_training_efficiency_curves.png"
 )
-POPULATION_ENTROPY_NLL = -3.64122
+POPULATION_ENTROPY_NLL = -3.6386545787958
 
 
 RUNS = [

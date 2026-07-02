@@ -37,8 +37,8 @@ DEFAULT_PANEL_CACHE = (
     / "runs/01_exponential_decay/15_broad_scaling/panel_marginal_cache/"
     "decay_panel64_grid180_refined_marginals.npz"
 )
-POPULATION_ENTROPY_NLL = -3.64122
-POPULATION_ENTROPY_NLL_UNCERTAINTY = 0.008
+POPULATION_ENTROPY_NLL = -3.6386545787958
+POPULATION_ENTROPY_NLL_UNCERTAINTY = 0.0026
 
 
 def parse_int_list(value: str) -> tuple[int, ...]:
@@ -515,7 +515,7 @@ def plot_scaling(summary: dict[str, object], rows: list[dict[str, object]], outp
     fig, axes = plt.subplots(1, 2, figsize=(12.4, 5.4), constrained_layout=True)
 
     ax = axes[0]
-    ax.plot(x, nll, color="#0f766e", marker="o", linewidth=2.3, label="ensemble validation NLL")
+    ax.plot(x, nll, color="#0f766e", marker="o", linewidth=2.3, label=r"measured $L(D)$")
     fit = fits.get("full_val_nll_z_units") if isinstance(fits, dict) else None
     if isinstance(fit, dict):
         x_dense = np.geomspace(float(np.min(x)), float(np.max(x)), 200)
@@ -530,21 +530,21 @@ def plot_scaling(summary: dict[str, object], rows: list[dict[str, object]], outp
             color="#172033",
             linestyle="--",
             linewidth=1.3,
-            label=f"asymptote fit alpha={float(fit['alpha']):.2f}",
+            label=rf"fit $L_{{free}}+A D^{{-\alpha}}$; $\alpha={float(fit['alpha']):.2f}$",
         )
         ax.axhline(
             float(fit["asymptote"]),
             color="#d97706",
             linestyle=":",
             linewidth=1.3,
-            label="fitted asymptote",
+            label=rf"free fitted $L_{{free}}={float(fit['asymptote']):.5f}$",
         )
     ax.axhspan(
         entropy_floor - entropy_uncertainty,
         entropy_floor + entropy_uncertainty,
         color="#b42318",
         alpha=0.12,
-        label="Bayes entropy estimate",
+        label=r"independent $\hat H \pm s_H$",
     )
     ax.set_xscale("log")
     y_min = min(float(np.nanmin(nll)), entropy_floor - entropy_uncertainty)
@@ -552,22 +552,30 @@ def plot_scaling(summary: dict[str, object], rows: list[dict[str, object]], outp
     margin = max(0.015, 0.15 * (y_max - y_min))
     ax.set_ylim(y_min - margin, y_max + margin)
     ax.set_xlabel("training simulations per ensemble member D")
-    ax.set_ylabel("validation NLL (z units)")
-    ax.set_title("Raw validation loss")
+    ax.set_ylabel(r"$L(D)$: validation NLL (z units)")
+    ax.set_title("Raw loss with free asymptote")
     ax.text(
         0.02,
         0.04,
-        f"Bayes entropy estimate: {entropy_floor:.5f} +/- {entropy_uncertainty:.3f}",
+        rf"Left fit: $L(D)=L_{{free}}+A D^{{-\alpha}}$"
+        "\n"
+        rf"Independent floor: $\hat H={entropy_floor:.5f}\pm {entropy_uncertainty:.3f}$",
         transform=ax.transAxes,
         fontsize=8,
         color="#7f1d1d",
     )
-    add_region_labels(ax, x)
     ax.legend(frameon=False, fontsize=8)
     ax.grid(which="both", alpha=0.24)
 
     ax = axes[1]
-    ax.plot(x, nll_excess, color="#0f766e", marker="o", linewidth=2.3, label="excess over estimate")
+    ax.plot(
+        x,
+        nll_excess,
+        color="#0f766e",
+        marker="o",
+        linewidth=2.3,
+        label=r"$\Delta_{\hat H}(D)=L(D)-\hat H$",
+    )
     fit = fits.get("nll_excess_fixed_entropy_no_floor") if isinstance(fits, dict) else None
     if isinstance(fit, dict):
         x_dense = np.geomspace(float(np.min(x)), float(np.max(x)), 200)
@@ -577,7 +585,7 @@ def plot_scaling(summary: dict[str, object], rows: list[dict[str, object]], outp
             color="#172033",
             linestyle="--",
             linewidth=1.3,
-            label=f"fixed-floor guide alpha={float(fit['alpha']):.2f}",
+            label=rf"fit $B D^{{-\beta}}$; $\beta={float(fit['alpha']):.2f}$",
         )
     lower_excess = nll - (entropy_floor + entropy_uncertainty)
     upper_excess = nll - (entropy_floor - entropy_uncertainty)
@@ -588,7 +596,7 @@ def plot_scaling(summary: dict[str, object], rows: list[dict[str, object]], outp
             upper_excess,
             color="#b42318",
             alpha=0.10,
-            label="entropy-floor uncertainty",
+            label=r"$\hat H$ uncertainty propagated",
         )
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -601,17 +609,18 @@ def plot_scaling(summary: dict[str, object], rows: list[dict[str, object]], outp
         float(np.nanmax(upper_excess)) * 1.75,
     )
     ax.set_xlabel("training simulations per ensemble member D")
-    ax.set_ylabel("validation NLL minus entropy estimate")
-    ax.set_title("Excess-loss diagnostic")
+    ax.set_ylabel(r"$\Delta_{\hat H}(D)$: validation NLL minus $\hat H$")
+    ax.set_title("Fixed-floor excess loss")
     ax.text(
         0.02,
         0.04,
-        "The subtraction is floor-sensitive near the right edge.",
+        rf"Right fit: $\Delta_{{\hat H}}(D)=B D^{{-\beta}}$"
+        "\n"
+        r"Band: $L(D)-(\hat H\pm s_H)$",
         transform=ax.transAxes,
         fontsize=8,
         color="#7f1d1d",
     )
-    add_region_labels(ax, x)
     ax.legend(frameon=False, fontsize=8)
     ax.grid(which="both", alpha=0.24)
     fig.suptitle("Single-decay Flow2 residual NSF ensemble data scaling", y=1.03)
@@ -654,7 +663,6 @@ def plot_panel_diagnostic(summary: dict[str, object], rows: list[dict[str, objec
     ax.set_xlabel("training simulations per ensemble member D")
     ax.set_ylabel("panel mean normalized marginal Wasserstein")
     ax.set_title("Posterior faithfulness diagnostic")
-    add_region_labels(ax, x)
     ax.legend(frameon=False, fontsize=8)
     ax.grid(which="both", alpha=0.24)
     output_path.parent.mkdir(parents=True, exist_ok=True)

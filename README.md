@@ -402,23 +402,44 @@ Flow2 residual NSF ensemble recipe fixed and scales only the number of
 simulated training pairs per member. The primary measurement is population
 validation NLL. Because this is a continuous-density NLL in normalized `z` units
 and can be negative, the log-scale companion panel plots excess NLL above the
-estimated Bayes entropy floor `-3.64122 +/- 0.008`. Posterior Wasserstein is
+estimated Bayes entropy floor `-3.63865 +/- 0.0026`. Posterior Wasserstein is
 kept as a separate faithfulness diagnostic, not as the main scaling-law loss.
 
 ![Single decay Flow2 ensemble data scaling](runs/00_shared_assets/readme_scaling/decay_flow2_ensemble_data_scaling_weng_style.png)
 
+The left panel plots raw validation loss $`L(D)`$ and fits a free-asymptote
+scaling curve:
+
+```math
+L(D) = L_{\mathrm{free}} + A D^{-\alpha}.
+```
+
+The shaded Bayes entropy band in that panel is independent of the fit; it is
+the numerical estimate $`\hat H \pm s_H`$, not a fitted constraint. The right
+panel fixes the numerical entropy estimate first and plots the positive
+excess-loss diagnostic:
+
+```math
+\Delta_{\hat H}(D) = L(D) - \hat H,
+\qquad
+\Delta_{\hat H}(D) \approx B D^{-\beta}.
+```
+
+The right-panel uncertainty band propagates the entropy-floor uncertainty as
+$`L(D)-(\hat H \pm s_H)`$.
+
 The equal-weight 4-member ensemble improves monotonically from `64k` to
 `2.048M` simulations per member. Validation NLL improves from `-3.54993` to
-`-3.63069`, reducing excess NLL above the entropy floor from `0.09129` to
-`0.01053`. A raw-NLL asymptote fit gives `L_asym=-3.63610`, exponent `0.823`,
-and raw `R2=0.999`. That fitted asymptote is only `0.00512` above the Bayes
-entropy estimate, which is smaller than the current `+/-0.008` floor
-uncertainty; it should not be read as a resolved residual training floor.
+`-3.63069`, reducing excess NLL above the entropy floor from `0.08872` to
+`0.00796`. A raw-NLL asymptote fit gives `L_asym=-3.63610`, exponent `0.823`,
+and raw `R2=0.999`. That fitted asymptote is only `0.00255` above the Bayes
+entropy estimate, comparable to the current `+/-0.0026` floor uncertainty; it
+should not be read as a resolved residual training floor.
 
 With the entropy estimate held fixed, a no-residual-floor fit to excess NLL
-gives exponent `0.631`, but this exponent is floor-sensitive near the right
-edge. Shifting the entropy estimate by its current uncertainty moves the
-excess-loss exponent from about `0.490` to `0.997`.
+gives exponent `0.704`, but this exponent is still floor-sensitive near the
+right edge. Shifting the entropy estimate by its current uncertainty moves the
+excess-loss exponent from about `0.631` to `0.806`.
 
 The fixed-panel posterior diagnostic moves in the same direction: panel mean
 normalized marginal Wasserstein decreases from `0.11046` to `0.03613`. Full
@@ -442,16 +463,16 @@ entropy:
 H(\theta\mid X).
 ```
 
-The adaptive oracle estimate recorded in
-[npe-next-2x-efficiency-decision-diary.md](notes/npe-next-2x-efficiency-decision-diary.md)
-is approximately `-3.64122 +/- 0.008` in $`z`$ units. That is the estimated
+The adaptive posterior-centered Gauss-Hermite oracle estimate recorded in
+[npe-decay-bayes-entropy-high-precision.md](notes/npe-decay-bayes-entropy-high-precision.md)
+is approximately `-3.63865 +/- 0.0026` in $`z`$ units. That is the estimated
 population-NLL floor for validation on $`p(\theta)p(x\mid\theta)`$.
 
 The reported model NLLs are measured on a finite 1M-example validation cache.
 Per-example NLL standard-error estimates are about `0.00252`, or roughly
 `+/-0.00495` for a 95% Monte Carlo half-width, for both NPEs listed above. The
-oracle floor also has finite numerical uncertainty, reported above as
-`+/-0.008`. The 4-member ensemble and convex-weighted density ensemble are
+oracle floor now has comparable finite-cache uncertainty, reported above as
+`+/-0.0026`. The 4-member ensemble and convex-weighted density ensemble are
 therefore close enough that the density ensemble's `0.00059` measured NLL
 advantage should not be interpreted as a resolved population-level ordering
 without a larger validation estimate. The validation-cache uncertainty

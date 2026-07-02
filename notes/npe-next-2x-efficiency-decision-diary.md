@@ -519,7 +519,7 @@ assembly / proof wall time < 300s
 Oracle context:
 
 ```text
-latest adaptive oracle estimate ~= -3.64122 +/- 0.008
+latest adaptive oracle estimate ~= -3.63865 +/- 0.0026
 practical excellent target      = -3.63
 ```
 

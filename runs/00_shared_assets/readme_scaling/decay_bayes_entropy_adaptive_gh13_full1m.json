@@ -1,0 +1,33 @@
+{
+  "completed_examples": 1000000,
+  "elapsed_seconds_this_run": 1112.067176957964,
+  "gh_order": 13,
+  "gh_points": 2197,
+  "hessian_eps": 0.0001,
+  "name": "adaptive_gh13_full1m",
+  "nll": {
+    "max": 13.734371905226524,
+    "mean": -3.6386545787958,
+    "median": -3.6663351104490562,
+    "min": -16.432346014586997,
+    "n": 1000000,
+    "q01": -9.399789834039712,
+    "q05": -7.749824819265962,
+    "q95": 0.49285888639971515,
+    "q99": 2.4518365518767657,
+    "std": 2.5331503100295336,
+    "std_error": 0.002533150310029534
+  },
+  "optimizer_failure_count": 58065,
+  "optimizer_success_count": 941935,
+  "output_json": "runs/01_exponential_decay/15_broad_scaling/202_bayes_entropy_high_precision/adaptive_gh13_full1m.json",
+  "output_npz": "runs/01_exponential_decay/15_broad_scaling/202_bayes_entropy_high_precision/adaptive_gh13_full1m.npz",
+  "pending_examples": 0,
+  "proposal_scale": 1.0,
+  "requested_examples": 1000000,
+  "seconds_since_last_flush": 25.48386091599241,
+  "start_index": 0,
+  "stop_index": 1000000,
+  "used_true_z_as_optimizer_initialization": true,
+  "validation_cache": "runs/01_exponential_decay/15_broad_scaling/validation_cache/broad_prior_val_1m_float32.npz"
+}
