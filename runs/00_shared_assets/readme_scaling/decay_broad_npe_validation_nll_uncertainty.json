@@ -1,0 +1,25 @@
+{
+  "runs": [
+    {
+      "approx_95pct_mc_half_width_z_units": 0.004946312446256988,
+      "evaluation_seconds": 8.286300417035818,
+      "mean_nll_z_units": -3.630690099321723,
+      "name": "fresh_4x_flow2_randperm_residual_nsf",
+      "standard_error_z_units": 0.0025236287991107086,
+      "std_nll_z_units": 2.5236287991107087,
+      "summary": "runs/01_exponential_decay/15_broad_scaling/199_nll63_randperm_e15_cosstep_ensemble4_saved/results/ensemble4_proof_summary.json",
+      "validation_examples": 1000000
+    },
+    {
+      "approx_95pct_mc_half_width_z_units": 0.004938285470367212,
+      "evaluation_seconds": 33.587117542047054,
+      "mean_nll_z_units": -3.6312809245829283,
+      "name": "convex_weighted_saved_checkpoint_pool",
+      "standard_error_z_units": 0.0025195334032485773,
+      "std_nll_z_units": 2.519533403248577,
+      "summary": "runs/01_exponential_decay/15_broad_scaling/187_nll63_weighted_broad_pool/results/weighted_ensemble_summary.json",
+      "validation_examples": 1000000
+    }
+  ],
+  "validation_cache": "runs/01_exponential_decay/15_broad_scaling/validation_cache/broad_prior_val_1m_float32.npz"
+}

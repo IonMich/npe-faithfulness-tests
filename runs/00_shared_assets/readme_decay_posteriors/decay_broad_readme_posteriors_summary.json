@@ -1,0 +1,110 @@
+{
+  "broad_low_prior_stress": {
+    "corner_path": "runs/00_shared_assets/readme_decay_posteriors/decay_broad_low_prior_stress_posterior_corner.png",
+    "grid": {
+      "grid_points": 216000,
+      "grid_size": 60,
+      "max_edge_mass": 4.315399813267828e-10
+    },
+    "mcmc": {
+      "acceptance_rate": 0.527984375,
+      "convergence_ok": true,
+      "max_rhat": 1.0078454969034965,
+      "mean_normalized_wasserstein": 0.08836239054179197,
+      "min_bulk_ess": 896.046453550259,
+      "min_tail_ess": 1447.9636078600176
+    },
+    "mode": "low_prior_very_low",
+    "mode_metadata": {
+      "log_prior_density_delta_vs_mean": -9.375000000000002,
+      "mode": "low_prior_very_low",
+      "noise_seed": 2026070201,
+      "prior_mahalanobis": 4.330127018922194,
+      "standardized_log_prior_offset": [
+        2.5,
+        -2.5,
+        2.5
+      ],
+      "tail_label": "very_low",
+      "theta": [
+        29.556225389155525,
+        0.06766763947277005,
+        2.9556226205770635
+      ]
+    },
+    "npe_mean_normalized_wasserstein": {
+      "broad_fresh_e15_ensemble4": 0.21945514541420455,
+      "broad_weighted_checkpoint_pool": 0.2864373538683087
+    },
+    "posterior_samples": 7000,
+    "selected_models": [
+      {
+        "ensemble_size": 4,
+        "full_val_nll_z_units": -3.6306901328125,
+        "id": "broad_fresh_e15_ensemble4",
+        "label": "4x flow2 randperm residual NSF, raw-decay-fit, 2.048M x e15",
+        "training_seconds": 246.0
+      },
+      {
+        "ensemble_size": 16,
+        "full_val_nll_z_units": -3.63128073481036,
+        "id": "broad_weighted_checkpoint_pool",
+        "label": "16x convex-weighted saved NPE pool, mixed broad NSF checkpoints",
+        "training_seconds": 73.63113179197535
+      }
+    ],
+    "signal_path": "runs/00_shared_assets/readme_decay_posteriors/decay_broad_low_prior_stress_posterior_signal.png",
+    "true_theta": {
+      "A": 29.556225389155525,
+      "k": 0.06766763947277005,
+      "sigma": 2.9556226205770635
+    }
+  },
+  "broad_prior": {
+    "corner_path": "runs/00_shared_assets/readme_decay_posteriors/decay_broad_prior_posterior_corner.png",
+    "grid": {
+      "grid_points": 216000,
+      "grid_size": 60,
+      "max_edge_mass": 1.35681541026e-07
+    },
+    "mcmc": {
+      "acceptance_rate": 0.452859375,
+      "convergence_ok": true,
+      "max_rhat": 1.0055585332242074,
+      "mean_normalized_wasserstein": 0.06457860755080479,
+      "min_bulk_ess": 1839.946937884544,
+      "min_tail_ess": 4145.221185489188
+    },
+    "mode": "prior",
+    "mode_metadata": {
+      "mode": "prior_predictive"
+    },
+    "npe_mean_normalized_wasserstein": {
+      "broad_fresh_e15_ensemble4": 0.06618542899890571,
+      "broad_weighted_checkpoint_pool": 0.06477731320712096
+    },
+    "posterior_samples": 7000,
+    "selected_models": [
+      {
+        "ensemble_size": 4,
+        "full_val_nll_z_units": -3.6306901328125,
+        "id": "broad_fresh_e15_ensemble4",
+        "label": "4x flow2 randperm residual NSF, raw-decay-fit, 2.048M x e15",
+        "training_seconds": 246.0
+      },
+      {
+        "ensemble_size": 16,
+        "full_val_nll_z_units": -3.63128073481036,
+        "id": "broad_weighted_checkpoint_pool",
+        "label": "16x convex-weighted saved NPE pool, mixed broad NSF checkpoints",
+        "training_seconds": 73.63113179197535
+      }
+    ],
+    "signal_path": "runs/00_shared_assets/readme_decay_posteriors/decay_broad_prior_posterior_signal.png",
+    "true_theta": {
+      "A": 5.2875486198456,
+      "k": 0.20852591170122484,
+      "sigma": 0.28188413909680116
+    }
+  }
+}

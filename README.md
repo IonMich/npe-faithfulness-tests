@@ -11,13 +11,13 @@ The basic simulator setup is:
 \theta \sim p(\theta), \qquad x \sim p(x \mid \theta).
 ```
 
-For a fixed observed signal $x_0$, the Bayesian target is:
+For a requested observed signal $x_\star$, the Bayesian target is:
 
 ```math
-p(\theta \mid x_0)
+p(\theta \mid x_\star)
 =
-\frac{p(x_0 \mid \theta)p(\theta)}
-{\int p(x_0 \mid \vartheta)p(\vartheta)\,d\vartheta}.
+\frac{p(x_\star \mid \theta)p(\theta)}
+{\int p(x_\star \mid \vartheta)p(\vartheta)\,d\vartheta}.
 ```
 
 NPE trains a conditional density estimator $q_\phi(\theta \mid x)$ from
@@ -29,7 +29,7 @@ simulated pairs:
 \left[\log q_\phi(\theta \mid x)\right].
 ```
 
-After training, the object under test is $q_\phi(\theta \mid x_0)$.
+After training, the object under test is $q_\phi(\theta \mid x_\star)$.
 
 ## Evaluation
 
@@ -55,13 +55,13 @@ W_1\!\left(g_j(\theta_q), g_j(\theta_{\mathrm{ref}})\right)
 
 The symbols in this diagnostic are:
 
-- $p_{\mathrm{ref}}(\theta \mid x_0)$: the reference posterior for the fixed
-  observed signal $x_0$.
-- $q(\theta \mid x_0)$: the learned posterior being evaluated, usually an NPE
+- $p_{\mathrm{ref}}(\theta \mid x_\star)$: the reference posterior for the
+  requested observed signal $x_\star$.
+- $q(\theta \mid x_\star)$: the learned posterior being evaluated, usually an NPE
   flow posterior.
-- $\theta_q$: samples drawn from $q(\theta \mid x_0)$.
+- $\theta_q$: samples drawn from $q(\theta \mid x_\star)$.
 - $\theta_{\mathrm{ref}}$: samples drawn from, or weighted grid points
-  representing, $p_{\mathrm{ref}}(\theta \mid x_0)$.
+  representing, $p_{\mathrm{ref}}(\theta \mid x_\star)$.
 - $g(\theta)$ is the diagnostic parameterization used for comparison; it may
   be the raw parameter vector, a physical-parameter transform, or a
   symmetry-aware transform. $g_j(\theta)$ is coordinate $j$ of that diagnostic
@@ -119,15 +119,15 @@ and reference plan:
 \qquad
 x \sim p(x\mid\theta),
 \qquad
-x_0 = f(\theta_0,\epsilon_0).
+x_\star = f(\theta_\star,\epsilon_\star).
 ```
 
-The posterior target for the fixed signal $x_0$ is:
+The posterior target for the requested signal $x_\star$ is:
 
 ```math
-p(\theta\mid x_0)
+p(\theta\mid x_\star)
 \propto
-p(x_0\mid\theta)p(\theta).
+p(x_\star\mid\theta)p(\theta).
 ```
 
 Define the parameterization used for numerical comparison at the same time:
@@ -148,7 +148,7 @@ NPE is faithful:
    transform, and diagnostic transform. Simple stress tests usually belong in
    `scripts/npe_flow_stress_tests.py`; decay-style models with specialized
    references can use a dedicated script.
-2. Pick a fixed truth $\theta_0$ and generate one observed signal $x_0$. Keep
+2. Pick a truth $\theta_\star$ and generate one observed signal $x_\star$. Keep
    this signal fixed while comparing methods, otherwise the reference target is
    changing between runs.
 3. Build an independent reference posterior. Use a grid when $d$ is small
@@ -200,35 +200,53 @@ z \sim \mathcal N\!\left(
 \right).
 ```
 
-The fixed synthetic truth used by the main reference scripts is:
+The current single-decay result is broad prior-amortized NPE. The estimator is
+trained over the full simulator population:
 
 ```math
-(A,k,\sigma)=(5.0,0.55,0.35).
+p_{\mathrm{broad}}(\theta,x)=p(\theta)p(x\mid\theta),
 ```
 
-There are now two distinct single-decay results in the repository. The original
-fixed-$x_0$ faithfulness check is a single-observation calibration problem. The
-newer broad-prior NPE work is a population amortization problem over
-$p(\theta)p(x\mid\theta)$.
+with objective
 
-| Result | Current status | Evidence |
-| --- | --- | --- |
-| Fixed-$x_0$ posterior calibration | Historical single-signal success case. | The calibrated local flow run below passes the original grid/MCMC/HMC posterior target for the fixed signal $x_0$. |
-| Broad prior-amortized NPE | Current interactive-viewer model family. | Fresh 4-member flow2 randperm residual NSF reaches full validation NLL `-3.6306901328125`; the convex-weighted saved-checkpoint pool reaches `-3.63128073481036`. |
+```math
+\phi_{\mathrm{broad}}
+=
+\arg\max_\phi
+\mathbb E_{(\theta,x)\sim p_{\mathrm{broad}}}
+\left[
+\log q_\phi(\theta\mid x)
+\right].
+```
 
-The plots below are the historical fixed-$x_0$ calibration artifacts, not the
-current broad-prior record:
-[local_q0005_linear_150k_t8_seed20260706 run](runs/01_exponential_decay/03_npe_flow_search/11_npe_flow_local_q0005_linear_150k_t8_seed20260706/README.md).
+The main UI exposes two current broad-prior NPEs:
 
-Observed $x_0$ signal and posterior predictive fit:
+| Model | Role | Full validation NLL |
+| --- | --- | ---: |
+| 4x flow2 randperm residual NSF, raw-decay-fit context, 2.048M/member x 15 epochs | Fresh end-to-end training proof under the five-minute budget. | `-3.6306901328125` |
+| 16x convex-weighted saved-checkpoint pool | Lower-NLL reference assembled from saved broad NPE checkpoints. | `-3.63128073481036` |
 
-![Single decay x0 predictive fit](runs/00_shared_assets/readme_model_overlays/single_decay_x0_predictive_overlay.png)
+The following prior-predictive signal shows the current broad NPE overlays
+against exact grid and MCMC references. Mean normalized Wasserstein to the grid
+is `0.0662` for the fresh 4x flow2 ensemble, `0.0648` for the weighted pool,
+and `0.0646` for MCMC.
 
-Corresponding fixed-$x_0$ posterior overlay:
+![Single decay broad-prior posterior overlay](runs/00_shared_assets/readme_decay_posteriors/decay_broad_prior_posterior_corner.png)
 
-![Single decay best posterior overlay](runs/00_shared_assets/readme_model_overlays/single_decay_best_posterior_overlay.png)
+[Single decay broad-prior signal predictive overlay](runs/00_shared_assets/readme_decay_posteriors/decay_broad_prior_posterior_signal.png)
 
-### Single-Exponential Broad-Prior Diagnostics
+The very-low-prior stress signal is harder. The fresh 4x flow2 ensemble has
+mean normalized Wasserstein `0.2195`, the weighted pool has `0.2864`, and MCMC
+has `0.0884`. This is a useful counterexample to relying only on average NLL.
+
+![Single decay very-low-prior posterior overlay](runs/00_shared_assets/readme_decay_posteriors/decay_broad_low_prior_stress_posterior_corner.png)
+
+[Single decay very-low-prior signal predictive overlay](runs/00_shared_assets/readme_decay_posteriors/decay_broad_low_prior_stress_posterior_signal.png)
+
+The generated metadata for these diagnostic views is stored in
+[decay_broad_readme_posteriors_summary.json](runs/00_shared_assets/readme_decay_posteriors/decay_broad_readme_posteriors_summary.json).
+
+#### Fixed-P Scaling Diagnostic
 
 The older fixed-P experiment below is the scaling-law diagnostic: it holds the
 architecture family roughly fixed and scales the number of prior-predictive
@@ -245,8 +263,8 @@ fixed panel of signals.
 
 The log-log panels show useful scaling with $D$ through the tested range up to
 16.384M simulations, but the panel Wasserstein remains far above the numerical
-evaluation floor. This is a broad amortization diagnostic rather than the
-single-signal $x_0$ faithfulness target above.
+evaluation floor. This is only a fixed-architecture scaling diagnostic; it is
+not the source of the current best broad-prior models.
 
 #### Population Entropy Floor
 
@@ -267,10 +285,17 @@ H(\theta\mid X).
 
 The current adaptive oracle estimate recorded in
 [npe-next-2x-efficiency-decision-diary.md](notes/npe-next-2x-efficiency-decision-diary.md)
-is approximately `-3.64122 +/- 0.008` in $z$ units. That is the population-NLL
-floor for broad prior-amortized validation. It is separate from the panel
-Wasserstein numerical floor and from the fixed-$x_0$ posterior-faithfulness
-target.
+is approximately `-3.64122 +/- 0.008` in $z$ units. That is the estimated
+population-NLL floor for broad prior-amortized validation.
+
+The reported model NLLs are measured on a finite 1M-example validation cache.
+Per-example NLL standard-error estimates are about `0.00252`, or roughly
+`+/-0.00495` for a 95% Monte Carlo half-width, for both current UI NPEs. The
+fresh and weighted ensembles are therefore close enough that the weighted
+pool's `0.00059` NLL advantage should not be interpreted as a resolved
+population-level ordering without a larger validation estimate. The uncertainty
+calculation is stored in
+[decay_broad_npe_validation_nll_uncertainty.json](runs/00_shared_assets/readme_scaling/decay_broad_npe_validation_nll_uncertainty.json).
 
 #### Training Efficiency
 
@@ -396,7 +421,7 @@ g(\theta)=(\theta_1,\theta_2).
 ```
 
 Progress: the best run has MCMC, HMC, and NPE in close pairwise agreement and
-uses a tighter local NPE region with linear target adjustment. It is currently
+uses a tighter proposal/training region with linear target adjustment. It is currently
 a legacy pairwise pass. The remaining work is model-specific calibration
 against a truth/reference target.
 
@@ -507,7 +532,7 @@ g(z)=(w_1,\ldots,w_6,\sigma).
 
 Progress: the best run has converged MCMC/HMC references and close NPE
 pairwise agreement after tuning the random-walk proposal and using a tighter
-local NPE region. It is a legacy pairwise pass pending model-specific
+proposal/training region. It is a legacy pairwise pass pending model-specific
 calibration.
 
 Best posterior:
@@ -566,7 +591,7 @@ g(z)=(A_1,k_1,A_2,k_2,\sigma).
 Progress: MCMC and HMC agree well on the best current run. NPE remains outside
 the reference agreement level. The best custom-flow result used a profiled
 two-rate least-squares summary and a residual-centered NPE target. Further
-attempts with broader and tighter local regions, proposal NPE, whitening,
+attempts with broader and tighter proposal regions, proposal NPE, whitening,
 ridge coordinates, raw-curve context, and `sbi` SNPE-C have left the gap
 unresolved.
 
@@ -574,150 +599,6 @@ Best posterior:
 [two_exp_ordered_residual run](runs/06_two_exponential/01_npe_flow/12_npe_flow_stress_tests_two_exp_ordered_residual/README.md).
 
 ![Ordered two-exponential best posterior overlay](runs/00_shared_assets/readme_model_overlays/two_exp_ordered_best_posterior_overlay.png)
-
-## Decay Amortization Check
-
-The single-decay best posterior above is the main calibrated result at the
-observed signal $x_0$. The following two plots are a separate diagnostic for
-the current broad NPEs in the interactive viewer. They compare the fresh
-4-member flow2 randperm NSF ensemble and the convex-weighted saved-checkpoint
-pool against MCMC and grid references on fresh signals.
-
-This section asks how much of the posterior map has been amortized by broad
-prior-predictive training. Both plotted NPEs are trained on the full joint
-simulator distribution:
-
-```math
-p_{\mathrm{broad}}(\theta,x)
-=
-p(\theta)p(x\mid\theta).
-```
-
-Its training objective is:
-
-```math
-\phi_{\mathrm{broad}}
-=
-\arg\max_\phi
-\mathbb E_{(\theta,x)\sim p_{\mathrm{broad}}}
-\left[
-\log q_\phi(\theta\mid x)
-\right],
-```
-
-and the learned posterior used in the plots is:
-
-```math
-q_{\phi,\mathrm{broad}}(\theta\mid x_\star).
-```
-
-The two signals are selected using the older local-region diagnostic around
-$x_0$, but the local NPE itself is no longer part of these README overlays. The
-region is still useful as a stress label: one draw is close to the original
-observation, and one is a prior-predictive draw far outside that neighborhood.
-In this decay run, $s(x)$ is an indirect exponential-fit summary. For a
-candidate signal $x=(x_1,\ldots,x_n)$ observed at times
-$t=(t_1,\ldots,t_n)$, the summary first profiles a one-exponential curve over
-decay rates $k$.
-
-For each fixed $k$, the least-squares amplitude is:
-
-```math
-\widehat A(k;x)
-=
-\frac{
-\sum_{i=1}^{n} x_i\exp(-k t_i)
-}{
-\sum_{i=1}^{n}\exp(-2k t_i)
-}.
-```
-
-The profiled squared error is:
-
-```math
-\mathrm{SSE}(k;x)
-=
-\sum_{i=1}^{n}
-\left[
-x_i-\widehat A(k;x)\exp(-k t_i)
-\right]^2.
-```
-
-The fitted decay rate is the grid-profile minimizer:
-
-```math
-\widehat k(x)
-=
-\arg\min_{k\in\mathcal K}\mathrm{SSE}(k;x),
-```
-
-with a small quadratic interpolation around the best grid point. The fitted
-noise scale is:
-
-```math
-\widehat\sigma(x)
-=
-\sqrt{\frac{\mathrm{SSE}(\widehat k(x);x)}{n}}.
-```
-
-The context summary used for the local region is then:
-
-```math
-s(x)
-=
-\left(
-\log\widehat A(\widehat k(x);x),
-\log\widehat k(x),
-\log\widehat\sigma(x)
-\right).
-```
-
-The local region is defined by a standardized distance in this three-dimensional
-summary space. Let $c$ and $a$ be the pilot prior-predictive center and scale
-vectors for $s(x)$. The distance used in the code is:
-
-```math
-d_s(x,x_0)
-=
-\sqrt{
-\frac{1}{3}
-\sum_{\ell=1}^{3}
-\left[
-\frac{s_\ell(x)-c_\ell}{a_\ell}
--
-\frac{s_\ell(x_0)-c_\ell}{a_\ell}
-\right]^2
-}.
-```
-
-The diagnostic local event is:
-
-```math
-R=\{x: d_s(x,x_0)\le r\}.
-```
-
-The first plot uses a signal just inside this diagnostic region
-($d_s=0.1435$, $r=0.1459$). The fresh 4-member flow2 ensemble has mean
-normalized Wasserstein 0.0597 to the grid reference, the weighted pool has
-0.0632, and MCMC has 0.0598. The second plot uses a prior-predictive signal
-outside the region ($d_s=0.9886$). There the fresh ensemble has Wasserstein
-0.0947, the weighted pool has 0.0878, and MCMC has 0.0874. The grid and MCMC
-layers remain exact-likelihood references for each fresh signal.
-
-Local-region signal:
-
-![Single decay local-region posterior overlay](runs/00_shared_assets/readme_decay_posteriors/decay_local_region_posterior_corner.png)
-
-[Local-region signal predictive overlay](runs/00_shared_assets/readme_decay_posteriors/decay_local_region_posterior_signal.png)
-
-Away-from-$x_0$ prior-predictive signal:
-
-![Single decay away-from-x0 posterior overlay](runs/00_shared_assets/readme_decay_posteriors/decay_away_from_x0_posterior_corner.png)
-
-[Away-from-x0 signal predictive overlay](runs/00_shared_assets/readme_decay_posteriors/decay_away_from_x0_posterior_signal.png)
-
-The generated metadata for these two diagnostic views is stored in
-[decay_readme_posteriors_summary.json](runs/00_shared_assets/readme_decay_posteriors/decay_readme_posteriors_summary.json).
 
 ## Main Reports
 
@@ -744,7 +625,7 @@ uv run scripts/build_runs_view.py
 The interactive posterior viewer supports the single-exponential decay
 diagnostics. It lets you draw signals, toggle the current broad NPE layers,
 compare against grid and MCMC references, and inspect corner plots, predictive
-plots, posterior quantiles, local-region status, low-prior signal stress cases,
+plots, posterior quantiles, low-prior signal stress cases,
 Wasserstein-to-grid distances, and runtime diagnostics.
 
 To run the built viewer:
