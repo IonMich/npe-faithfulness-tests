@@ -15,12 +15,33 @@ from matplotlib.lines import Line2D  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = (
     ROOT
-    / "runs/00_shared_assets/readme_scaling/decay_broad_npe_training_efficiency_curves.png"
+    / "runs/00_shared_assets/readme_scaling/decay_population_npe_training_efficiency_curves.png"
 )
 POPULATION_ENTROPY_NLL = -3.64122
 
 
 RUNS = [
+    {
+        "kind": "single",
+        "summary": ROOT
+        / "runs/01_exponential_decay/15_broad_scaling/38_spline_lr_schedule_proof/"
+        "cosine_4m_seed20260901/results/broad_scaling_summary.json",
+        "color": "#374151",
+        "label": "Flow4 NSF, 4.096M, 90 epochs",
+    },
+    {
+        "kind": "single",
+        "summary": ROOT
+        / "runs/01_exponential_decay/15_broad_scaling/58_partial_epoch_budget/"
+        "batch1024_hidden80_wd1e4_lr004_e74_max294000_seed20260901/"
+        "results/broad_scaling_summary.json",
+        "progress": ROOT
+        / "runs/01_exponential_decay/15_broad_scaling/58_partial_epoch_budget/"
+        "batch1024_hidden80_wd1e4_lr004_e74_max294000_seed20260901/"
+        "runs/n4096000_seed20260901/results/training_progress.jsonl",
+        "color": "#64748b",
+        "label": "Flow3 NSF, 4.096M, batch 1024, 74 epochs",
+    },
     {
         "kind": "single",
         "summary": ROOT
@@ -31,6 +52,18 @@ RUNS = [
         "train8m_lr004_wd2e4_e27_max212000_seed20260901/runs/n8192000_seed20260901/"
         "results/training_progress.jsonl",
         "color": "#6f7378",
+        "label": "Flow3 NSF, 8.192M, 27 epochs",
+    },
+    {
+        "kind": "ensemble",
+        "summary": ROOT
+        / "runs/01_exponential_decay/15_broad_scaling/120_next4x_ensemble4_saved/"
+        "residual_512k_e20_lr003_wd2e4_seeds4/results/ensemble4_proof_summary.json",
+        "progress_glob": ROOT
+        / "runs/01_exponential_decay/15_broad_scaling/120_next4x_ensemble4_saved/"
+        "residual_512k_e20_lr003_wd2e4_seeds4/runs/*/results/training_progress.jsonl",
+        "color": "#16a34a",
+        "label": "4-member residual NSF, 512k/member, 20 epochs",
     },
     {
         "kind": "ensemble",
@@ -41,6 +74,7 @@ RUNS = [
         / "runs/01_exponential_decay/15_broad_scaling/146_next8x_rawfit_512k10_mixed_lr_timed_proof/"
         "mixed_lr_rawfit_512k_e10_seeds2_6_3_5/runs/*/results/training_progress.jsonl",
         "color": "#d65f3d",
+        "label": "4-member residual NSF + fit features, 512k/member, 10 epochs",
     },
     {
         "kind": "ensemble",
@@ -51,6 +85,7 @@ RUNS = [
         / "runs/01_exponential_decay/15_broad_scaling/199_nll63_randperm_e15_cosstep_ensemble4_saved/"
         "rp_seed*/runs/*/results/training_progress.jsonl",
         "color": "#0f766e",
+        "label": "4-member Flow2 residual NSF + fit features, 2.048M/member, 15 epochs",
     },
     {
         "kind": "point",
@@ -58,6 +93,7 @@ RUNS = [
         / "runs/01_exponential_decay/15_broad_scaling/187_nll63_weighted_broad_pool/"
         "results/weighted_ensemble_summary.json",
         "color": "#7c3aed",
+        "label": "16x convex-weighted checkpoint ensemble",
     },
 ]
 
@@ -107,9 +143,56 @@ def final_seconds(summary: dict) -> float:
     raise KeyError("Could not find final wall seconds in summary.")
 
 
+def first_summary_row(summary: dict) -> dict:
+    rows = summary.get("rows")
+    if isinstance(rows, list) and rows:
+        return rows[0]
+    return summary
+
+
+def summary_history_series(summary: dict) -> dict[str, np.ndarray]:
+    row = first_summary_row(summary)
+    history = row.get("history")
+    if not isinstance(history, dict):
+        raise KeyError("Summary has no history block.")
+    nll = history.get("train_nll")
+    if not isinstance(nll, list) or not nll:
+        raise KeyError("Summary history has no train_nll list.")
+    nll_array = np.asarray(nll, dtype=float)
+    if row.get("final_train_nll_z_units") is not None and row.get("final_train_nll_standardized") is not None:
+        nll_array = nll_array + (
+            float(row["final_train_nll_z_units"])
+            - float(row["final_train_nll_standardized"])
+        )
+    if "train_seconds" in history and isinstance(history["train_seconds"], list):
+        seconds = np.cumsum(np.asarray(history["train_seconds"], dtype=float))
+    elif "epoch_seconds" in history and isinstance(history["epoch_seconds"], list):
+        seconds = np.cumsum(np.asarray(history["epoch_seconds"], dtype=float))
+    else:
+        seconds = np.linspace(
+            final_seconds(summary) / float(nll_array.size),
+            final_seconds(summary),
+            nll_array.size,
+        )
+    if seconds.size != nll_array.size:
+        seconds = np.linspace(
+            final_seconds(summary) / float(nll_array.size),
+            final_seconds(summary),
+            nll_array.size,
+        )
+    return {
+        "seconds": seconds,
+        "nll": nll_array,
+    }
+
+
 def load_single(spec: dict) -> dict:
     summary = load_json(spec["summary"])
-    series = progress_series(spec["progress"])
+    progress_path = spec.get("progress")
+    if isinstance(progress_path, Path) and progress_path.exists():
+        series = progress_series(progress_path)
+    else:
+        series = summary_history_series(summary)
     return {
         **spec,
         "summary_data": summary,
@@ -169,7 +252,7 @@ def load_runs() -> list[dict]:
 
 
 def legend_label(run: dict) -> str:
-    return f"{float(run['final_nll']):.4f}"
+    return f"{run['label']} ({float(run['final_nll']):.4f})"
 
 
 def plot_curve(ax: plt.Axes, run: dict) -> None:
@@ -217,14 +300,14 @@ def configure_axis(ax: plt.Axes) -> None:
         color="#172033",
     )
     ax.set_xscale("log")
-    ax.set_xlim(left=4.5, right=900)
-    ax.set_xticks([5, 10, 20, 60, 120, 246, 780])
+    ax.set_xlim(left=4.5, right=4000)
+    ax.set_xticks([5, 10, 20, 60, 120, 260, 780, 1560, 3140])
     ax.xaxis.set_major_formatter(mticker.ScalarFormatter())
     ax.xaxis.set_minor_formatter(mticker.NullFormatter())
-    ax.set_ylim(-3.67, -2.78)
+    ax.set_ylim(-3.67, -2.15)
     ax.set_xlabel("training or assembly wall seconds")
-    ax.set_ylabel("NLL, z units (lower is better)")
-    ax.set_title("Broad-prior single-decay NPE loss by wall time")
+    ax.set_ylabel("negative log likelihood, z units (lower is better)")
+    ax.set_title("Single-decay NPE loss by wall time")
 
 
 def legend_handles(runs: list[dict]) -> list[Line2D]:
@@ -249,7 +332,7 @@ def legend_handles(runs: list[dict]) -> list[Line2D]:
 def plot(output_path: Path = DEFAULT_OUTPUT) -> Path:
     runs = load_runs()
     plt.style.use("seaborn-v0_8-whitegrid")
-    fig, ax = plt.subplots(figsize=(10.5, 6.1), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(12.6, 7.0), constrained_layout=True)
     for run in runs:
         if run["kind"] == "point":
             plot_point(ax, run)
@@ -258,12 +341,13 @@ def plot(output_path: Path = DEFAULT_OUTPUT) -> Path:
     configure_axis(ax)
     ax.legend(
         handles=legend_handles(runs),
-        title="final exact NLL",
-        loc="lower left",
-        fontsize=9,
-        title_fontsize=9,
+        title="final validation NLL",
+        loc="upper right",
+        fontsize=7.4,
+        title_fontsize=8.0,
+        ncol=1,
         frameon=True,
-        framealpha=0.88,
+        framealpha=0.86,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=180, bbox_inches="tight")

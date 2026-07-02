@@ -634,20 +634,20 @@ class NPEPosteriorViewer:
         self.stage1_ensembles: dict[str, list[str]] = {}
         self.stage1_ensemble_weights: dict[str, np.ndarray] = {}
         # Keep the legacy MDN arguments loadable for explicit debugging, but omit
-        # them from the default UI model set after the broad-spline records.
+        # them from the default UI model set after the older spline-flow records.
         for model_id, path, label, plot_label, color in (
             (
                 "broad_mdn",
                 broad_model_path,
-                "Broad MDN, 5 components, h128x3, 100k",
-                "Broad MDN 5c h128x3 100k",
+                "Population-trained MDN, 5 components, h128x3, 100k",
+                "Population-trained MDN 5c h128x3 100k",
                 NPE_LAYER_COLORS["broad_mdn"],
             ),
             (
                 "broad_mdn_512k",
                 best_broad_model_path,
-                "Broad MDN, 5 components, h128x3, 512k, seed 20260902",
-                "Broad MDN 5c h128x3 512k",
+                "Population-trained MDN, 5 components, h128x3, 512k, seed 20260902",
+                "Population-trained MDN 5c h128x3 512k",
                 "#6d4aff",
             ),
         ):
@@ -659,7 +659,7 @@ class NPEPosteriorViewer:
                     plot_label=plot_label,
                     color=color,
                     training_description=(
-                        "legacy MDN broad-prior checkpoint retained for explicit "
+                        "legacy MDN population-trained checkpoint retained for explicit "
                         "debugging, not part of the default comparison set"
                     ),
                 )
@@ -667,11 +667,11 @@ class NPEPosteriorViewer:
             self.register_stage1_checkpoint(
                 model_id="broad_spline_4m",
                 path=best_broad_spline_model_path,
-                label="Broad flow4 NSF, raw-x, h64x2 bins8, 4.096M x e90",
-                plot_label="Broad flow4 NSF 4.096M e90",
+                label="Population-trained Flow4 NSF, raw curve, h64x2 bins8, 4.096M x e90",
+                plot_label="Population-trained Flow4 NSF 4.096M e90",
                 color=NPE_LAYER_COLORS["broad_spline_4m"],
                 training_description=(
-                    "best panel-W fixed-P broad NPE from the scaling diagnostics "
+                    "best panel-distance fixed parameter-count NPE from the scaling diagnostics "
                     "(4.096M prior-predictive simulations, seed 20260901)"
                 ),
             )
@@ -679,35 +679,35 @@ class NPEPosteriorViewer:
             self.register_stage1_ensemble(
                 model_id="broad_fresh_e15_ensemble4",
                 summary_path=best_broad_ensemble_summary_path,
-                label="4x flow2 randperm residual NSF, raw-decay-fit, 2.048M x e15",
-                plot_label="4x flow2 randperm NSF e15",
+                label="4-member Flow2 residual NSF ensemble, random permutations, raw curve plus fit features, 2.048M/member, 15 epochs",
+                plot_label="4-member Flow2 residual NSF, 15 epochs",
                 color=NPE_LAYER_COLORS["broad_fresh_e15_ensemble4"],
                 training_description=(
-                    "freshly retrained 4-member equal density ensemble; exact full-validation "
-                    "NLL -3.630690 in 246 seconds of direct remote training wall time"
+                    "4-member equal-density ensemble trained from initialization; exact full-validation "
+                    "NLL -3.630690 in 246 seconds of remote training wall time"
                 ),
             )
         if weighted_broad_ensemble_summary_path is not None and weighted_broad_ensemble_summary_path.exists():
             self.register_stage1_ensemble(
                 model_id="broad_weighted_checkpoint_pool",
                 summary_path=weighted_broad_ensemble_summary_path,
-                label="16x convex-weighted saved NPE pool, mixed broad NSF checkpoints",
-                plot_label="16x convex-weighted NPE pool",
+                label="16-member convex-weighted checkpoint ensemble, mixed NSF checkpoints",
+                plot_label="16-member weighted checkpoint ensemble",
                 color=NPE_LAYER_COLORS["broad_weighted_checkpoint_pool"],
                 training_description=(
-                    "reference NLL record only: convex weighted density ensemble over prior saved "
-                    "broad NPE checkpoints, not the fresh-training proof model"
+                    "reference NLL record only: convex weighted density ensemble over saved "
+                    "population-trained NPE checkpoints, not a direct training run"
                 ),
             )
         elif best_broad_ensemble_summary_path is None and best_broad_efficiency_model_path is not None and best_broad_efficiency_model_path.exists():
             self.register_stage1_checkpoint(
                 model_id="broad_spline_8m",
                 path=best_broad_efficiency_model_path,
-                label="Broad flow3 NSF, raw-x, h80x2 bins8, 8.192M x e27",
-                plot_label="Broad flow3 NSF 8.192M e27",
+                label="Population-trained Flow3 NSF, raw curve, h80x2 bins8, 8.192M x e27",
+                plot_label="Population-trained Flow3 NSF 8.192M e27",
                 color=NPE_LAYER_COLORS["broad_spline_8m"],
                 training_description=(
-                    "superseded broad-validation NLL record from the efficiency sweep "
+                    "superseded population-validation NLL record from the efficiency sweep "
                     "(8.192M prior-predictive simulations, 212k optimizer steps)"
                 ),
             )
@@ -1285,7 +1285,7 @@ class NPEPosteriorViewer:
                 alpha=0.16,
                 label="MCMC 90% mean curve",
             )
-            ax.plot(t_grid, mcmc_mean_median, color=MCMC_COLOR, lw=1.9, label="MCMC mean median")
+            ax.plot(t_grid, mcmc_mean_median, color=MCMC_COLOR, lw=1.9, label="MCMC median mean curve")
         ax.set_xlabel("time")
         ax.set_ylabel("observation")
         ax.grid(alpha=0.22)
@@ -1917,7 +1917,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_BROAD_MODEL,
         help=(
-            "Optional older broad prior-predictive decay NPE checkpoint to expose "
+            "Optional older population-trained decay NPE checkpoint to expose "
             "in the posterior-estimator dropdown. Omitted by default."
         ),
     )
@@ -1926,7 +1926,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_BEST_BROAD_MODEL,
         help=(
-            "Optional legacy broad MDN checkpoint from earlier scaling-law runs. "
+            "Optional legacy population-trained MDN checkpoint from earlier scaling-law runs. "
             "Omitted by default."
         ),
     )
@@ -1935,7 +1935,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_BEST_BROAD_SPLINE_MODEL,
         help=(
-            "Optional best broad spline-flow checkpoint from the fixed-P scaling "
+            "Optional older spline-flow checkpoint from the fixed parameter-count scaling "
             "diagnostics. If the path is missing, it is omitted from the model dropdown."
         ),
     )
@@ -1944,7 +1944,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_BEST_BROAD_EFFICIENCY_MODEL,
         help=(
-            "Optional superseded broad spline-flow efficiency-record checkpoint. "
+            "Optional superseded population-trained spline-flow efficiency-record checkpoint. "
             "Used as a fallback only when --best-broad-ensemble-summary is missing."
         ),
     )
@@ -1953,8 +1953,8 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_BEST_BROAD_ENSEMBLE_SUMMARY,
         help=(
-            "Optional current fresh broad residual-spline ensemble proof summary. "
-            "If present, it replaces the superseded broad 8.192M efficiency model in the picker."
+            "Optional current residual neural spline-flow ensemble summary. "
+            "If present, it replaces the superseded 8.192M efficiency model in the picker."
         ),
     )
     parser.add_argument(
@@ -1963,7 +1963,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_WEIGHTED_BROAD_ENSEMBLE_SUMMARY,
         help=(
             "Optional convex-weighted saved-checkpoint reference ensemble. "
-            "Kept separate from the fresh-training proof model."
+            "Kept separate from directly trained ensemble records."
         ),
     )
     parser.add_argument("--host", default="127.0.0.1")

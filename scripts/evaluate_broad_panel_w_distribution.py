@@ -49,9 +49,14 @@ MODEL_COLORS = {
     "flow2_ensemble": "#0f766e",
 }
 MODEL_LABELS = {
-    "spline": "Broad spline 4.096M",
-    "mdn": "Broad MDN 512k",
-    "flow2_ensemble": "4x flow2 randperm NSF e15",
+    "spline": "Population-trained conditional spline-flow NPE, 4.096M",
+    "mdn": "Population-trained mixture density network, 512k",
+    "flow2_ensemble": "4-member Flow2 residual NSF, random permutations, 15 epochs",
+}
+SCATTER_AXIS_LABELS = {
+    "spline": "spline-flow NPE distance",
+    "mdn": "mixture density network distance",
+    "flow2_ensemble": "Flow2 residual NSF ensemble distance",
 }
 
 
@@ -423,7 +428,7 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
         ax.axvline(np.median(values), color=MODEL_COLORS[key], lw=1.6, alpha=0.68)
     if np.all(all_w > 0):
         ax.set_xscale("log")
-    ax.set_xlabel("mean normalized marginal W")
+    ax.set_xlabel("mean normalized marginal Wasserstein distance")
     ax.set_ylabel("empirical CDF")
     ax.set_title("Distribution across panel signals")
     ax.grid(which="both", alpha=0.22)
@@ -453,8 +458,8 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
     ax.set_yscale("log")
     ax.set_xlim(lower, upper)
     ax.set_ylim(lower, upper)
-    ax.set_xlabel(f"{MODEL_LABELS[x_key]} W")
-    ax.set_ylabel(f"{MODEL_LABELS[y_key]} W")
+    ax.set_xlabel(SCATTER_AXIS_LABELS.get(x_key, f"{x_key} distance"))
+    ax.set_ylabel(SCATTER_AXIS_LABELS.get(y_key, f"{y_key} distance"))
     ax.set_title("Per-signal comparison")
     ax.grid(which="both", alpha=0.22)
     colorbar = figure.colorbar(scatter, ax=ax, fraction=0.046, pad=0.04)
@@ -472,7 +477,7 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
     for key, values in ratio_by_model.items():
         ax.hist(values, bins=bins, alpha=0.32, color=MODEL_COLORS[key], label=MODEL_LABELS[key])
         ax.axvline(np.median(values), color=MODEL_COLORS[key], lw=2.0)
-    ax.set_xlabel("W / panel target numerical floor")
+    ax.set_xlabel("distance / panel target numerical floor")
     ax.set_ylabel("signal count")
     ax.set_title("Distance to evaluation floor")
     ax.grid(which="both", alpha=0.22)
@@ -484,13 +489,13 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("true sigma")
-    ax.set_ylabel("mean normalized marginal W")
+    ax.set_ylabel("mean normalized marginal Wasserstein distance")
     ax.set_title("Failure concentration by noise level")
     ax.grid(which="both", alpha=0.22)
     ax.legend(frameon=False)
 
     figure.suptitle(
-        f"Broad NPE panel marginal W distribution "
+        f"Single-decay NPE panel marginal Wasserstein distribution "
         f"(n={len(combined_rows)}, posterior samples={posterior_samples:,})",
         y=1.02,
     )
@@ -581,7 +586,7 @@ def make_summary(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Evaluate saved broad NPE checkpoints against a cached panel of exact "
+            "Evaluate saved population-trained NPE checkpoints against a cached panel of exact "
             "1D posterior marginals."
         ),
     )
