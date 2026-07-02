@@ -395,14 +395,46 @@ NLL.
 The generated metadata for these diagnostic views is stored in
 [decay_population_readme_posteriors_summary.json](runs/00_shared_assets/readme_decay_posteriors/decay_population_readme_posteriors_summary.json).
 
-#### Fixed Parameter-Count Scaling Diagnostic
+#### Flow2 Ensemble Data Scaling Diagnostic
 
-The fixed parameter-count experiment below is the scaling-law diagnostic. It
-holds the architecture family roughly fixed and scales only the number of
-simulated training pairs. The other improvements in this section come from
-architecture changes, context features, learning-rate schedules, hyperparameter
-search, ensembling, and convex weight optimization on the same population
-validation objective, so they should not be read as scaling-law evidence.
+The current single-decay data scaling diagnostic holds the deployed 4-member
+Flow2 residual NSF ensemble recipe fixed and scales only the number of
+simulated training pairs per member. The primary measurement is population
+validation NLL. Because this is a continuous-density NLL in normalized `z` units
+and can be negative, the log-scale companion panel plots excess NLL above the
+estimated Bayes entropy floor `-3.64122 +/- 0.008`. Posterior Wasserstein is
+kept as a separate faithfulness diagnostic, not as the main scaling-law loss.
+
+![Single decay Flow2 ensemble data scaling](runs/00_shared_assets/readme_scaling/decay_flow2_ensemble_data_scaling_weng_style.png)
+
+The equal-weight 4-member ensemble improves monotonically from `64k` to
+`2.048M` simulations per member. Validation NLL improves from `-3.54993` to
+`-3.63069`, reducing excess NLL above the entropy floor from `0.09129` to
+`0.01053`. A raw-NLL asymptote fit gives `L_asym=-3.63610`, exponent `0.823`,
+and raw `R2=0.999`. That fitted asymptote is only `0.00512` above the Bayes
+entropy estimate, which is smaller than the current `+/-0.008` floor
+uncertainty; it should not be read as a resolved residual training floor.
+
+With the entropy estimate held fixed, a no-residual-floor fit to excess NLL
+gives exponent `0.631`, but this exponent is floor-sensitive near the right
+edge. Shifting the entropy estimate by its current uncertainty moves the
+excess-loss exponent from about `0.490` to `0.997`.
+
+The fixed-panel posterior diagnostic moves in the same direction: panel mean
+normalized marginal Wasserstein decreases from `0.11046` to `0.03613`. Full
+metadata and rows are stored in
+[flow2_ensemble_data_scaling_summary.json](runs/01_exponential_decay/15_broad_scaling/201_flow2_ensemble_data_scaling/results/flow2_ensemble_data_scaling_summary.json).
+
+#### Older Fixed Parameter-Count Diagnostic
+
+The older fixed parameter-count experiment below holds the architecture family
+roughly fixed and scales only the number of simulated training pairs. It is
+still useful as a historical MDN-vs-spline comparison, but it is no longer the
+best single-decay scaling-law plot. Other improvements in this section come
+from architecture changes, context features, learning-rate schedules,
+hyperparameter search, ensembling, and convex weight optimization on the same
+population validation objective, so they should not be read as single-axis data
+scaling evidence.
 
 The fixed parameter-count plot compares a mixture density network (MDN) and a
 conditional spline-flow NPE with about 45k parameters each. It reports both
