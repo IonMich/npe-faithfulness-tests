@@ -387,6 +387,7 @@ def fit_loss_with_asymptote(x: np.ndarray, y: np.ndarray) -> dict[str, object] |
     asymptote, amplitude, alpha = [float(value) for value in params]
     return {
         "asymptote": asymptote,
+        "asymptote_std_error": covariance_std_error(covariance, 0),
         "amplitude": amplitude,
         "alpha": alpha,
         "alpha_std_error": covariance_std_error(covariance, 2),
@@ -434,6 +435,19 @@ def fit_power_no_floor(x: np.ndarray, y: np.ndarray) -> dict[str, object] | None
     }
 
 
+def data_excess_fit_from_free_asymptote(fit: dict[str, object] | None) -> dict[str, object] | None:
+    if not isinstance(fit, dict):
+        return None
+    return {
+        "source_fit": "full_val_nll_z_units",
+        "floor": float(fit["asymptote"]),
+        "floor_std_error": float(fit.get("asymptote_std_error", float("nan"))),
+        "amplitude": float(fit["amplitude"]),
+        "alpha": float(fit["alpha"]),
+        "alpha_std_error": float(fit.get("alpha_std_error", float("nan"))),
+    }
+
+
 def entropy_floor_sensitivity(
     x: np.ndarray,
     nll: np.ndarray,
@@ -469,7 +483,9 @@ def update_scaling_fits(summary: dict[str, object], rows: list[dict[str, object]
     panel_floor = float(summary["panel_floor_wasserstein_mean"])
     summary["population_entropy_nll_uncertainty"] = entropy_uncertainty
     fits = dict(summary.get("fits", {}))
-    fits["full_val_nll_z_units"] = fit_loss_with_asymptote(x, nll)
+    raw_fit = fit_loss_with_asymptote(x, nll)
+    fits["full_val_nll_z_units"] = raw_fit
+    fits["data_excess_from_free_fit"] = data_excess_fit_from_free_asymptote(raw_fit)
     fits["nll_excess_fixed_entropy_no_floor"] = fit_power_no_floor(x, nll_excess)
     fits["nll_excess_fixed_entropy_floor_sensitivity"] = entropy_floor_sensitivity(
         x,
@@ -566,6 +582,15 @@ def plot_scaling(summary: dict[str, object], rows: list[dict[str, object]], outp
             linewidth=1.3,
             label=rf"free fitted $L_{{free}}={float(fit['asymptote']):.5f}$",
         )
+        asymptote_std = float(fit.get("asymptote_std_error", float("nan")))
+        if np.isfinite(asymptote_std) and asymptote_std > 0.0:
+            ax.axhspan(
+                float(fit["asymptote"]) - asymptote_std,
+                float(fit["asymptote"]) + asymptote_std,
+                color="#d97706",
+                alpha=0.12,
+                label=rf"free fitted $L_{{free}}\pm 1$ SE",
+            )
     ax.axhspan(
         entropy_floor - entropy_uncertainty,
         entropy_floor + entropy_uncertainty,
@@ -574,8 +599,21 @@ def plot_scaling(summary: dict[str, object], rows: list[dict[str, object]], outp
         label=r"independent $\hat H \pm s_H$",
     )
     ax.set_xscale("log")
-    y_min = min(float(np.nanmin(nll)), entropy_floor - entropy_uncertainty)
-    y_max = max(float(np.nanmax(nll)), entropy_floor + entropy_uncertainty)
+    y_candidates = [
+        float(np.nanmin(nll)),
+        float(np.nanmax(nll)),
+        entropy_floor - entropy_uncertainty,
+        entropy_floor + entropy_uncertainty,
+    ]
+    if isinstance(fit, dict):
+        asymptote_std = float(fit.get("asymptote_std_error", float("nan")))
+        if np.isfinite(asymptote_std):
+            y_candidates.extend([
+                float(fit["asymptote"]) - asymptote_std,
+                float(fit["asymptote"]) + asymptote_std,
+            ])
+    y_min = min(y_candidates)
+    y_max = max(y_candidates)
     margin = max(0.015, 0.15 * (y_max - y_min))
     ax.set_ylim(y_min - margin, y_max + margin)
     ax.set_xlabel("training simulations per ensemble member D")
@@ -595,16 +633,18 @@ def plot_scaling(summary: dict[str, object], rows: list[dict[str, object]], outp
     ax.grid(which="both", alpha=0.24)
 
     ax = axes[1]
-    ax.plot(
-        x,
-        nll_excess,
-        color="#0f766e",
-        marker="o",
-        linewidth=2.3,
-        label=r"$\Delta_{\hat H}(D)=L(D)-\hat H$",
-    )
-    fit = fits.get("nll_excess_fixed_entropy_no_floor") if isinstance(fits, dict) else None
+    fit = fits.get("data_excess_from_free_fit") if isinstance(fits, dict) else None
     if isinstance(fit, dict):
+        floor = float(fit["floor"])
+        data_excess = nll - floor
+        ax.plot(
+            x,
+            data_excess,
+            color="#0f766e",
+            marker="o",
+            linewidth=2.3,
+            label=r"$\Delta_D(D)=L(D)-L_{free}$",
+        )
         x_dense = np.geomspace(float(np.min(x)), float(np.max(x)), 200)
         ax.plot(
             x_dense,
@@ -612,42 +652,40 @@ def plot_scaling(summary: dict[str, object], rows: list[dict[str, object]], outp
             color="#172033",
             linestyle="--",
             linewidth=1.3,
-            label=rf"fit $B D^{{-\beta}}$; {exponent_label(r'\beta', fit)}",
+            label="same fit residual from left panel",
         )
-    lower_excess = nll - (entropy_floor + entropy_uncertainty)
-    upper_excess = nll - (entropy_floor - entropy_uncertainty)
-    if np.all(upper_excess > 0.0):
-        ax.fill_between(
+        floor_std = float(fit.get("floor_std_error", float("nan")))
+        y_upper = data_excess
+        if np.isfinite(floor_std) and floor_std > 0.0:
+            lower = data_excess - floor_std
+            upper = data_excess + floor_std
+            if np.all(upper > 0.0):
+                ax.fill_between(
+                    x,
+                    np.maximum(lower, 1e-5),
+                    upper,
+                    color="#d97706",
+                    alpha=0.10,
+                    label=r"$L_{free}$ uncertainty propagated",
+                )
+                y_upper = upper
+        ax.set_ylim(max(float(np.nanmin(y_upper)) * 0.45, 1e-5), float(np.nanmax(y_upper)) * 1.9)
+    else:
+        ax.plot(
             x,
-            np.maximum(lower_excess, 1e-5),
-            upper_excess,
-            color="#b42318",
-            alpha=0.10,
-            label=r"$\hat H$ uncertainty propagated",
+            nll_excess,
+            color="#0f766e",
+            marker="o",
+            linewidth=2.3,
+            label=r"$\Delta_{\hat H}(D)=L(D)-\hat H$",
         )
+        upper_excess = nll - (entropy_floor - entropy_uncertainty)
+        ax.set_ylim(max(float(np.nanmin(upper_excess)) * 0.55, 1e-4), float(np.nanmax(upper_excess)) * 1.75)
     ax.set_xscale("log")
     ax.set_yscale("log")
-    lower = max(
-        min(float(np.nanmin(nll_excess)) * 0.55, float(np.nanmin(upper_excess)) * 0.55),
-        1e-4,
-    )
-    ax.set_ylim(
-        lower,
-        float(np.nanmax(upper_excess)) * 1.75,
-    )
     ax.set_xlabel("training simulations per ensemble member D")
-    ax.set_ylabel(r"$\Delta_{\hat H}(D)$: validation NLL minus $\hat H$")
-    ax.set_title("Fixed-floor excess loss")
-    ax.text(
-        0.02,
-        0.04,
-        rf"Right fit: $\Delta_{{\hat H}}(D)=B D^{{-\beta}}$"
-        "\n"
-        r"Band: $L(D)-(\hat H\pm s_H)$",
-        transform=ax.transAxes,
-        fontsize=8,
-        color="#7f1d1d",
-    )
+    ax.set_ylabel(r"$\Delta_D(D)$: validation NLL minus $L_{free}$")
+    ax.set_title("Finite-data excess over fitted fixed-model floor")
     ax.legend(frameon=False, fontsize=8)
     ax.grid(which="both", alpha=0.24)
     fig.suptitle("Single-decay Flow2 residual NSF ensemble data scaling", y=1.03)

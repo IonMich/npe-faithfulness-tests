@@ -70,7 +70,8 @@ def load_rows(summary_paths: list[Path]) -> list[dict[str, object]]:
     rows = []
     for summary_path in summary_paths:
         data = json.loads(summary_path.read_text(encoding="utf-8"))
-        for row in data["rows"]:
+        source_rows = data["rows"] if "rows" in data else [data]
+        for row in source_rows:
             item = dict(row)
             item["source_summary_json"] = str(summary_path)
             config = item.get("config", {})
@@ -132,29 +133,37 @@ def summarize(rows: list[dict[str, object]]) -> list[dict[str, object]]:
             "flow_context_dim": first.get("flow_context_dim"),
             "spline_bins": first.get("spline_bins"),
             "panel_marginal_wasserstein_mean": quantile_summary(
-                np.asarray([row["panel_marginal_wasserstein_mean"] for row in group], dtype=np.float64)
+                metric_values(group, "panel_marginal_wasserstein_mean")
             ),
             "panel_marginal_target_ratio_mean": quantile_summary(
-                np.asarray([row["panel_marginal_target_ratio_mean"] for row in group], dtype=np.float64)
+                metric_values(group, "panel_marginal_target_ratio_mean")
             ),
             "x0_grid300_wasserstein": quantile_summary(
-                np.asarray([row["x0_grid300_wasserstein"] for row in group], dtype=np.float64)
+                metric_values(group, "x0_grid300_wasserstein")
             ),
             "x0_grid300_target_ratio": quantile_summary(
-                np.asarray([row["x0_grid300_target_ratio"] for row in group], dtype=np.float64)
+                metric_values(group, "x0_grid300_target_ratio")
             ),
             "full_val_nll_z_units": quantile_summary(
-                np.asarray([row["full_val_nll_z_units"] for row in group], dtype=np.float64)
+                metric_values(group, "full_val_nll_z_units")
             ),
             "best_val_nll_z_units": quantile_summary(
-                np.asarray([row["best_val_nll_z_units"] for row in group], dtype=np.float64)
+                metric_values(group, "best_val_nll_z_units")
             ),
             "training_seconds": quantile_summary(
-                np.asarray([row["training_seconds"] for row in group], dtype=np.float64)
+                metric_values(group, "training_seconds")
             ),
         }
         output.append(item)
     return output
+
+
+def metric_values(rows: list[dict[str, object]], metric: str) -> np.ndarray:
+    values = []
+    for row in rows:
+        value = row.get(metric, np.nan)
+        values.append(np.nan if value is None else value)
+    return np.asarray(values, dtype=np.float64)
 
 
 def plot(summary_rows: list[dict[str, object]], output_path: Path) -> None:
@@ -169,23 +178,40 @@ def plot(summary_rows: list[dict[str, object]], output_path: Path) -> None:
     palette = ["#2f6fbb", "#b85c38", "#2f855a", "#5f4bb6", "#6b7280"]
     colors = {train_simulations: palette[index % len(palette)] for index, train_simulations in enumerate(train_values)}
     for metric, ylabel, ax, fallback_color, log_y in panels:
+        plotted = False
         for train_simulations in train_values:
             group = [row for row in summary_rows if int(row["train_simulations"]) == train_simulations]
             group.sort(key=lambda row: int(row["model_parameters"]))
+            group = [row for row in group if "median" in row[metric]]
+            if not group:
+                continue
             x = np.asarray([row["model_parameters"] for row in group], dtype=np.float64)
             y = np.asarray([row[metric]["median"] for row in group], dtype=np.float64)
             q16 = np.asarray([row[metric]["q16"] for row in group], dtype=np.float64)
             q84 = np.asarray([row[metric]["q84"] for row in group], dtype=np.float64)
+            valid = np.isfinite(x) & np.isfinite(y)
+            if not np.any(valid):
+                continue
+            x = x[valid]
+            y = y[valid]
+            q16 = q16[valid]
+            q84 = q84[valid]
             color = colors.get(train_simulations, fallback_color)
             ax.plot(x, y, marker="o", linewidth=2.0, color=color, label=f"D={train_simulations:,}")
             ax.fill_between(x, q16, q84, color=color, alpha=0.14)
+            plotted = True
         ax.set_xscale("log")
-        if log_y:
+        plotted_y = np.asarray([line.get_ydata() for line in ax.lines], dtype=object)
+        has_positive_y = any(np.any(np.asarray(values, dtype=np.float64) > 0.0) for values in plotted_y)
+        if log_y and has_positive_y:
             ax.set_yscale("log")
         ax.set_xlabel("trainable NPE parameters")
         ax.set_ylabel(ylabel)
         ax.grid(alpha=0.22)
-        ax.legend(frameon=False, fontsize=8)
+        if plotted:
+            ax.legend(frameon=False, fontsize=8)
+        else:
+            ax.text(0.5, 0.5, "not evaluated", ha="center", va="center", transform=ax.transAxes)
     axes[0, 1].axhline(1.0, color="#172033", linestyle=":", linewidth=1.2)
     figure.suptitle("Broad NPE parameter-axis scaling", y=0.995)
     figure.tight_layout()

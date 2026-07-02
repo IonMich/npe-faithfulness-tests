@@ -6667,6 +6667,7 @@
     },
     "full_val_nll_z_units": {
       "asymptote": -3.636104842858715,
+      "asymptote_std_error": 0.0016534458890514598,
       "amplitude": 785.0824522914382,
       "alpha": 0.8234184868241374,
       "alpha_std_error": 0.04569611099746121,
@@ -6836,7 +6837,15 @@
           ]
         }
       }
-    ]
+    ],
+    "data_excess_from_free_fit": {
+      "source_fit": "full_val_nll_z_units",
+      "floor": -3.636104842858715,
+      "floor_std_error": 0.0016534458890514598,
+      "amplitude": 785.0824522914382,
+      "alpha": 0.8234184868241374,
+      "alpha_std_error": 0.04569611099746121
+    }
   },
   "outputs": {
     "rows_csv": "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/201_flow2_ensemble_data_scaling/results/flow2_ensemble_data_scaling_rows.csv",
