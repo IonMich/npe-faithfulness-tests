@@ -241,11 +241,15 @@ evaluation floor. This is a broad amortization diagnostic rather than the
 single-signal $x_0$ faithfulness target above.
 
 The current training-efficiency comparison below tracks the broad-prior
-single-decay validation objective as model size, batch size, training-pool size,
-and optimizer-step budget change. Solid curves are training NLL, dashed points
-are sparse validation NLL, and stars mark final full-cache validation NLL. The
-`Spline L3 h80, D=8.192M, B=1024` run reaches lower validation NLL than the
-previous record while staying under the 2x wall-time target.
+single-decay validation objective through the later efficiency records. Solid
+curves are training NLL, dashed points are sparse cached validation NLL, hollow
+circles are individual exact full-cache NLL, and stars mark final exact
+full-cache NLL; for ensembles, the star is the log-mean-exp ensemble NLL at
+parallel wall time. The progression moved from the 8M plain spline record
+(`-3.6059` in `775.6s`), to a 2M residual NSF single model (`-3.6069` in
+`260.0s`), to a 4-member residual ensemble (`-3.6129` in `119.0s`), and finally
+to the raw-fit-summary mixed-LR ensemble (`-3.6134` in `57.37s`). One raw-fit
+member also individually crossed `-3.60` in `51.36s`.
 
 ![Single decay broad NPE training efficiency curves](runs/00_shared_assets/readme_scaling/decay_broad_npe_training_efficiency_curves.png)
 
