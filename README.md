@@ -206,32 +206,40 @@ The fixed synthetic truth used by the main reference scripts is:
 (A,k,\sigma)=(5.0,0.55,0.35).
 ```
 
-Progress: this is the reference success case. Local flow NPE has a calibrated
-passing run against the grid/MCMC/HMC target. ABC-assisted correction also
-produces faithful posterior samples, with the neural posterior used to focus
-the proposal. Broad prior-amortized NPE, hard local MDNs, and sequential SNPE
-runs remain useful diagnostics because they show how visually close posteriors
-can still miss reference-level accuracy.
+There are now two distinct single-decay results in the repository. The original
+fixed-$x_0$ faithfulness check is a single-observation calibration problem. The
+newer broad-prior NPE work is a population amortization problem over
+$p(\theta)p(x\mid\theta)$.
 
-Best posterior:
+| Result | Current status | Evidence |
+| --- | --- | --- |
+| Fixed-$x_0$ posterior calibration | Historical single-signal success case. | The calibrated local flow run below passes the original grid/MCMC/HMC posterior target for the fixed signal $x_0$. |
+| Broad prior-amortized NPE | Current interactive-viewer model family. | Fresh 4-member flow2 randperm residual NSF reaches full validation NLL `-3.6306901328125`; the convex-weighted saved-checkpoint pool reaches `-3.63128073481036`. |
+
+The plots below are the historical fixed-$x_0$ calibration artifacts, not the
+current broad-prior record:
 [local_q0005_linear_150k_t8_seed20260706 run](runs/01_exponential_decay/03_npe_flow_search/11_npe_flow_local_q0005_linear_150k_t8_seed20260706/README.md).
 
-First, the observed $x_0$ signal and posterior predictive fit:
+Observed $x_0$ signal and posterior predictive fit:
 
 ![Single decay x0 predictive fit](runs/00_shared_assets/readme_model_overlays/single_decay_x0_predictive_overlay.png)
 
-Then, the corresponding best posterior overlay:
+Corresponding fixed-$x_0$ posterior overlay:
 
 ![Single decay best posterior overlay](runs/00_shared_assets/readme_model_overlays/single_decay_best_posterior_overlay.png)
 
-### Single-Exponential Scaling Diagnostics
+### Single-Exponential Broad-Prior Diagnostics
 
-The broad prior-amortized decay NPE is also being used as a small scaling-law
-testbed. These runs hold the architecture family roughly fixed and scale the
-number of prior-predictive training pairs $D$. The main 2x2 diagnostic compares
-an MDN and a conditional spline flow with about 45k parameters each. It reports
-both validation NLL over broad prior samples and panel marginal Wasserstein over
-cached exact grid marginals for a fixed panel of signals.
+The older fixed-P experiment below is the scaling-law diagnostic: it holds the
+architecture family roughly fixed and scales the number of prior-predictive
+training pairs $D$. The later gains are not scaling-law evidence. They came from
+architecture, context-feature, schedule, HPO, ensembling, and convex-weighting
+changes on the broad-prior validation objective.
+
+The fixed-P scaling plot compares an MDN and a conditional spline flow with
+about 45k parameters each. It reports both validation NLL over broad prior
+samples and panel marginal Wasserstein over cached exact grid marginals for a
+fixed panel of signals.
 
 ![Single decay broad NPE fixed-P scaling](runs/00_shared_assets/readme_scaling/decay_mdn_vs_spline_fixed_p_2x2_16m.png)
 
@@ -240,16 +248,41 @@ The log-log panels show useful scaling with $D$ through the tested range up to
 evaluation floor. This is a broad amortization diagnostic rather than the
 single-signal $x_0$ faithfulness target above.
 
-The current training-efficiency comparison below tracks the broad-prior
-single-decay validation objective through the later efficiency records. Solid
-curves are training NLL, dashed points are sparse cached validation NLL, hollow
-circles are individual exact full-cache NLL, and stars mark final exact
-full-cache NLL; for ensembles, the star is the log-mean-exp ensemble NLL at
-parallel wall time. The progression moved from the 8M plain spline record
-(`-3.6059` in `775.6s`), to a 2M residual NSF single model (`-3.6069` in
-`260.0s`), to a 4-member residual ensemble (`-3.6129` in `119.0s`), and finally
-to the raw-fit-summary mixed-LR ensemble (`-3.6134` in `57.37s`). One raw-fit
-member also individually crossed `-3.60` in `51.36s`.
+#### Population Entropy Floor
+
+For the broad-prior validation NLL, the Bayes-optimal density is the exact
+posterior $p(\theta\mid x)$. The irreducible loss is the conditional population
+entropy:
+
+```math
+\mathcal L_\star
+=
+\mathbb E_{p(\theta,x)}
+\left[
+-\log p(\theta\mid x)
+\right]
+=
+H(\theta\mid X).
+```
+
+The current adaptive oracle estimate recorded in
+[npe-next-2x-efficiency-decision-diary.md](notes/npe-next-2x-efficiency-decision-diary.md)
+is approximately `-3.64122 +/- 0.008` in $z$ units. That is the population-NLL
+floor for broad prior-amortized validation. It is separate from the panel
+Wasserstein numerical floor and from the fixed-$x_0$ posterior-faithfulness
+target.
+
+#### Training Efficiency
+
+The wall-time plot below is not a scaling-law plot. It tracks broad-prior
+single-decay training and assembly records by wall time. Curves show training
+NLL where a fresh training curve exists; markers show exact full-cache NLL. The
+legend labels are intentionally just the final NLL values. The teal curve is
+the fresh 4-member flow2 randperm residual NSF ensemble currently exposed in
+the UI (`-3.6307` in `246s`). The purple diamond is the convex-weighted
+saved-checkpoint pool also exposed in the UI (`-3.6313` in `73.63s` assembly
+and evaluation time); it is a point because it was weight optimization over
+already saved checkpoints, not a fresh end-to-end training run.
 
 ![Single decay broad NPE training efficiency curves](runs/00_shared_assets/readme_scaling/decay_broad_npe_training_efficiency_curves.png)
 
