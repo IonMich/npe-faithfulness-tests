@@ -40,7 +40,7 @@ RUNS = [
         "batch1024_hidden80_wd1e4_lr004_e74_max294000_seed20260901/"
         "runs/n4096000_seed20260901/results/training_progress.jsonl",
         "color": "#64748b",
-        "label": "Flow3 NSF, 4.096M simulations, batch 1024, 74 epochs",
+        "label": "Flow4 NSF, 4.096M simulations, batch 1024, 74 epochs",
     },
     {
         "kind": "single",

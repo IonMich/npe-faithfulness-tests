@@ -220,14 +220,151 @@ with objective
 \right].
 ```
 
-The viewer includes two population-trained NPEs. Flow2, Flow3, and Flow4 denote
-two, three, or four flow coupling blocks. Negative log likelihood (NLL) is
-reported in the log-coordinate parameterization
-$z=(\log A,\log k,\log\sigma)$.
+#### Model Definitions
+
+All reported negative log likelihoods (NLLs) in this section are in the
+log-coordinate parameterization $z=(\log A,\log k,\log\sigma)$. Each neural
+posterior estimator (NPE) receives a deterministic context vector
+$c=f(x)$, then standardizes each context coordinate using training-set mean and
+standard deviation before the neural density is evaluated.
+
+The raw-curve context is the 40-dimensional signal itself:
+
+```math
+c_{\mathrm{raw}}(x)=(y_1,\ldots,y_{40}).
+```
+
+The decay-summary context adds 12 deterministic statistics: the intercept and
+negative slope of a least-squares line through
+$\log\max(y_i,10^{-4})$, the standard deviation of the log residuals, mean,
+standard deviation, minimum, maximum, first value, last value, early mean, late
+mean, and first-to-last log ratio. The fit-summary context is a coarse
+least-squares exponential fit. For a 64-point grid over $\log k$ spanning
+three prior standard deviations on either side of the prior mean,
+
+```math
+\phi_k(t_i)=\exp(-k t_i),
+\qquad
+\hat A(k)=
+\frac{\sum_i y_i\phi_k(t_i)}{\sum_i \phi_k(t_i)^2},
+```
+
+and $k_\star$ is the grid point with the smallest residual sum of squares
+$\operatorname{SSE}(k)$. The six fit features are
+
+```math
+\left(
+\log \hat A(k_\star),
+\log k_\star,
+\log \hat\sigma,
+\log(1+\operatorname{SSE}_\star),
+\log(1+\operatorname{SSE}_{2}-\operatorname{SSE}_\star),
+d_{\mathrm{edge}}
+\right),
+```
+
+where $\hat\sigma=\sqrt{\operatorname{SSE}_\star/40}$,
+$\operatorname{SSE}_2$ is the second-best grid SSE, and $d_{\mathrm{edge}}$
+is the normalized distance of $k_\star$ from the grid edge. Thus
+`raw_fit_summary` has 46 context features and `raw_decay_fit_summary` has
+58 context features.
+
+A mixture density network (MDN) models a finite Gaussian mixture with full
+covariances:
+
+```math
+q_\phi(z\mid c)
+=
+\sum_{j=1}^{M}
+\pi_j(c)\,
+\mathcal N\!\left(z;\mu_j(c),L_j(c)L_j(c)^\top\right).
+```
+
+The MDN used in the fixed parameter-count diagnostic has
+$M=5$ components, raw-curve context, a three-hidden-layer SiLU multilayer
+perceptron (MLP) with width 128, and 44,722 trainable parameters.
+
+A neural spline flow (NSF) represents $z$ by an invertible conditional
+transformation $T_\phi(\cdot;c)$ of a standard normal base variable:
+
+```math
+u=T_\phi^{-1}(z;c),
+\qquad
+q_\phi(z\mid c)
+=
+\mathcal N(u;0,I)
+\left|\det\frac{\partial T_\phi^{-1}(z;c)}{\partial z}\right|.
+```
+
+Each NSF transform is a monotonic rational-quadratic spline with 8 bins. In the
+names Flow2, Flow3, and Flow4, the number is the number of stacked NSF
+transforms. These runs use fully autoregressive NSF transforms; they are not
+coupling layers. In this code, coupling-style NSF transforms would correspond
+to `flow_passes=2`, which is not used by the models listed here. A residual NSF
+means the Zuko masked MLP conditioner inside each autoregressive spline uses
+residual hidden blocks. This is separate from the repo's optional residual
+target transform, which is not used by the models listed in this section.
+Random permutations mean the feature order is randomly permuted between
+successive NSF transforms.
+
+An ensemble is a density mixture over trained NPEs:
+
+```math
+q_{\mathrm{ens}}(z\mid x)
+=
+\sum_{m=1}^{M} w_m q_m(z\mid x),
+\qquad
+w_m\ge 0,\quad \sum_m w_m=1.
+```
+
+The ensemble log density is evaluated with `logsumexp` over member log
+densities plus $\log w_m$. The equal-weight 4-member ensemble has
+$w_m=1/4$. The convex-weighted 16-member ensemble fits the weights by
+minimizing validation NLL on 200,000 validation examples,
+
+```math
+\min_{w\in\Delta^{15}}
+-
+\frac{1}{n}
+\sum_{i=1}^{n}
+\log
+\left(
+\sum_{m=1}^{16} w_m q_m(z_i\mid x_i)
+\right),
+```
+
+then reports NLL on the full 1M validation cache, including an 800,000-example
+holdout not used for fitting the weights.
+
+| Model or figure entry | Actual architecture |
+| --- | --- |
+| 4-member Flow2 residual NSF ensemble in the viewer | Four independently trained NSF members; each member uses `raw_decay_fit_summary` context, two NSF transforms, 8 spline bins, width-80 residual masked-MLP conditioners with two hidden layers, ReLU activation, random inter-transform permutations, and 72,938 trainable parameters. Each member is trained on 2.048M simulations for 15 epochs. |
+| 16-member convex-weighted density ensemble in the viewer | Convex mixture of saved NSF checkpoints. The member weights, rounded to four decimals in saved-member order, are `(0.1541, 0.1386, 0.0458, 0.0065, 0.1088, 0.0530, 0.0950, 0.0745, 0.0138, 0.0008, 0.0012, 0.0923, 0.0548, 0.1088, 0.0130, 0.0391)`. The members are Flow2 or Flow3 NSF checkpoints using raw, `raw_fit_summary`, or `raw_decay_fit_summary` context; all use 8 spline bins and width-80, two-hidden-layer conditioners. All but one use residual masked-MLP conditioners. |
+| Fixed parameter-count MDN diagnostic | Five-component full-covariance Gaussian MDN with raw-curve context and a width-128, three-hidden-layer SiLU MLP; 44,722 trainable parameters. |
+| Fixed parameter-count spline-flow diagnostic | Flow4 NSF with raw-curve context, 8 spline bins, width-64, two-hidden-layer ReLU conditioners, no residual conditioners, no random permutations, and 45,844 trainable parameters. |
+| Training-efficiency Flow4 single-model runs | Flow4 NSF single models with raw-curve context. The 90-epoch run uses width 64 and batch 512; the 74-epoch run uses width 80 and batch 1024. |
+| Training-efficiency Flow3 single-model run | Flow3 NSF single model with raw-curve context, width 80, batch 1024, 8.192M simulations, and 27 epochs. |
+| Earlier 4-member residual NSF ensemble curves | Equal-weight density mixtures of four Flow3 residual NSF members with width-80 conditioners and 8 spline bins; one curve uses raw-curve context, and one adds the six fit-summary features. |
+
+For the 16-member convex-weighted density ensemble, the weight-vector indices
+map to member architectures as follows: members 1, 2, 6, and 9 are Flow2
+residual NSF models with random permutations and `raw_decay_fit_summary`
+context; members 3 and 4 are the same Flow2 residual NSF architecture without
+random permutations; members 5, 7, and 8 are Flow3 residual NSF models with
+`raw_decay_fit_summary` context; members 10, 11, 15, and 16 are Flow3 residual
+NSF models with `raw_fit_summary` context; members 12 and 13 are Flow3
+residual NSF models with raw-curve context; member 14 is a Flow3 NSF with
+raw-curve context and no residual conditioner. The Flow2 members have 72,938
+trainable parameters; the Flow3 residual raw-context members have 105,087; the
+Flow3 residual `raw_fit_summary` members have 106,527; the Flow3 residual
+`raw_decay_fit_summary` members have 109,407; and the non-residual Flow3
+raw-context member has 46,767.
+
+The viewer includes two population-trained NPEs:
 
 | Model | Description | Full validation negative log likelihood (NLL) |
 | --- | --- | ---: |
-| 4-member ensemble of Flow2 residual neural spline flows (NSFs) with random permutations, raw curve features, and exponential-fit context features; 2.048M simulations per member, 15 epochs | Equal-weight ensemble trained from initialization. | `-3.6306901328125` |
+| 4-member ensemble of Flow2 residual neural spline flows (NSFs) with random permutations, raw-curve, decay-summary, and fit-summary context features; 2.048M simulations per member, 15 epochs | Equal-weight density ensemble trained from initialization. | `-3.6306901328125` |
 | 16-member convex-weighted density ensemble | Ensemble whose nonnegative weights are fitted on validation data; its measured cache NLL is slightly lower, but the difference is not statistically resolved. | `-3.63128073481036` |
 
 The following prior-predictive signal was sampled from
