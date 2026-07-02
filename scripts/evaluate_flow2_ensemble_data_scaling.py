@@ -287,6 +287,18 @@ def power_with_floor(x: np.ndarray, floor: float, amplitude: float, alpha: float
     return floor + amplitude * np.power(x, -alpha)
 
 
+def covariance_std_error(covariance: np.ndarray | None, index: int) -> float:
+    if covariance is None:
+        return float("nan")
+    covariance = np.asarray(covariance, dtype=np.float64)
+    if covariance.ndim != 2 or index >= covariance.shape[0] or index >= covariance.shape[1]:
+        return float("nan")
+    variance = float(covariance[index, index])
+    if not np.isfinite(variance) or variance < 0.0:
+        return float("nan")
+    return float(math.sqrt(variance))
+
+
 def fit_power_with_floor(x: np.ndarray, y: np.ndarray, *, min_floor: float = 0.0) -> dict[str, object] | None:
     valid = np.isfinite(x) & np.isfinite(y)
     x = np.asarray(x[valid], dtype=np.float64)
@@ -303,7 +315,7 @@ def fit_power_with_floor(x: np.ndarray, y: np.ndarray, *, min_floor: float = 0.0
     initial_alpha = 0.25
     initial_amplitude = float((np.max(y) - initial_floor) * np.min(x) ** initial_alpha)
     try:
-        params, _ = curve_fit(
+        params, covariance = curve_fit(
             power_with_floor,
             x,
             y,
@@ -331,6 +343,7 @@ def fit_power_with_floor(x: np.ndarray, y: np.ndarray, *, min_floor: float = 0.0
         "floor": floor,
         "amplitude": amplitude,
         "alpha": alpha,
+        "alpha_std_error": covariance_std_error(covariance, 2),
         "r2_raw": r2,
         "r2_log_excess": log_r2,
         "x": x.tolist(),
@@ -354,7 +367,7 @@ def fit_loss_with_asymptote(x: np.ndarray, y: np.ndarray) -> dict[str, object] |
     initial_alpha = 0.25
     initial_amplitude = float((np.max(y) - initial_asymptote) * np.min(x) ** initial_alpha)
     try:
-        params, _ = curve_fit(
+        params, covariance = curve_fit(
             power_with_floor,
             x,
             y,
@@ -376,6 +389,7 @@ def fit_loss_with_asymptote(x: np.ndarray, y: np.ndarray) -> dict[str, object] |
         "asymptote": asymptote,
         "amplitude": amplitude,
         "alpha": alpha,
+        "alpha_std_error": covariance_std_error(covariance, 2),
         "r2_raw": r2,
         "x": x.tolist(),
         "y": y.tolist(),
@@ -394,7 +408,11 @@ def fit_power_no_floor(x: np.ndarray, y: np.ndarray) -> dict[str, object] | None
     y = y[order]
     log_x = np.log(x)
     log_y = np.log(y)
-    slope, intercept = np.polyfit(log_x, log_y, 1)
+    try:
+        (slope, intercept), covariance = np.polyfit(log_x, log_y, 1, cov=True)
+    except ValueError:
+        slope, intercept = np.polyfit(log_x, log_y, 1)
+        covariance = None
     alpha = float(-slope)
     amplitude = float(np.exp(intercept))
     fitted = amplitude * np.power(x, -alpha)
@@ -407,6 +425,7 @@ def fit_power_no_floor(x: np.ndarray, y: np.ndarray) -> dict[str, object] | None
     return {
         "amplitude": amplitude,
         "alpha": alpha,
+        "alpha_std_error": covariance_std_error(covariance, 0),
         "r2_raw": raw_r2,
         "r2_log": log_r2,
         "x": x.tolist(),
@@ -502,6 +521,14 @@ def add_region_labels(ax: plt.Axes, x_values: np.ndarray) -> None:
         )
 
 
+def exponent_label(symbol: str, fit: dict[str, object]) -> str:
+    value = float(fit["alpha"])
+    error = float(fit.get("alpha_std_error", float("nan")))
+    if np.isfinite(error):
+        return rf"${symbol}={value:.2f}\pm{error:.2f}$"
+    return rf"${symbol}={value:.2f}$"
+
+
 def plot_scaling(summary: dict[str, object], rows: list[dict[str, object]], output_path: Path) -> None:
     x = np.asarray([row["train_simulations_per_member"] for row in rows], dtype=np.float64)
     nll = np.asarray([row["full_val_nll_z_units"] for row in rows], dtype=np.float64)
@@ -530,7 +557,7 @@ def plot_scaling(summary: dict[str, object], rows: list[dict[str, object]], outp
             color="#172033",
             linestyle="--",
             linewidth=1.3,
-            label=rf"fit $L_{{free}}+A D^{{-\alpha}}$; $\alpha={float(fit['alpha']):.2f}$",
+            label=rf"fit $L_{{free}}+A D^{{-\alpha}}$; {exponent_label(r'\alpha', fit)}",
         )
         ax.axhline(
             float(fit["asymptote"]),
@@ -585,7 +612,7 @@ def plot_scaling(summary: dict[str, object], rows: list[dict[str, object]], outp
             color="#172033",
             linestyle="--",
             linewidth=1.3,
-            label=rf"fit $B D^{{-\beta}}$; $\beta={float(fit['alpha']):.2f}$",
+            label=rf"fit $B D^{{-\beta}}$; {exponent_label(r'\beta', fit)}",
         )
     lower_excess = nll - (entropy_floor + entropy_uncertainty)
     upper_excess = nll - (entropy_floor - entropy_uncertainty)
@@ -651,7 +678,7 @@ def plot_panel_diagnostic(summary: dict[str, object], rows: list[dict[str, objec
             color="#172033",
             linestyle="--",
             linewidth=1.3,
-            label=f"diagnostic fit alpha={float(fit['alpha']):.2f}",
+            label=rf"diagnostic fit {exponent_label(r'\alpha', fit)}",
         )
     ax.axhline(panel_floor, color="#b42318", linestyle=":", linewidth=1.3, label="panel eval floor")
     ax.set_xscale("log")

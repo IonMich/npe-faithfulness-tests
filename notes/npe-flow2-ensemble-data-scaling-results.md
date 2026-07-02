@@ -12,10 +12,10 @@ only per-member training simulations gives a clean monotone loss curve. The
 most defensible headline is the raw validation NLL trend, not a precisely
 floor-subtracted exponent.
 
-A raw-NLL asymptote fit gives exponent `0.82`, but the fitted asymptote is only
-`0.00255` above the current Bayes entropy estimate. That gap is comparable to
-the entropy-floor uncertainty (`+/-0.0026`), so it should not be interpreted as a
-resolved residual training floor.
+A raw-NLL asymptote fit gives exponent `0.823 +/- 0.046`, but the fitted
+asymptote is only `0.00255` above the current Bayes entropy estimate. That gap
+is comparable to the entropy-floor uncertainty (`+/-0.0026`), so it should not
+be interpreted as a resolved residual training floor.
 
 The Wasserstein panel also improves monotonically, but it is a posterior
 diagnostic rather than the primary scaling-law target.
@@ -68,10 +68,10 @@ Power-law fits:
 
 ```text
 Raw-NLL asymptote = -3.63610
-Raw-NLL alpha     = 0.823
+Raw-NLL alpha     = 0.823 +/- 0.046
 Raw-NLL R2        = 0.999
 
-Fixed-entropy excess alpha = 0.704
+Fixed-entropy excess alpha = 0.704 +/- 0.031
 Fixed-entropy log R2       = 0.992
 Excess-alpha sensitivity   = 0.631 to 0.806
                               for entropy_floor +/- 0.0026

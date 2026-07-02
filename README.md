@@ -432,14 +432,16 @@ The equal-weight 4-member ensemble improves monotonically from `64k` to
 `2.048M` simulations per member. Validation NLL improves from `-3.54993` to
 `-3.63069`, reducing excess NLL above the entropy floor from `0.08872` to
 `0.00796`. A raw-NLL asymptote fit gives `L_asym=-3.63610`, exponent `0.823`,
-and raw `R2=0.999`. That fitted asymptote is only `0.00255` above the Bayes
-entropy estimate, comparable to the current `+/-0.0026` floor uncertainty; it
-should not be read as a resolved residual training floor.
+exponent standard error `0.046`, and raw `R2=0.999`. That fitted asymptote is
+only `0.00255` above the Bayes entropy estimate, comparable to the current
+`+/-0.0026` floor uncertainty; it should not be read as a resolved residual
+training floor.
 
 With the entropy estimate held fixed, a no-residual-floor fit to excess NLL
-gives exponent `0.704`, but this exponent is still floor-sensitive near the
-right edge. Shifting the entropy estimate by its current uncertainty moves the
-excess-loss exponent from about `0.631` to `0.806`.
+gives exponent `0.704` with standard error `0.031`, but this exponent is still
+floor-sensitive near the right edge. Shifting the entropy estimate by its
+current uncertainty moves the excess-loss exponent from about `0.631` to
+`0.806`.
 
 The fixed-panel posterior diagnostic moves in the same direction: panel mean
 normalized marginal Wasserstein decreases from `0.11046` to `0.03613`. Full
