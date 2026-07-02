@@ -42,21 +42,36 @@ def build_payload(args: argparse.Namespace) -> dict[str, object]:
         "lr_schedule": args.lr_schedule,
         "lr_eta_min": args.lr_eta_min,
         "lr_warmup_steps": args.lr_warmup_steps,
+        "lr_decay_epochs": args.lr_decay_epochs,
+        "adam_beta1": args.adam_beta1,
+        "adam_beta2": args.adam_beta2,
+        "adam_eps": args.adam_eps,
         "validation_every_epochs": args.validation_every_epochs,
+        "skip_training_validation": args.skip_training_validation,
         "max_optimizer_steps": args.max_optimizer_steps,
         "torch_compile": args.torch_compile,
         "grad_clip_norm": args.grad_clip_norm,
         "ema_decay": args.ema_decay,
         "batching_mode": args.batching_mode,
+        "loss_weight_mode": args.loss_weight_mode,
+        "loss_tail_weight": args.loss_tail_weight,
         "weight_decay": args.weight_decay,
         "hidden_dim": args.hidden_dim,
         "hidden_layers": args.hidden_layers,
         "mdn_components": args.mdn_components,
         "flow_layers": args.flow_layers,
         "flow_context_dim": args.flow_context_dim,
+        "flow_activation": args.flow_activation,
+        "flow_residual": args.flow_residual,
+        "flow_randperm": args.flow_randperm,
+        "flow_passes": args.flow_passes,
+        "flow_kind": args.flow_kind,
         "spline_bins": args.spline_bins,
+        "target_transform": args.target_transform,
+        "target_ridge": args.target_ridge,
         "context_features": args.context_features,
         "jobs": args.jobs,
+        "parallel_backend": args.parallel_backend,
         "torch_threads": args.torch_threads,
         "eval_batch_size": args.eval_batch_size,
         "early_stop_val_simulations": args.early_stop_val_simulations,
@@ -73,6 +88,7 @@ def build_payload(args: argparse.Namespace) -> dict[str, object]:
         "tail_top_k": args.tail_top_k,
         "prepare_caches": args.prepare_caches,
         "save_models": not args.no_save_models,
+        "train_only": args.train_only,
         "sync": not args.no_sync,
         "dry_run": args.remote_dry_run,
     }
@@ -121,10 +137,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=90)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--learning-rate", type=float, default=2e-3)
-    parser.add_argument("--lr-schedule", choices=("constant", "cosine_epoch", "cosine_step"), default="constant")
+    parser.add_argument(
+        "--lr-schedule",
+        choices=("constant", "cosine_epoch", "cosine_step", "one_cycle"),
+        default="constant",
+    )
     parser.add_argument("--lr-eta-min", type=float, default=0.0)
     parser.add_argument("--lr-warmup-steps", type=int, default=0)
+    parser.add_argument("--lr-decay-epochs", type=int, default=0)
+    parser.add_argument("--adam-beta1", type=float, default=0.9)
+    parser.add_argument("--adam-beta2", type=float, default=0.999)
+    parser.add_argument("--adam-eps", type=float, default=1e-8)
     parser.add_argument("--validation-every-epochs", type=int, default=1)
+    parser.add_argument("--skip-training-validation", action="store_true")
     parser.add_argument("--max-optimizer-steps", type=int, default=0)
     parser.add_argument("--torch-compile", choices=("none", "default", "reduce_overhead"), default="none")
     parser.add_argument("--grad-clip-norm", type=float, default=20.0)
@@ -134,19 +159,39 @@ def parse_args() -> argparse.Namespace:
         choices=("dataloader", "pre_shuffle", "sequential"),
         default="dataloader",
     )
+    parser.add_argument("--loss-weight-mode", choices=("none", "tail_balanced"), default="none")
+    parser.add_argument("--loss-tail-weight", type=float, default=3.0)
     parser.add_argument("--weight-decay", type=float, default=1e-5)
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--hidden-layers", type=int, default=3)
     parser.add_argument("--mdn-components", type=int, default=5)
     parser.add_argument("--flow-layers", type=int, default=6)
     parser.add_argument("--flow-context-dim", type=int, default=64)
+    parser.add_argument("--flow-activation", choices=("relu", "elu", "gelu", "silu", "tanh"), default="relu")
+    parser.add_argument("--flow-residual", action="store_true")
+    parser.add_argument("--flow-randperm", action="store_true")
+    parser.add_argument("--flow-kind", choices=("nsf", "maf", "naf", "gf"), default="nsf")
+    parser.add_argument("--flow-passes", type=int, default=0)
     parser.add_argument("--spline-bins", type=int, default=12)
+    parser.add_argument("--target-transform", choices=("none", "linear_residual"), default="none")
+    parser.add_argument("--target-ridge", type=float, default=1e-3)
     parser.add_argument(
         "--context-features",
-        choices=("raw", "decay_summary", "raw_decay_summary"),
+        choices=(
+            "raw",
+            "decay_summary",
+            "fit_summary",
+            "raw_decay_summary",
+            "raw_fit_summary",
+            "asinh",
+            "asinh_decay_summary",
+            "rms_normalized",
+            "rms_normalized_decay_summary",
+        ),
         default="raw",
     )
     parser.add_argument("--jobs", type=int, default=2)
+    parser.add_argument("--parallel-backend", choices=("subprocess", "threads"), default="subprocess")
     parser.add_argument("--torch-threads", type=int, default=2)
     parser.add_argument("--eval-batch-size", type=int, default=16384)
     parser.add_argument("--early-stop-val-simulations", type=int, default=100000)
@@ -164,6 +209,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-prepare-caches", dest="prepare_caches", action="store_false")
     parser.set_defaults(prepare_caches=True)
     parser.add_argument("--no-save-models", action="store_true")
+    parser.add_argument(
+        "--train-only",
+        action="store_true",
+        help="Train and save checkpoints without per-member final validation or posterior diagnostics.",
+    )
     parser.add_argument("--no-sync", action="store_true")
     parser.add_argument(
         "--remote-dry-run",

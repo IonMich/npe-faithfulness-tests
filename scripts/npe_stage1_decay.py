@@ -4,6 +4,7 @@ import argparse
 import copy
 import json
 import math
+import threading
 import time
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -33,8 +34,29 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 
 FAMILIES = ("diag_gaussian", "full_gaussian", "mdn", "affine_flow", "spline_flow")
-CONTEXT_FEATURE_MODES = ("raw", "decay_summary", "raw_decay_summary")
+CONTEXT_FEATURE_MODES = (
+    "raw",
+    "decay_summary",
+    "fit_summary",
+    "laplace_summary",
+    "profile_summary",
+    "raw_decay_summary",
+    "raw_fit_summary",
+    "raw_laplace_summary",
+    "raw_profile_summary",
+    "raw_decay_fit_summary",
+    "raw_decay_laplace_summary",
+    "raw_decay_profile_summary",
+    "asinh",
+    "asinh_decay_summary",
+    "asinh_fit_summary",
+    "rms_normalized",
+    "rms_normalized_decay_summary",
+    "rms_normalized_fit_summary",
+)
 TRAIN_SAMPLERS = ("random", "lhs", "sobol")
+FLOW_ACTIVATIONS = ("relu", "elu", "gelu", "silu", "tanh")
+ZUKO_FLOW_KINDS = ("nsf", "maf", "naf", "gf")
 FAMILY_LABELS = {
     "diag_gaussian": "Diagonal Gaussian",
     "full_gaussian": "Full Gaussian",
@@ -51,6 +73,7 @@ FAMILY_COLORS = {
     "grid_reference": "#172033",
 }
 LOG_2PI = math.log(2.0 * math.pi)
+MODEL_INIT_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -78,12 +101,26 @@ class Stage1Config:
     lr_schedule: str = "constant"
     lr_eta_min: float = 0.0
     lr_warmup_steps: int = 0
+    lr_decay_epochs: int = 0
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.999
+    adam_eps: float = 1e-8
     validation_every_epochs: int = 1
+    skip_training_validation: bool = False
     torch_compile: str = "none"
     grad_clip_norm: float = 20.0
     ema_decay: float = 0.0
     batching_mode: str = "dataloader"
     max_optimizer_steps: int = 0
+    loss_weight_mode: str = "none"
+    loss_tail_weight: float = 3.0
+    target_transform: str = "none"
+    target_ridge: float = 1e-3
+    flow_activation: str = "relu"
+    flow_residual: bool = False
+    flow_randperm: bool = False
+    flow_passes: int = 0
+    flow_kind: str = "nsf"
     progress_jsonl: Path | None = None
     progress_nll_offset: float = 0.0
 
@@ -222,14 +259,211 @@ def decay_context_summary_features(x: np.ndarray) -> np.ndarray:
     )
 
 
+def decay_fit_summary_features(x: np.ndarray, *, grid_size: int = 64, chunk_size: int = 8192) -> np.ndarray:
+    x = np.asarray(x, dtype=np.float64)
+    if x.ndim != 2:
+        raise ValueError(f"Expected 2D context array, got shape {x.shape}")
+    t = np.linspace(0.0, 6.0, x.shape[1], dtype=np.float64)
+    log_k_center = float(PRIOR_LOG_MEAN[1].detach().cpu())
+    log_k_scale = float(PRIOR_LOG_STD[1].detach().cpu())
+    log_k_grid = np.linspace(
+        log_k_center - 3.0 * log_k_scale,
+        log_k_center + 3.0 * log_k_scale,
+        grid_size,
+        dtype=np.float64,
+    )
+    k_grid = np.exp(log_k_grid)
+    phi = np.exp(-k_grid[:, None] * t[None, :])
+    denom = np.sum(phi * phi, axis=1).clip(min=1e-12)
+    outputs: list[np.ndarray] = []
+    for start in range(0, x.shape[0], chunk_size):
+        y = x[start : start + chunk_size]
+        y_phi = y @ phi.T
+        amplitude_grid = y_phi / denom[None, :]
+        y2 = np.sum(y * y, axis=1, keepdims=True)
+        sse_grid = y2 - 2.0 * amplitude_grid * y_phi + amplitude_grid * amplitude_grid * denom[None, :]
+        sse_grid = np.maximum(sse_grid, 0.0)
+        best = np.argmin(sse_grid, axis=1)
+        row = np.arange(y.shape[0])
+        best_sse = sse_grid[row, best]
+        best_amplitude = amplitude_grid[row, best]
+        best_log_k = log_k_grid[best]
+        sigma_hat = np.sqrt(best_sse / max(1, x.shape[1]))
+        sorted_sse = np.partition(sse_grid, kth=min(1, grid_size - 1), axis=1)
+        second_sse = sorted_sse[:, min(1, grid_size - 1)]
+        edge_distance = np.minimum(best, grid_size - 1 - best).astype(np.float64) / max(1, grid_size - 1)
+        outputs.append(
+            np.column_stack(
+                [
+                    np.log(np.clip(best_amplitude, 1e-6, None)),
+                    best_log_k,
+                    np.log(np.clip(sigma_hat, 1e-6, None)),
+                    np.log1p(best_sse),
+                    np.log1p(second_sse - best_sse),
+                    edge_distance,
+                ]
+            )
+        )
+    return np.vstack(outputs)
+
+
+def decay_laplace_summary_features(x: np.ndarray, *, grid_size: int = 64, chunk_size: int = 8192) -> np.ndarray:
+    x = np.asarray(x, dtype=np.float64)
+    if x.ndim != 2:
+        raise ValueError(f"Expected 2D context array, got shape {x.shape}")
+    t = np.linspace(0.0, 6.0, x.shape[1], dtype=np.float64)
+    log_k_center = float(PRIOR_LOG_MEAN[1].detach().cpu())
+    log_k_scale = float(PRIOR_LOG_STD[1].detach().cpu())
+    log_k_grid = np.linspace(
+        log_k_center - 3.0 * log_k_scale,
+        log_k_center + 3.0 * log_k_scale,
+        grid_size,
+        dtype=np.float64,
+    )
+    k_grid = np.exp(log_k_grid)
+    phi = np.exp(-k_grid[:, None] * t[None, :])
+    denom = np.sum(phi * phi, axis=1).clip(min=1e-12)
+    prior_mean = PRIOR_LOG_MEAN.detach().cpu().numpy().astype(np.float64)
+    prior_std = PRIOR_LOG_STD.detach().cpu().numpy().astype(np.float64)
+    prior_precision = 1.0 / np.square(prior_std)
+    outputs: list[np.ndarray] = []
+    for start in range(0, x.shape[0], chunk_size):
+        y = x[start : start + chunk_size]
+        y_phi = y @ phi.T
+        amplitude_grid = y_phi / denom[None, :]
+        y2 = np.sum(y * y, axis=1, keepdims=True)
+        sse_grid = y2 - 2.0 * amplitude_grid * y_phi + amplitude_grid * amplitude_grid * denom[None, :]
+        sse_grid = np.maximum(sse_grid, 0.0)
+        best = np.argmin(sse_grid, axis=1)
+        row = np.arange(y.shape[0])
+        best_sse = sse_grid[row, best]
+        best_amplitude = np.clip(amplitude_grid[row, best], 1e-6, None)
+        best_log_a = np.log(best_amplitude)
+        best_log_k = log_k_grid[best]
+        best_k = np.exp(best_log_k)
+        sigma_hat = np.sqrt(best_sse / max(1, x.shape[1])).clip(min=1e-6)
+        mu = best_amplitude[:, None] * np.exp(-best_k[:, None] * t[None, :])
+        d_log_a = mu
+        d_log_k = -mu * best_k[:, None] * t[None, :]
+        inv_var = 1.0 / np.square(sigma_hat)
+        h_aa = np.sum(d_log_a * d_log_a, axis=1) * inv_var + prior_precision[0]
+        h_ak = np.sum(d_log_a * d_log_k, axis=1) * inv_var
+        h_kk = np.sum(d_log_k * d_log_k, axis=1) * inv_var + prior_precision[1]
+        det = np.maximum(h_aa * h_kk - h_ak * h_ak, 1e-12)
+        cov_aa = h_kk / det
+        cov_kk = h_aa / det
+        cov_ak = -h_ak / det
+        std_log_a = np.sqrt(np.maximum(cov_aa, 1e-12))
+        std_log_k = np.sqrt(np.maximum(cov_kk, 1e-12))
+        corr_ak = cov_ak / np.maximum(std_log_a * std_log_k, 1e-12)
+        noise_precision = 2.0 * float(x.shape[1]) + prior_precision[2]
+        std_log_sigma = np.full(y.shape[0], np.sqrt(1.0 / np.maximum(noise_precision, 1e-12)))
+        z_map = np.column_stack([best_log_a, best_log_k, np.log(sigma_hat)])
+        prior_maha = np.sum(np.square((z_map - prior_mean[None, :]) / prior_std[None, :]), axis=1)
+        gaussian_log_like = -0.5 * (
+            float(x.shape[1]) * LOG_2PI
+            + float(x.shape[1]) * np.log(np.square(sigma_hat))
+            + best_sse / np.square(sigma_hat)
+        )
+        sorted_sse = np.partition(sse_grid, kth=min(1, grid_size - 1), axis=1)
+        second_sse = sorted_sse[:, min(1, grid_size - 1)]
+        edge_distance = np.minimum(best, grid_size - 1 - best).astype(np.float64) / max(1, grid_size - 1)
+        outputs.append(
+            np.column_stack(
+                [
+                    best_log_a,
+                    best_log_k,
+                    np.log(sigma_hat),
+                    np.log(np.clip(std_log_a, 1e-6, None)),
+                    np.log(np.clip(std_log_k, 1e-6, None)),
+                    np.log(np.clip(std_log_sigma, 1e-6, None)),
+                    corr_ak,
+                    np.log1p(best_sse),
+                    np.log1p(second_sse - best_sse),
+                    edge_distance,
+                    -0.5 * prior_maha,
+                    gaussian_log_like,
+                ]
+            )
+        )
+    return np.vstack(outputs)
+
+
+def decay_profile_summary_features(x: np.ndarray, *, grid_size: int = 32, chunk_size: int = 8192) -> np.ndarray:
+    x = np.asarray(x, dtype=np.float64)
+    if x.ndim != 2:
+        raise ValueError(f"Expected 2D context array, got shape {x.shape}")
+    t = np.linspace(0.0, 6.0, x.shape[1], dtype=np.float64)
+    log_k_center = float(PRIOR_LOG_MEAN[1].detach().cpu())
+    log_k_scale = float(PRIOR_LOG_STD[1].detach().cpu())
+    log_k_grid = np.linspace(
+        log_k_center - 3.0 * log_k_scale,
+        log_k_center + 3.0 * log_k_scale,
+        grid_size,
+        dtype=np.float64,
+    )
+    k_grid = np.exp(log_k_grid)
+    phi = np.exp(-k_grid[:, None] * t[None, :])
+    denom = np.sum(phi * phi, axis=1).clip(min=1e-12)
+    outputs: list[np.ndarray] = []
+    for start in range(0, x.shape[0], chunk_size):
+        y = x[start : start + chunk_size]
+        y_phi = y @ phi.T
+        amplitude_grid = y_phi / denom[None, :]
+        y2 = np.sum(y * y, axis=1, keepdims=True)
+        sse_grid = y2 - 2.0 * amplitude_grid * y_phi + amplitude_grid * amplitude_grid * denom[None, :]
+        sse_grid = np.maximum(sse_grid, 1e-12)
+        log_amp_grid = np.log(np.clip(amplitude_grid, 1e-6, None))
+        profile = -0.5 * float(x.shape[1]) * np.log(sse_grid / max(1, x.shape[1]))
+        profile = profile - np.max(profile, axis=1, keepdims=True)
+        profile = np.clip(profile, -60.0, 0.0) / 10.0
+        outputs.append(np.concatenate([profile, log_amp_grid], axis=1))
+    return np.vstack(outputs)
+
+
 def transform_context_features(x: np.ndarray, mode: str) -> np.ndarray:
+    raw = np.asarray(x, dtype=np.float64)
     if mode == "raw":
-        return np.asarray(x, dtype=np.float64)
+        return raw
     summary = decay_context_summary_features(x)
     if mode == "decay_summary":
         return summary
+    if mode == "fit_summary":
+        return decay_fit_summary_features(x)
+    if mode == "laplace_summary":
+        return decay_laplace_summary_features(x)
+    if mode == "profile_summary":
+        return decay_profile_summary_features(x)
     if mode == "raw_decay_summary":
-        return np.concatenate([np.asarray(x, dtype=np.float64), summary], axis=1)
+        return np.concatenate([raw, summary], axis=1)
+    if mode == "raw_fit_summary":
+        return np.concatenate([raw, decay_fit_summary_features(x)], axis=1)
+    if mode == "raw_laplace_summary":
+        return np.concatenate([raw, decay_laplace_summary_features(x)], axis=1)
+    if mode == "raw_profile_summary":
+        return np.concatenate([raw, decay_profile_summary_features(x)], axis=1)
+    if mode == "raw_decay_fit_summary":
+        return np.concatenate([raw, summary, decay_fit_summary_features(x)], axis=1)
+    if mode == "raw_decay_laplace_summary":
+        return np.concatenate([raw, summary, decay_laplace_summary_features(x)], axis=1)
+    if mode == "raw_decay_profile_summary":
+        return np.concatenate([raw, summary, decay_profile_summary_features(x)], axis=1)
+    asinh_raw = np.arcsinh(raw)
+    if mode == "asinh":
+        return asinh_raw
+    if mode == "asinh_decay_summary":
+        return np.concatenate([asinh_raw, summary], axis=1)
+    if mode == "asinh_fit_summary":
+        return np.concatenate([asinh_raw, decay_fit_summary_features(x)], axis=1)
+    rms = np.sqrt(np.mean(raw * raw, axis=1, keepdims=True)).clip(min=1e-6)
+    rms_normalized = raw / rms
+    log_rms = np.log(rms)
+    if mode == "rms_normalized":
+        return np.concatenate([rms_normalized, log_rms], axis=1)
+    if mode == "rms_normalized_decay_summary":
+        return np.concatenate([rms_normalized, log_rms, summary], axis=1)
+    if mode == "rms_normalized_fit_summary":
+        return np.concatenate([rms_normalized, log_rms, decay_fit_summary_features(x)], axis=1)
     raise ValueError(f"Unknown context feature mode: {mode}")
 
 
@@ -435,6 +669,20 @@ class AffineFlowPosterior(nn.Module):
         return current
 
 
+def flow_activation_constructor(name: str) -> type[nn.Module]:
+    if name == "relu":
+        return nn.ReLU
+    if name == "elu":
+        return nn.ELU
+    if name == "gelu":
+        return nn.GELU
+    if name == "silu":
+        return nn.SiLU
+    if name == "tanh":
+        return nn.Tanh
+    raise ValueError(f"Unknown flow_activation: {name}")
+
+
 class SplineFlowPosterior(nn.Module):
     def __init__(
         self,
@@ -444,16 +692,37 @@ class SplineFlowPosterior(nn.Module):
         hidden_layers: int,
         flow_layers: int,
         bins: int,
+        activation: str,
+        residual: bool,
+        randperm: bool,
+        passes: int,
+        flow_kind: str,
     ) -> None:
         super().__init__()
         self.z_dim = z_dim
-        self.flow = zuko.flows.NSF(
-            z_dim,
-            context=x_dim,
-            transforms=flow_layers,
-            hidden_features=tuple(hidden_dim for _ in range(hidden_layers)),
-            bins=bins,
-        )
+        common = {
+            "features": z_dim,
+            "context": x_dim,
+            "transforms": flow_layers,
+            "hidden_features": tuple(hidden_dim for _ in range(hidden_layers)),
+            "activation": flow_activation_constructor(activation),
+        }
+        autoregressive = {
+            **common,
+            "randperm": randperm,
+            "passes": None if passes <= 0 else passes,
+            "residual": residual,
+        }
+        if flow_kind == "nsf":
+            self.flow = zuko.flows.NSF(**autoregressive, bins=bins)
+        elif flow_kind == "maf":
+            self.flow = zuko.flows.MAF(**autoregressive)
+        elif flow_kind == "naf":
+            self.flow = zuko.flows.NAF(**autoregressive, signal=max(2, bins))
+        elif flow_kind == "gf":
+            self.flow = zuko.flows.GF(**common, components=max(2, bins))
+        else:
+            raise ValueError(f"Unknown flow_kind: {flow_kind}")
 
     def log_prob(self, z: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         return self.flow(x).log_prob(z)
@@ -470,21 +739,140 @@ class SplineFlowPosterior(nn.Module):
         return torch.cat(samples, dim=0)
 
 
+class LinearResidualTargetPosterior(nn.Module):
+    def __init__(self, base: nn.Module, x_dim: int, z_dim: int) -> None:
+        super().__init__()
+        self.base = base
+        self.register_buffer("linear_weight", torch.zeros(x_dim, z_dim))
+        self.register_buffer("linear_bias", torch.zeros(z_dim))
+        self.register_buffer("residual_scale", torch.ones(z_dim))
+
+    @torch.no_grad()
+    def fit_from_tensors(self, x: torch.Tensor, z: torch.Tensor, ridge: float) -> None:
+        x64 = x.detach().cpu().to(dtype=torch.float64)
+        z64 = z.detach().cpu().to(dtype=torch.float64)
+        n, x_dim = x64.shape
+        z_dim = z64.shape[1]
+        system = torch.empty((x_dim + 1, x_dim + 1), dtype=torch.float64)
+        rhs = torch.empty((x_dim + 1, z_dim), dtype=torch.float64)
+        x_sum = x64.sum(dim=0)
+        system[:x_dim, :x_dim] = x64.T @ x64
+        system[:x_dim, x_dim] = x_sum
+        system[x_dim, :x_dim] = x_sum
+        system[x_dim, x_dim] = float(n)
+        penalty = torch.eye(x_dim + 1, dtype=torch.float64) * float(ridge)
+        penalty[x_dim, x_dim] = 0.0
+        rhs[:x_dim] = x64.T @ z64
+        rhs[x_dim] = z64.sum(dim=0)
+        solution = torch.linalg.solve(system + penalty, rhs)
+        weight = solution[:x_dim]
+        bias = solution[x_dim]
+        residual = z64 - (x64 @ weight + bias)
+        scale = residual.std(dim=0, unbiased=False).clamp_min(0.05)
+        self.linear_weight.copy_(weight.to(dtype=self.linear_weight.dtype))
+        self.linear_bias.copy_(bias.to(dtype=self.linear_bias.dtype))
+        self.residual_scale.copy_(scale.to(dtype=self.residual_scale.dtype))
+
+    def residual_from_z(self, z: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        loc = x @ self.linear_weight.to(device=x.device, dtype=x.dtype)
+        loc = loc + self.linear_bias.to(device=x.device, dtype=x.dtype)
+        scale = self.residual_scale.to(device=x.device, dtype=x.dtype)
+        return (z - loc) / scale
+
+    def log_prob(self, z: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        residual = self.residual_from_z(z, x)
+        scale = self.residual_scale.to(device=x.device, dtype=x.dtype)
+        return self.base.log_prob(residual, x) - torch.log(scale).sum()
+
+    @torch.no_grad()
+    def sample(self, n: int, x: torch.Tensor) -> torch.Tensor:
+        residual = self.base.sample(n, x)
+        loc = x @ self.linear_weight.to(device=x.device, dtype=x.dtype)
+        loc = loc + self.linear_bias.to(device=x.device, dtype=x.dtype)
+        scale = self.residual_scale.to(device=x.device, dtype=x.dtype)
+        return loc.expand_as(residual) + residual * scale.expand_as(residual)
+
+
+class FitSummaryResidualTargetPosterior(nn.Module):
+    def __init__(self, base: nn.Module, x_dim: int, z_dim: int) -> None:
+        super().__init__()
+        self.base = base
+        self.z_dim = z_dim
+        self.register_buffer("fit_weight", torch.zeros(z_dim, z_dim))
+        self.register_buffer("fit_bias", torch.zeros(z_dim))
+        self.register_buffer("residual_scale", torch.ones(z_dim))
+
+    def fit_slice(self, x: torch.Tensor) -> torch.Tensor:
+        if x.shape[-1] == 6:
+            return x[..., : self.z_dim]
+        if x.shape[-1] >= 46:
+            return x[..., -6 : -6 + self.z_dim]
+        raise ValueError(
+            "target_transform='fit_summary_residual' requires fit_summary or raw_fit_summary context."
+        )
+
+    @torch.no_grad()
+    def fit_from_tensors(self, x: torch.Tensor, z: torch.Tensor, ridge: float) -> None:
+        fit = self.fit_slice(x).detach().cpu().to(dtype=torch.float64)
+        z64 = z.detach().cpu().to(dtype=torch.float64)
+        n, fit_dim = fit.shape
+        system = torch.empty((fit_dim + 1, fit_dim + 1), dtype=torch.float64)
+        rhs = torch.empty((fit_dim + 1, z64.shape[1]), dtype=torch.float64)
+        fit_sum = fit.sum(dim=0)
+        system[:fit_dim, :fit_dim] = fit.T @ fit
+        system[:fit_dim, fit_dim] = fit_sum
+        system[fit_dim, :fit_dim] = fit_sum
+        system[fit_dim, fit_dim] = float(n)
+        penalty = torch.eye(fit_dim + 1, dtype=torch.float64) * float(ridge)
+        penalty[fit_dim, fit_dim] = 0.0
+        rhs[:fit_dim] = fit.T @ z64
+        rhs[fit_dim] = z64.sum(dim=0)
+        solution = torch.linalg.solve(system + penalty, rhs)
+        weight = solution[:fit_dim]
+        bias = solution[fit_dim]
+        residual = z64 - (fit @ weight + bias)
+        scale = residual.std(dim=0, unbiased=False).clamp_min(0.05)
+        self.fit_weight.copy_(weight.to(dtype=self.fit_weight.dtype))
+        self.fit_bias.copy_(bias.to(dtype=self.fit_bias.dtype))
+        self.residual_scale.copy_(scale.to(dtype=self.residual_scale.dtype))
+
+    def residual_from_z(self, z: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        fit = self.fit_slice(x)
+        loc = fit @ self.fit_weight.to(device=x.device, dtype=x.dtype)
+        loc = loc + self.fit_bias.to(device=x.device, dtype=x.dtype)
+        scale = self.residual_scale.to(device=x.device, dtype=x.dtype)
+        return (z - loc) / scale
+
+    def log_prob(self, z: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        residual = self.residual_from_z(z, x)
+        scale = self.residual_scale.to(device=x.device, dtype=x.dtype)
+        return self.base.log_prob(residual, x) - torch.log(scale).sum()
+
+    @torch.no_grad()
+    def sample(self, n: int, x: torch.Tensor) -> torch.Tensor:
+        residual = self.base.sample(n, x)
+        fit = self.fit_slice(x)
+        loc = fit @ self.fit_weight.to(device=x.device, dtype=x.dtype)
+        loc = loc + self.fit_bias.to(device=x.device, dtype=x.dtype)
+        scale = self.residual_scale.to(device=x.device, dtype=x.dtype)
+        return loc.expand_as(residual) + residual * scale.expand_as(residual)
+
+
 def make_model(family: str, config: Stage1Config, x_dim: int, z_dim: int) -> nn.Module:
     if family == "diag_gaussian":
-        return DiagonalGaussianPosterior(x_dim, z_dim, config.hidden_dim, config.hidden_layers)
-    if family == "full_gaussian":
-        return FullGaussianPosterior(x_dim, z_dim, config.hidden_dim, config.hidden_layers)
-    if family == "mdn":
-        return MixtureDensityPosterior(
+        base = DiagonalGaussianPosterior(x_dim, z_dim, config.hidden_dim, config.hidden_layers)
+    elif family == "full_gaussian":
+        base = FullGaussianPosterior(x_dim, z_dim, config.hidden_dim, config.hidden_layers)
+    elif family == "mdn":
+        base = MixtureDensityPosterior(
             x_dim,
             z_dim,
             config.hidden_dim,
             config.hidden_layers,
             config.mdn_components,
         )
-    if family == "affine_flow":
-        return AffineFlowPosterior(
+    elif family == "affine_flow":
+        base = AffineFlowPosterior(
             x_dim,
             z_dim,
             config.hidden_dim,
@@ -492,16 +880,29 @@ def make_model(family: str, config: Stage1Config, x_dim: int, z_dim: int) -> nn.
             config.flow_layers,
             config.flow_context_dim,
         )
-    if family == "spline_flow":
-        return SplineFlowPosterior(
+    elif family == "spline_flow":
+        base = SplineFlowPosterior(
             x_dim,
             z_dim,
             config.hidden_dim,
             config.hidden_layers,
             config.flow_layers,
             config.spline_bins,
+            config.flow_activation,
+            config.flow_residual,
+            config.flow_randperm,
+            config.flow_passes,
+            config.flow_kind,
         )
-    raise ValueError(f"Unknown family: {family}")
+    else:
+        raise ValueError(f"Unknown family: {family}")
+    if config.target_transform == "none":
+        return base
+    if config.target_transform == "linear_residual":
+        return LinearResidualTargetPosterior(base, x_dim, z_dim)
+    if config.target_transform == "fit_summary_residual":
+        return FitSummaryResidualTargetPosterior(base, x_dim, z_dim)
+    raise ValueError(f"Unknown target_transform: {config.target_transform}")
 
 
 def first_tensor_dataset_batch(loader: DataLoader) -> tuple[torch.Tensor, torch.Tensor] | None:
@@ -524,8 +925,21 @@ def train_one_model(
     x_dim: int,
     z_dim: int,
 ) -> tuple[nn.Module, dict[str, object]]:
-    torch.manual_seed(config.seed + 1000 + FAMILIES.index(family))
-    model = make_model(family, config, x_dim, z_dim).to(device)
+    with MODEL_INIT_LOCK:
+        torch.manual_seed(config.seed + 1000 + FAMILIES.index(family))
+        model = make_model(family, config, x_dim, z_dim)
+    target_transform_fit_seconds = 0.0
+    if isinstance(model, (LinearResidualTargetPosterior, FitSummaryResidualTargetPosterior)):
+        if not isinstance(train_loader.dataset, TensorDataset) or len(train_loader.dataset.tensors) < 2:
+            raise ValueError(f"target_transform={config.target_transform!r} requires a TensorDataset train_loader.")
+        transform_fit_start = time.perf_counter()
+        model.fit_from_tensors(
+            train_loader.dataset.tensors[0],
+            train_loader.dataset.tensors[1],
+            ridge=float(config.target_ridge),
+        )
+        target_transform_fit_seconds = time.perf_counter() - transform_fit_start
+    model = model.to(device)
     if config.torch_compile == "default":
         model = torch.compile(model)
     elif config.torch_compile == "reduce_overhead":
@@ -535,17 +949,27 @@ def train_one_model(
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=config.learning_rate,
+        betas=(float(config.adam_beta1), float(config.adam_beta2)),
+        eps=float(config.adam_eps),
         weight_decay=config.weight_decay,
     )
     max_optimizer_steps = max(0, int(config.max_optimizer_steps))
     scheduler = None
     scheduler_step_unit = None
     if config.lr_schedule == "cosine_epoch":
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=max(1, config.epochs),
-            eta_min=float(config.lr_eta_min),
+        decay_epochs = max(1, int(config.lr_decay_epochs or config.epochs))
+        eta_ratio = (
+            float(config.lr_eta_min) / float(config.learning_rate)
+            if config.learning_rate > 0.0
+            else 0.0
         )
+
+        def cosine_epoch_factor(epoch_index: int) -> float:
+            t = min(max(0, int(epoch_index)), decay_epochs)
+            cosine = 0.5 * (1.0 + math.cos(math.pi * float(t) / float(decay_epochs)))
+            return float(eta_ratio + (1.0 - eta_ratio) * cosine)
+
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=cosine_epoch_factor)
         scheduler_step_unit = "epoch"
     elif config.lr_schedule == "cosine_step":
         total_steps = max(1, config.epochs * len(train_loader))
@@ -576,6 +1000,23 @@ def train_one_model(
                 eta_min=float(config.lr_eta_min),
             )
         scheduler_step_unit = "step"
+    elif config.lr_schedule == "one_cycle":
+        total_steps = max(1, config.epochs * len(train_loader))
+        if max_optimizer_steps > 0:
+            total_steps = min(total_steps, max_optimizer_steps)
+        pct_start = 0.1
+        if config.lr_warmup_steps > 0:
+            pct_start = min(0.5, max(1.0 / total_steps, float(config.lr_warmup_steps) / total_steps))
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=config.learning_rate,
+            total_steps=total_steps,
+            pct_start=pct_start,
+            div_factor=10.0,
+            final_div_factor=100.0,
+            anneal_strategy="cos",
+        )
+        scheduler_step_unit = "step"
     elif config.lr_schedule != "constant":
         raise ValueError(f"Unknown lr_schedule: {config.lr_schedule}")
     manual_batch_tensors = None
@@ -588,7 +1029,7 @@ def train_one_model(
         tensors = train_loader.dataset.tensors
         if len(tensors) < 2:
             raise ValueError(f"batching_mode={config.batching_mode!r} requires x and z tensors.")
-        manual_batch_tensors = (tensors[0], tensors[1])
+        manual_batch_tensors = tuple(tensors[:3])
         manual_batch_shuffle = config.batching_mode == "pre_shuffle"
     elif config.batching_mode != "dataloader":
         raise ValueError(f"Unknown batching_mode: {config.batching_mode}")
@@ -661,7 +1102,7 @@ def train_one_model(
             initial_train_batch_nll = float(
                 (-model.log_prob(batch_z, batch_x).mean()).detach().cpu()
             )
-        initial_val_nll = evaluate_val_nll()
+        initial_val_nll = float("nan") if config.skip_training_validation else evaluate_val_nll()
     synchronize_device(device)
     initial_eval_seconds = time.perf_counter() - initial_eval_start
     append_progress_record(
@@ -680,12 +1121,27 @@ def train_one_model(
             "lr_schedule": config.lr_schedule,
             "lr_eta_min": float(config.lr_eta_min),
             "lr_warmup_steps": int(config.lr_warmup_steps),
+            "lr_decay_epochs": int(config.lr_decay_epochs),
+            "adam_beta1": float(config.adam_beta1),
+            "adam_beta2": float(config.adam_beta2),
+            "adam_eps": float(config.adam_eps),
             "validation_every_epochs": int(config.validation_every_epochs),
+            "skip_training_validation": bool(config.skip_training_validation),
             "torch_compile": config.torch_compile,
             "grad_clip_norm": float(config.grad_clip_norm),
             "ema_decay": float(config.ema_decay),
             "batching_mode": config.batching_mode,
             "max_optimizer_steps": int(config.max_optimizer_steps),
+            "target_transform": config.target_transform,
+            "target_ridge": float(config.target_ridge),
+            "target_transform_fit_seconds": target_transform_fit_seconds,
+            "loss_weight_mode": config.loss_weight_mode,
+            "loss_tail_weight": float(config.loss_tail_weight),
+            "flow_activation": config.flow_activation,
+            "flow_residual": bool(config.flow_residual),
+            "flow_randperm": bool(config.flow_randperm),
+            "flow_passes": int(config.flow_passes),
+            "flow_kind": config.flow_kind,
         },
     )
 
@@ -702,7 +1158,9 @@ def train_one_model(
         if manual_batch_tensors is None:
             batch_iterable = train_loader
         else:
-            train_x_tensor, train_z_tensor = manual_batch_tensors
+            train_x_tensor = manual_batch_tensors[0]
+            train_z_tensor = manual_batch_tensors[1]
+            train_w_tensor = manual_batch_tensors[2] if len(manual_batch_tensors) > 2 else None
             if manual_batch_shuffle:
                 generator = torch.Generator(device="cpu").manual_seed(
                     int(config.seed + 2 + config.train_simulations + epoch)
@@ -710,21 +1168,45 @@ def train_one_model(
                 permutation = torch.randperm(train_x_tensor.shape[0], generator=generator)
                 batch_x_source = train_x_tensor[permutation]
                 batch_z_source = train_z_tensor[permutation]
+                batch_w_source = train_w_tensor[permutation] if train_w_tensor is not None else None
             else:
                 batch_x_source = train_x_tensor
                 batch_z_source = train_z_tensor
+                batch_w_source = train_w_tensor
             batch_size = int(train_loader.batch_size or config.batch_size)
-            batch_iterable = (
-                (
-                    batch_x_source[start_index : start_index + batch_size],
-                    batch_z_source[start_index : start_index + batch_size],
+            if batch_w_source is None:
+                batch_iterable = (
+                    (
+                        batch_x_source[start_index : start_index + batch_size],
+                        batch_z_source[start_index : start_index + batch_size],
+                    )
+                    for start_index in range(0, batch_x_source.shape[0], batch_size)
                 )
-                for start_index in range(0, batch_x_source.shape[0], batch_size)
-            )
-        for batch_x, batch_z in batch_iterable:
+            else:
+                batch_iterable = (
+                    (
+                        batch_x_source[start_index : start_index + batch_size],
+                        batch_z_source[start_index : start_index + batch_size],
+                        batch_w_source[start_index : start_index + batch_size],
+                    )
+                    for start_index in range(0, batch_x_source.shape[0], batch_size)
+                )
+        for batch in batch_iterable:
+            batch_x = batch[0]
+            batch_z = batch[1]
+            batch_w = batch[2] if len(batch) > 2 else None
             batch_x = batch_x.to(device)
             batch_z = batch_z.to(device)
-            loss = -model.log_prob(batch_z, batch_x).mean()
+            per_sample_loss = -model.log_prob(batch_z, batch_x)
+            if batch_w is None:
+                loss = per_sample_loss.mean()
+                batch_weight_sum = float(batch_x.shape[0])
+                train_loss_sum += float(per_sample_loss.detach().mean().cpu()) * batch_weight_sum
+            else:
+                batch_w = batch_w.to(device=device, dtype=per_sample_loss.dtype)
+                batch_weight_sum = float(batch_w.sum().detach().cpu())
+                loss = (per_sample_loss * batch_w).sum() / batch_w.sum().clamp_min(1e-12)
+                train_loss_sum += float((per_sample_loss.detach() * batch_w).sum().cpu())
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             if config.grad_clip_norm > 0.0:
@@ -737,8 +1219,7 @@ def train_one_model(
             optimizer_steps += 1
             if scheduler is not None and scheduler_step_unit == "step":
                 scheduler.step()
-            train_loss_sum += float(loss.detach().cpu()) * batch_x.shape[0]
-            train_count += batch_x.shape[0]
+            train_count += batch_weight_sum
             if max_optimizer_steps > 0 and optimizer_steps >= max_optimizer_steps:
                 reached_max_optimizer_steps = True
                 break
@@ -746,10 +1227,14 @@ def train_one_model(
 
         train_loss = train_loss_sum / train_count
         should_validate = (
-            epoch == 0
-            or (epoch + 1) % max(1, int(config.validation_every_epochs)) == 0
-            or epoch == config.epochs - 1
-            or reached_max_optimizer_steps
+            False
+            if config.skip_training_validation
+            else (
+                epoch == 0
+                or (epoch + 1) % max(1, int(config.validation_every_epochs)) == 0
+                or epoch == config.epochs - 1
+                or reached_max_optimizer_steps
+            )
         )
         if should_validate:
             val_start = time.perf_counter()
@@ -808,10 +1293,15 @@ def train_one_model(
 
     synchronize_device(device)
     runtime = time.perf_counter() - start
+    if config.skip_training_validation:
+        best_state = copy.deepcopy(model.state_dict())
+        best_val = float("nan")
     model.load_state_dict(best_state)
     model.eval()
-    final_val_nll = next(
-        value for value in reversed(history["val_nll"]) if math.isfinite(float(value))
+    final_val_nll = (
+        float("nan")
+        if config.skip_training_validation
+        else next(value for value in reversed(history["val_nll"]) if math.isfinite(float(value)))
     )
     metrics = {
         "family": family,
@@ -825,14 +1315,29 @@ def train_one_model(
         "lr_schedule": config.lr_schedule,
         "lr_eta_min": float(config.lr_eta_min),
         "lr_warmup_steps": int(config.lr_warmup_steps),
+        "lr_decay_epochs": int(config.lr_decay_epochs),
+        "adam_beta1": float(config.adam_beta1),
+        "adam_beta2": float(config.adam_beta2),
+        "adam_eps": float(config.adam_eps),
         "lr_scheduler_step_unit": scheduler_step_unit,
         "validation_every_epochs": int(config.validation_every_epochs),
+        "skip_training_validation": bool(config.skip_training_validation),
         "validation_evaluations": int(sum(history["val_evaluated"])),
         "torch_compile": config.torch_compile,
         "grad_clip_norm": float(config.grad_clip_norm),
         "ema_decay": float(config.ema_decay),
         "batching_mode": config.batching_mode,
         "max_optimizer_steps": int(config.max_optimizer_steps),
+        "target_transform": config.target_transform,
+        "target_ridge": float(config.target_ridge),
+        "target_transform_fit_seconds": target_transform_fit_seconds,
+        "loss_weight_mode": config.loss_weight_mode,
+        "loss_tail_weight": float(config.loss_tail_weight),
+        "flow_activation": config.flow_activation,
+        "flow_residual": bool(config.flow_residual),
+        "flow_randperm": bool(config.flow_randperm),
+        "flow_passes": int(config.flow_passes),
+        "flow_kind": config.flow_kind,
         "progress_jsonl": str(config.progress_jsonl) if config.progress_jsonl is not None else None,
         "optimizer_steps": int(optimizer_steps),
         "batches_per_epoch": int(len(train_loader)),
@@ -1021,7 +1526,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=float, default=2e-3)
     parser.add_argument(
         "--lr-schedule",
-        choices=("constant", "cosine_epoch", "cosine_step"),
+        choices=("constant", "cosine_epoch", "cosine_step", "one_cycle"),
         default="constant",
         help="Learning-rate schedule. Default preserves the historical fixed-rate trainer.",
     )
@@ -1037,6 +1542,18 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Optimizer steps for linear LR warmup before cosine_step decay.",
     )
+    parser.add_argument(
+        "--lr-decay-epochs",
+        type=int,
+        default=0,
+        help=(
+            "Epochs over which cosine_epoch decays to --lr-eta-min. "
+            "Use 0 to decay over --epochs, preserving prior behavior."
+        ),
+    )
+    parser.add_argument("--adam-beta1", type=float, default=0.9)
+    parser.add_argument("--adam-beta2", type=float, default=0.999)
+    parser.add_argument("--adam-eps", type=float, default=1e-8)
     parser.add_argument(
         "--validation-every-epochs",
         type=int,
@@ -1076,13 +1593,47 @@ def parse_args() -> argparse.Namespace:
             "per-epoch shuffling; sequential slices the existing random simulation order."
         ),
     )
+    parser.add_argument(
+        "--loss-weight-mode",
+        choices=("none", "tail_balanced", "low_noise_exp", "snr_exp"),
+        default="none",
+        help="Optional per-simulation loss weighting mode.",
+    )
+    parser.add_argument(
+        "--loss-tail-weight",
+        type=float,
+        default=3.0,
+        help="Additional weight applied per active tail condition for tail_balanced loss.",
+    )
     parser.add_argument("--weight-decay", type=float, default=1e-5)
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--hidden-layers", type=int, default=3)
     parser.add_argument("--mdn-components", type=int, default=5)
     parser.add_argument("--flow-layers", type=int, default=6)
     parser.add_argument("--flow-context-dim", type=int, default=64)
+    parser.add_argument("--flow-activation", choices=FLOW_ACTIVATIONS, default="relu")
+    parser.add_argument("--flow-residual", action="store_true")
+    parser.add_argument("--flow-randperm", action="store_true")
+    parser.add_argument("--flow-kind", choices=ZUKO_FLOW_KINDS, default="nsf")
+    parser.add_argument(
+        "--flow-passes",
+        type=int,
+        default=0,
+        help="NSF autoregressive passes. Use 0 for Zuko's fully autoregressive default.",
+    )
     parser.add_argument("--spline-bins", type=int, default=12)
+    parser.add_argument(
+        "--target-transform",
+        choices=("none", "linear_residual", "fit_summary_residual"),
+        default="none",
+        help="Optional deterministic target transform before density training.",
+    )
+    parser.add_argument(
+        "--target-ridge",
+        type=float,
+        default=1e-3,
+        help="Ridge penalty for residual target transforms.",
+    )
     parser.add_argument("--seed", type=int, default=20260622)
     parser.add_argument("--observed-seed", type=int, default=20260622)
     parser.add_argument("--device", choices=["auto", "cpu", "mps", "cuda"], default="auto")
@@ -1116,18 +1667,29 @@ def main() -> None:
         lr_schedule=args.lr_schedule,
         lr_eta_min=args.lr_eta_min,
         lr_warmup_steps=args.lr_warmup_steps,
+        lr_decay_epochs=args.lr_decay_epochs,
+        adam_beta1=args.adam_beta1,
+        adam_beta2=args.adam_beta2,
+        adam_eps=args.adam_eps,
         validation_every_epochs=args.validation_every_epochs,
         torch_compile=args.torch_compile,
         grad_clip_norm=args.grad_clip_norm,
         ema_decay=args.ema_decay,
         batching_mode=args.batching_mode,
         max_optimizer_steps=args.max_optimizer_steps,
+        loss_weight_mode=args.loss_weight_mode,
+        loss_tail_weight=args.loss_tail_weight,
         weight_decay=args.weight_decay,
         hidden_dim=args.hidden_dim,
         hidden_layers=args.hidden_layers,
         mdn_components=args.mdn_components,
         flow_layers=args.flow_layers,
         flow_context_dim=args.flow_context_dim,
+        flow_activation=args.flow_activation,
+        flow_residual=args.flow_residual,
+        flow_randperm=args.flow_randperm,
+        flow_passes=args.flow_passes,
+        flow_kind=args.flow_kind,
         seed=args.seed,
         observed_seed=args.observed_seed,
         requested_device=args.device,
@@ -1137,6 +1699,8 @@ def main() -> None:
         train_sampler=args.train_sampler,
         context_features=args.context_features,
         spline_bins=args.spline_bins,
+        target_transform=args.target_transform,
+        target_ridge=args.target_ridge,
     )
 
     data_start = time.perf_counter()

@@ -36,10 +36,23 @@ DEFAULT_TRAIN_SIMULATIONS = [64_000, 128_000, 256_000, 512_000, 1_000_000]
 DEFAULT_SEEDS = [20260901, 20260902, 20260903]
 FAMILY_CHOICES = {"mdn", "affine_flow", "spline_flow", "full_gaussian", "diag_gaussian"}
 DEVICE_CHOICES = {"cpu", "mps", "auto", "cuda"}
-LR_SCHEDULE_CHOICES = {"constant", "cosine_epoch", "cosine_step"}
+LR_SCHEDULE_CHOICES = {"constant", "cosine_epoch", "cosine_step", "one_cycle"}
 TORCH_COMPILE_CHOICES = {"none", "default", "reduce_overhead"}
+FLOW_ACTIVATION_CHOICES = {"relu", "elu", "gelu", "silu", "tanh"}
+FLOW_KIND_CHOICES = {"nsf", "maf", "naf", "gf"}
 CONTEXT_VARIANT_CHOICES = {"real", "zero_x", "shuffled_x"}
-CONTEXT_FEATURE_CHOICES = {"raw", "decay_summary", "raw_decay_summary"}
+PARALLEL_BACKEND_CHOICES = {"subprocess", "threads"}
+CONTEXT_FEATURE_CHOICES = {
+    "raw",
+    "decay_summary",
+    "fit_summary",
+    "raw_decay_summary",
+    "raw_fit_summary",
+    "asinh",
+    "asinh_decay_summary",
+    "rms_normalized",
+    "rms_normalized_decay_summary",
+}
 BATCHING_MODE_CHOICES = {"dataloader", "pre_shuffle", "sequential"}
 TRAIN_SAMPLER_CHOICES = {"random", "lhs", "sobol"}
 RUN_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -133,10 +146,19 @@ def parse_int(value: object, *, default: int, name: str, minimum: int = 1) -> in
     return output
 
 
-def parse_float(value: object, *, default: float, name: str, minimum: float | None = None) -> float:
+def parse_float(
+    value: object,
+    *,
+    default: float,
+    name: str,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
     output = default if value is None else float(value)
     if minimum is not None and output < minimum:
         raise ValueError(f"{name} must be >= {minimum}")
+    if maximum is not None and output > maximum:
+        raise ValueError(f"{name} must be <= {maximum}")
     return output
 
 
@@ -277,10 +299,41 @@ def broad_scaling_config(payload: dict[str, object]) -> dict[str, object]:
             name="lr_warmup_steps",
             minimum=0,
         ),
+        "lr_decay_epochs": parse_int(
+            payload.get("lr_decay_epochs"),
+            default=0,
+            name="lr_decay_epochs",
+            minimum=0,
+        ),
+        "adam_beta1": parse_float(
+            payload.get("adam_beta1"),
+            default=0.9,
+            name="adam_beta1",
+            minimum=0.0,
+            maximum=1.0,
+        ),
+        "adam_beta2": parse_float(
+            payload.get("adam_beta2"),
+            default=0.999,
+            name="adam_beta2",
+            minimum=0.0,
+            maximum=1.0,
+        ),
+        "adam_eps": parse_float(
+            payload.get("adam_eps"),
+            default=1e-8,
+            name="adam_eps",
+            minimum=0.0,
+        ),
         "validation_every_epochs": parse_int(
             payload.get("validation_every_epochs"),
             default=1,
             name="validation_every_epochs",
+        ),
+        "skip_training_validation": parse_bool(
+            payload.get("skip_training_validation"),
+            default=False,
+            name="skip_training_validation",
         ),
         "max_optimizer_steps": parse_int(
             payload.get("max_optimizer_steps"),
@@ -312,13 +365,52 @@ def broad_scaling_config(payload: dict[str, object]) -> dict[str, object]:
             name="batching_mode",
             choices=BATCHING_MODE_CHOICES,
         ),
+        "loss_weight_mode": parse_choice(
+            payload.get("loss_weight_mode"),
+            default="none",
+            name="loss_weight_mode",
+            choices=("none", "tail_balanced"),
+        ),
+        "loss_tail_weight": parse_float(
+            payload.get("loss_tail_weight"),
+            default=3.0,
+            name="loss_tail_weight",
+            minimum=0.0,
+        ),
         "weight_decay": parse_float(payload.get("weight_decay"), default=1e-5, name="weight_decay", minimum=0.0),
         "hidden_dim": parse_int(payload.get("hidden_dim"), default=128, name="hidden_dim"),
         "hidden_layers": parse_int(payload.get("hidden_layers"), default=3, name="hidden_layers"),
         "mdn_components": parse_int(payload.get("mdn_components"), default=5, name="mdn_components"),
         "flow_layers": parse_int(payload.get("flow_layers"), default=6, name="flow_layers"),
         "flow_context_dim": parse_int(payload.get("flow_context_dim"), default=64, name="flow_context_dim"),
+        "flow_activation": parse_choice(
+            payload.get("flow_activation"),
+            default="relu",
+            name="flow_activation",
+            choices=FLOW_ACTIVATION_CHOICES,
+        ),
+        "flow_residual": bool(payload.get("flow_residual", False)),
+        "flow_randperm": bool(payload.get("flow_randperm", False)),
+        "flow_kind": parse_choice(
+            payload.get("flow_kind"),
+            default="nsf",
+            name="flow_kind",
+            choices=FLOW_KIND_CHOICES,
+        ),
+        "flow_passes": parse_int(payload.get("flow_passes"), default=0, name="flow_passes", minimum=0),
         "spline_bins": parse_int(payload.get("spline_bins"), default=12, name="spline_bins", minimum=2),
+        "target_transform": parse_choice(
+            payload.get("target_transform"),
+            default="none",
+            name="target_transform",
+            choices=("none", "linear_residual"),
+        ),
+        "target_ridge": parse_float(
+            payload.get("target_ridge"),
+            default=1e-3,
+            name="target_ridge",
+            minimum=0.0,
+        ),
         "context_features": parse_choice(
             payload.get("context_features"),
             default="raw",
@@ -326,6 +418,12 @@ def broad_scaling_config(payload: dict[str, object]) -> dict[str, object]:
             choices=CONTEXT_FEATURE_CHOICES,
         ),
         "jobs": parse_int(payload.get("jobs"), default=2, name="jobs"),
+        "parallel_backend": parse_choice(
+            payload.get("parallel_backend"),
+            default="subprocess",
+            name="parallel_backend",
+            choices=PARALLEL_BACKEND_CHOICES,
+        ),
         "torch_threads": parse_int(payload.get("torch_threads"), default=2, name="torch_threads"),
         "eval_batch_size": parse_int(payload.get("eval_batch_size"), default=16_384, name="eval_batch_size"),
         "early_stop_val_simulations": parse_int(
@@ -372,6 +470,7 @@ def broad_scaling_config(payload: dict[str, object]) -> dict[str, object]:
         "tail_top_k": parse_int(payload.get("tail_top_k"), default=20, name="tail_top_k", minimum=0),
         "prepare_caches": parse_bool(payload.get("prepare_caches"), default=True, name="prepare_caches"),
         "save_models": parse_bool(payload.get("save_models"), default=True, name="save_models"),
+        "train_only": parse_bool(payload.get("train_only"), default=False, name="train_only"),
         "sync": parse_bool(payload.get("sync"), default=True, name="sync"),
         "dry_run": parse_bool(payload.get("dry_run"), default=False, name="dry_run"),
     }
@@ -464,8 +563,17 @@ def broad_scaling_commands(config: dict[str, object], *, uv: str) -> tuple[list[
         str(config["lr_eta_min"]),
         "--lr-warmup-steps",
         str(config["lr_warmup_steps"]),
+        "--lr-decay-epochs",
+        str(config["lr_decay_epochs"]),
+        "--adam-beta1",
+        str(config["adam_beta1"]),
+        "--adam-beta2",
+        str(config["adam_beta2"]),
+        "--adam-eps",
+        str(config["adam_eps"]),
         "--validation-every-epochs",
         str(config["validation_every_epochs"]),
+        *(["--skip-training-validation"] if config["skip_training_validation"] else []),
         "--max-optimizer-steps",
         str(config["max_optimizer_steps"]),
         "--torch-compile",
@@ -476,6 +584,10 @@ def broad_scaling_commands(config: dict[str, object], *, uv: str) -> tuple[list[
         str(config["ema_decay"]),
         "--batching-mode",
         str(config["batching_mode"]),
+        "--loss-weight-mode",
+        str(config["loss_weight_mode"]),
+        "--loss-tail-weight",
+        str(config["loss_tail_weight"]),
         "--weight-decay",
         str(config["weight_decay"]),
         "--hidden-dim",
@@ -488,8 +600,20 @@ def broad_scaling_commands(config: dict[str, object], *, uv: str) -> tuple[list[
         str(config["flow_layers"]),
         "--flow-context-dim",
         str(config["flow_context_dim"]),
+        "--flow-activation",
+        str(config["flow_activation"]),
+        *(["--flow-residual"] if config["flow_residual"] else []),
+        *(["--flow-randperm"] if config["flow_randperm"] else []),
+        "--flow-kind",
+        str(config["flow_kind"]),
+        "--flow-passes",
+        str(config["flow_passes"]),
         "--spline-bins",
         str(config["spline_bins"]),
+        "--target-transform",
+        str(config["target_transform"]),
+        "--target-ridge",
+        str(config["target_ridge"]),
         "--context-features",
         str(config["context_features"]),
         "--context-variants",
@@ -510,6 +634,8 @@ def broad_scaling_commands(config: dict[str, object], *, uv: str) -> tuple[list[
         "--skip-existing",
         "--jobs",
         str(config["jobs"]),
+        "--parallel-backend",
+        str(config["parallel_backend"]),
         "--torch-threads",
         str(config["torch_threads"]),
         "--eval-batch-size",
@@ -519,6 +645,8 @@ def broad_scaling_commands(config: dict[str, object], *, uv: str) -> tuple[list[
     ]
     if not config["save_models"]:
         command.append("--no-save-models")
+    if config["train_only"]:
+        command.append("--train-only")
     if config["dry_run"]:
         command.append("--dry-run")
     return setup_commands, command
