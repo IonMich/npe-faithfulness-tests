@@ -55,12 +55,6 @@ MODEL_LABELS = {
     "flow2_ensemble": "4-member Flow2 residual NSF",
     "mcmc": "Random-walk MCMC",
 }
-SCATTER_AXIS_LABELS = {
-    "spline": "spline-flow NPE distance",
-    "mdn": "mixture density network distance",
-    "flow2_ensemble": "Flow2 residual NSF ensemble distance",
-    "mcmc": "MCMC distance",
-}
 
 
 def json_ready(value: object) -> object:
@@ -419,12 +413,13 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
         for key in model_keys
     }
     sigma = np.asarray([row["sigma"] for row in combined_rows], dtype=np.float64)
-    indices = np.asarray([row["index"] for row in combined_rows], dtype=np.int64)
     all_w = np.concatenate([values[np.isfinite(values)] for values in w_by_model.values()])
     all_ratio = np.concatenate([values[np.isfinite(values)] for values in ratio_by_model.values()])
-    figure, axes = plt.subplots(2, 2, figsize=(13.8, 9.2), constrained_layout=True)
+    figure = plt.figure(figsize=(13.8, 9.2), constrained_layout=True)
+    grid = figure.add_gridspec(2, 2)
 
-    ax = axes[0, 0]
+    ax_distribution = figure.add_subplot(grid[0, 0])
+    ax = ax_distribution
     for key, values in w_by_model.items():
         x, y = ecdf(values)
         ax.step(x, y, where="post", lw=2.5, color=MODEL_COLORS[key], label=MODEL_LABELS[key])
@@ -436,41 +431,7 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
     ax.set_title("Distribution across panel signals")
     ax.grid(which="both", alpha=0.22)
 
-    ax = axes[0, 1]
-    if "flow2_ensemble" in w_by_model and "spline" in w_by_model:
-        x_key = "spline"
-        y_key = "flow2_ensemble"
-    else:
-        x_key, y_key = model_keys[:2]
-    x_values = w_by_model[x_key]
-    y_values = w_by_model[y_key]
-    scatter = ax.scatter(
-        x_values,
-        y_values,
-        c=sigma,
-        cmap="viridis",
-        s=28,
-        alpha=0.78,
-        edgecolors="none",
-    )
-    lower = max(float(np.nanmin(all_w)) * 0.75, 1e-6)
-    upper = float(np.nanmax(all_w)) * 1.25
-    ax.plot([lower, upper], [lower, upper], color="#172033", lw=1.2, linestyle=":")
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_xlim(lower, upper)
-    ax.set_ylim(lower, upper)
-    ax.set_xlabel(SCATTER_AXIS_LABELS.get(x_key, f"{x_key} distance"))
-    ax.set_ylabel(SCATTER_AXIS_LABELS.get(y_key, f"{y_key} distance"))
-    ax.set_title("Per-signal comparison")
-    ax.grid(which="both", alpha=0.22)
-    colorbar = figure.colorbar(scatter, ax=ax, fraction=0.046, pad=0.04)
-    colorbar.set_label("true sigma")
-    worst_order = np.argsort(np.maximum(x_values, y_values))[::-1][: min(6, len(indices))]
-    for row_index in worst_order:
-        ax.text(x_values[row_index], y_values[row_index], str(int(indices[row_index])), fontsize=8)
-
-    ax = axes[1, 0]
+    ax = figure.add_subplot(grid[1, 0])
     if all_ratio.size and np.all(all_ratio > 0):
         bins = np.logspace(np.log10(np.nanmin(all_ratio) * 0.85), np.log10(np.nanmax(all_ratio) * 1.15), 24)
         ax.set_xscale("log")
@@ -484,7 +445,7 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
     ax.set_title("Distance to evaluation floor")
     ax.grid(which="both", alpha=0.22)
 
-    ax = axes[1, 1]
+    ax = figure.add_subplot(grid[:, 1])
     for key, values in w_by_model.items():
         ax.scatter(sigma, values, color=MODEL_COLORS[key], s=24, alpha=0.58, label=MODEL_LABELS[key])
     ax.set_xscale("log")
@@ -493,7 +454,7 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
     ax.set_ylabel("mean normalized marginal Wasserstein distance")
     ax.set_title("Failure concentration by noise level")
     ax.grid(which="both", alpha=0.22)
-    handles, labels = axes[0, 0].get_legend_handles_labels()
+    handles, labels = ax_distribution.get_legend_handles_labels()
     figure.legend(
         handles,
         labels,
