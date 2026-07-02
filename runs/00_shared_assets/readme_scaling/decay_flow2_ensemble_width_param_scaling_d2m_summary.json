@@ -1,0 +1,261 @@
+{
+  "description": "Fixed-D 4-member Flow2 residual NSF ensemble parameter scaling by conditioner width.",
+  "train_roots": [
+    "runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini"
+  ],
+  "train_simulations_per_member": 2048000,
+  "ensemble_size": 4,
+  "validation_cache": "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/validation_cache/broad_prior_val_1m_float32.npz",
+  "population_entropy_nll": -3.63865,
+  "population_entropy_nll_uncertainty": 0.0026,
+  "rows": [
+    {
+      "train_simulations_per_member": 2048000,
+      "model_parameters_per_member": 1346,
+      "ensemble_size": 4,
+      "seeds": [
+        20260901,
+        20260902,
+        20260903,
+        20260904
+      ],
+      "family": "spline_flow",
+      "architecture_label": "spline_h4_l2_t2_b8",
+      "hidden_dim": 4,
+      "hidden_layers": 2,
+      "flow_layers": 2,
+      "spline_bins": 8,
+      "context_features": "raw_decay_fit_summary",
+      "full_val_nll_z_units": -3.572103296875,
+      "nll_excess_over_entropy_floor": 0.06654670312500022,
+      "best_individual_full_val_nll_z_units": -3.55649984375,
+      "ensemble_gain_vs_best_individual": -0.015603453124999778,
+      "individual_full_val_nll_z_units": [
+        -3.5533944375,
+        -3.54049523046875,
+        -3.55649984375,
+        -3.53664828125
+      ],
+      "member_training_seconds_sum": 1076.4256933741271,
+      "member_training_seconds_max": 269.35994549980387,
+      "member_summary_paths": [
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h4/runs/n2048000_seed20260901/results/broad_scaling_run_summary.json",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h4/runs/n2048000_seed20260902/results/broad_scaling_run_summary.json",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h4/runs/n2048000_seed20260903/results/broad_scaling_run_summary.json",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h4/runs/n2048000_seed20260904/results/broad_scaling_run_summary.json"
+      ],
+      "model_paths": [
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h4/runs/n2048000_seed20260901/results/spline_flow_model.pt",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h4/runs/n2048000_seed20260902/results/spline_flow_model.pt",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h4/runs/n2048000_seed20260903/results/spline_flow_model.pt",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h4/runs/n2048000_seed20260904/results/spline_flow_model.pt"
+      ],
+      "nll_json": "runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_combined/results/flow2_width_ensemble_nll_h4_p1346.json"
+    },
+    {
+      "train_simulations_per_member": 2048000,
+      "model_parameters_per_member": 2046,
+      "ensemble_size": 4,
+      "seeds": [
+        20260901,
+        20260902,
+        20260903,
+        20260904
+      ],
+      "family": "spline_flow",
+      "architecture_label": "spline_h6_l2_t2_b8",
+      "hidden_dim": 6,
+      "hidden_layers": 2,
+      "flow_layers": 2,
+      "spline_bins": 8,
+      "context_features": "raw_decay_fit_summary",
+      "full_val_nll_z_units": -3.60330530078125,
+      "nll_excess_over_entropy_floor": 0.035344699218750275,
+      "best_individual_full_val_nll_z_units": -3.59442638671875,
+      "ensemble_gain_vs_best_individual": -0.008878914062500076,
+      "individual_full_val_nll_z_units": [
+        -3.5928512421875,
+        -3.56856017578125,
+        -3.592188484375,
+        -3.59442638671875
+      ],
+      "member_training_seconds_sum": 1117.1784294149838,
+      "member_training_seconds_max": 280.9266559998505,
+      "member_summary_paths": [
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h6/runs/n2048000_seed20260901/results/broad_scaling_run_summary.json",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h6/runs/n2048000_seed20260902/results/broad_scaling_run_summary.json",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h6/runs/n2048000_seed20260903/results/broad_scaling_run_summary.json",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h6/runs/n2048000_seed20260904/results/broad_scaling_run_summary.json"
+      ],
+      "model_paths": [
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h6/runs/n2048000_seed20260901/results/spline_flow_model.pt",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h6/runs/n2048000_seed20260902/results/spline_flow_model.pt",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h6/runs/n2048000_seed20260903/results/spline_flow_model.pt",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h6/runs/n2048000_seed20260904/results/spline_flow_model.pt"
+      ],
+      "nll_json": "runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_combined/results/flow2_width_ensemble_nll_h6_p2046.json"
+    },
+    {
+      "train_simulations_per_member": 2048000,
+      "model_parameters_per_member": 2810,
+      "ensemble_size": 4,
+      "seeds": [
+        20260901,
+        20260902,
+        20260903,
+        20260904
+      ],
+      "family": "spline_flow",
+      "architecture_label": "spline_h8_l2_t2_b8",
+      "hidden_dim": 8,
+      "hidden_layers": 2,
+      "flow_layers": 2,
+      "spline_bins": 8,
+      "context_features": "raw_decay_fit_summary",
+      "full_val_nll_z_units": -3.614096078125,
+      "nll_excess_over_entropy_floor": 0.024553921875000384,
+      "best_individual_full_val_nll_z_units": -3.6069175859375,
+      "ensemble_gain_vs_best_individual": -0.007178492187499774,
+      "individual_full_val_nll_z_units": [
+        -3.6069175859375,
+        -3.59710138671875,
+        -3.58866153125,
+        -3.60580713671875
+      ],
+      "member_training_seconds_sum": 1094.6609859568998,
+      "member_training_seconds_max": 276.8450600830838,
+      "member_summary_paths": [
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h8/runs/n2048000_seed20260901/results/broad_scaling_run_summary.json",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h8/runs/n2048000_seed20260902/results/broad_scaling_run_summary.json",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h8/runs/n2048000_seed20260903/results/broad_scaling_run_summary.json",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h8/runs/n2048000_seed20260904/results/broad_scaling_run_summary.json"
+      ],
+      "model_paths": [
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h8/runs/n2048000_seed20260901/results/spline_flow_model.pt",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h8/runs/n2048000_seed20260902/results/spline_flow_model.pt",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h8/runs/n2048000_seed20260903/results/spline_flow_model.pt",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h8/runs/n2048000_seed20260904/results/spline_flow_model.pt"
+      ],
+      "nll_json": "runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_combined/results/flow2_width_ensemble_nll_h8_p2810.json"
+    },
+    {
+      "train_simulations_per_member": 2048000,
+      "model_parameters_per_member": 4530,
+      "ensemble_size": 4,
+      "seeds": [
+        20260901,
+        20260902,
+        20260903,
+        20260904
+      ],
+      "family": "spline_flow",
+      "architecture_label": "spline_h12_l2_t2_b8",
+      "hidden_dim": 12,
+      "hidden_layers": 2,
+      "flow_layers": 2,
+      "spline_bins": 8,
+      "context_features": "raw_decay_fit_summary",
+      "full_val_nll_z_units": -3.62390042578125,
+      "nll_excess_over_entropy_floor": 0.014749574218750006,
+      "best_individual_full_val_nll_z_units": -3.61835208203125,
+      "ensemble_gain_vs_best_individual": -0.005548343750000129,
+      "individual_full_val_nll_z_units": [
+        -3.61835208203125,
+        -3.61515478125,
+        -3.6110462734375,
+        -3.61573569140625
+      ],
+      "member_training_seconds_sum": 1100.3479066262953,
+      "member_training_seconds_max": 276.5836292919703,
+      "member_summary_paths": [
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h12/runs/n2048000_seed20260901/results/broad_scaling_run_summary.json",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h12/runs/n2048000_seed20260902/results/broad_scaling_run_summary.json",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h12/runs/n2048000_seed20260903/results/broad_scaling_run_summary.json",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h12/runs/n2048000_seed20260904/results/broad_scaling_run_summary.json"
+      ],
+      "model_paths": [
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h12/runs/n2048000_seed20260901/results/spline_flow_model.pt",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h12/runs/n2048000_seed20260902/results/spline_flow_model.pt",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h12/runs/n2048000_seed20260903/results/spline_flow_model.pt",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h12/runs/n2048000_seed20260904/results/spline_flow_model.pt"
+      ],
+      "nll_json": "runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_combined/results/flow2_width_ensemble_nll_h12_p4530.json"
+    },
+    {
+      "train_simulations_per_member": 2048000,
+      "model_parameters_per_member": 6506,
+      "ensemble_size": 4,
+      "seeds": [
+        20260901,
+        20260902,
+        20260903,
+        20260904
+      ],
+      "family": "spline_flow",
+      "architecture_label": "spline_h16_l2_t2_b8",
+      "hidden_dim": 16,
+      "hidden_layers": 2,
+      "flow_layers": 2,
+      "spline_bins": 8,
+      "context_features": "raw_decay_fit_summary",
+      "full_val_nll_z_units": -3.627443546875,
+      "nll_excess_over_entropy_floor": 0.011206453125000237,
+      "best_individual_full_val_nll_z_units": -3.62270740234375,
+      "ensemble_gain_vs_best_individual": -0.004736144531249931,
+      "individual_full_val_nll_z_units": [
+        -3.62270740234375,
+        -3.617653734375,
+        -3.61938802734375,
+        -3.62240209375
+      ],
+      "member_training_seconds_sum": 1116.8729717484675,
+      "member_training_seconds_max": 281.28223633300513,
+      "member_summary_paths": [
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h16/runs/n2048000_seed20260901/results/broad_scaling_run_summary.json",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h16/runs/n2048000_seed20260902/results/broad_scaling_run_summary.json",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h16/runs/n2048000_seed20260903/results/broad_scaling_run_summary.json",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h16/runs/n2048000_seed20260904/results/broad_scaling_run_summary.json"
+      ],
+      "model_paths": [
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h16/runs/n2048000_seed20260901/results/spline_flow_model.pt",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h16/runs/n2048000_seed20260902/results/spline_flow_model.pt",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h16/runs/n2048000_seed20260903/results/spline_flow_model.pt",
+        "/Users/ioannism/repos/npe/runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_mini/h16/runs/n2048000_seed20260904/results/spline_flow_model.pt"
+      ],
+      "nll_json": "runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_combined/results/flow2_width_ensemble_nll_h16_p6506.json"
+    }
+  ],
+  "fits": {
+    "full_val_nll_z_units": {
+      "ok": true,
+      "asymptote": -3.6309530442417626,
+      "asymptote_std_error": 0.0009614195849321974,
+      "amplitude": 17603.939775442443,
+      "alpha": 1.7502630233552663,
+      "alpha_std_error": 0.08055696341825523,
+      "r2": 0.9995814546443931
+    },
+    "capacity_excess_from_free_fit": {
+      "ok": true,
+      "source_fit": "full_val_nll_z_units",
+      "floor": -3.6309530442417626,
+      "floor_std_error": 0.0009614195849321974,
+      "amplitude": 17603.939775442443,
+      "alpha": 1.7502630233552663,
+      "alpha_std_error": 0.08055696341825523
+    },
+    "nll_excess_fixed_entropy_no_floor": {
+      "ok": true,
+      "amplitude": 724.7531945291686,
+      "alpha": 1.2927675282961923,
+      "alpha_std_error": 0.08851756553922774,
+      "r2": 0.991102117438072,
+      "r2_log": 0.956025840300064
+    }
+  },
+  "outputs": {
+    "rows_csv": "runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_combined/results/flow2_ensemble_width_param_scaling_rows.csv",
+    "summary_json": "runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_combined/results/flow2_ensemble_width_param_scaling_summary.json",
+    "figure": "runs/01_exponential_decay/15_broad_scaling/206_flow2_width_param_scaling_d2m_low_convergence_combined/figures/flow2_ensemble_width_param_scaling_weng_style.png"
+  }
+}

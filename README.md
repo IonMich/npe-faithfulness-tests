@@ -401,9 +401,10 @@ The current single-decay data scaling diagnostic holds the deployed 4-member
 Flow2 residual NSF ensemble recipe fixed and scales only the number of
 simulated training pairs per member. The primary measurement is population
 validation NLL. Because this is a continuous-density NLL in normalized `z` units
-and can be negative, the log-scale companion panel plots excess NLL above the
-estimated Bayes entropy floor `-3.63865 +/- 0.0026`. Posterior Wasserstein is
-kept as a separate faithfulness diagnostic, not as the main scaling-law loss.
+and can be negative, the companion panel removes the fitted free asymptote from
+the raw-loss fit and plots the same fitted residual on a log scale. Posterior
+Wasserstein is kept as a separate faithfulness diagnostic, not as the main
+scaling-law loss.
 
 ![Single decay Flow2 ensemble data scaling](runs/00_shared_assets/readme_scaling/decay_flow2_ensemble_data_scaling_weng_style.png)
 
@@ -416,37 +417,75 @@ L(D) = L_{\mathrm{free}} + A D^{-\alpha}.
 
 The shaded Bayes entropy band in that panel is independent of the fit; it is
 the numerical estimate $`\hat H \pm s_H`$, not a fitted constraint. The right
-panel fixes the numerical entropy estimate first and plots the positive
-excess-loss diagnostic:
+panel subtracts the fitted asymptote from the same left-panel fit:
 
 ```math
-\Delta_{\hat H}(D) = L(D) - \hat H,
+\Delta_D(D) = L(D) - L_{\mathrm{free}},
 \qquad
-\Delta_{\hat H}(D) \approx B D^{-\beta}.
+\Delta_D(D) = A D^{-\alpha}.
 ```
 
-The right-panel uncertainty band propagates the entropy-floor uncertainty as
-$`L(D)-(\hat H \pm s_H)`$.
+The right-panel uncertainty band propagates the fitted $`L_{\mathrm{free}}`$
+uncertainty. This removes the finite-model floor from the displayed residual;
+the independent entropy estimate is shown only as a reference in the raw-loss
+panel.
 
 The equal-weight 4-member ensemble improves monotonically from `64k` to
 `2.048M` simulations per member. Validation NLL improves from `-3.54993` to
-`-3.63069`, reducing excess NLL above the entropy floor from `0.08872` to
-`0.00796`. A raw-NLL asymptote fit gives `L_asym=-3.63610`, exponent `0.823`,
-exponent standard error `0.046`, and raw `R2=0.999`. That fitted asymptote is
-only `0.00255` above the Bayes entropy estimate, comparable to the current
-`+/-0.0026` floor uncertainty; it should not be read as a resolved residual
-training floor.
+`-3.63069`. A raw-NLL asymptote fit gives `L_free=-3.63610 +/- 0.00165`,
+exponent `0.823`, exponent standard error `0.046`, and raw `R2=0.999`. That
+fitted asymptote is only `0.00255` above the Bayes entropy estimate, comparable
+to the current `+/-0.0026` floor uncertainty; it should not be read as a
+resolved residual training floor.
 
-With the entropy estimate held fixed, a no-residual-floor fit to excess NLL
-gives exponent `0.704` with standard error `0.031`, but this exponent is still
-floor-sensitive near the right edge. Shifting the entropy estimate by its
-current uncertainty moves the excess-loss exponent from about `0.631` to
-`0.806`.
+The old entropy-floor excess fit is retained in the summary JSON for audit, but
+it is not the displayed scaling-law residual because it mixes the finite-data
+term with the gap between $`L_{\mathrm{free}}`$ and $`\hat H`$.
 
 The fixed-panel posterior diagnostic moves in the same direction: panel mean
 normalized marginal Wasserstein decreases from `0.11046` to `0.03613`. Full
 metadata and rows are stored in
 [flow2_ensemble_data_scaling_summary.json](runs/00_shared_assets/readme_scaling/decay_flow2_ensemble_data_scaling_summary.json).
+
+#### Flow2 Ensemble Parameter Scaling Diagnostic
+
+The complementary parameter-scaling diagnostic fixes the data budget at
+`D=2,048,000` simulations per ensemble member and varies the conditioner width
+of the same 4-member Flow2 residual NSF recipe. This low-width probe uses
+`h=4,6,8,12,16`, corresponding to `1,346` through `6,506` trainable parameters
+per member.
+
+![Single decay Flow2 ensemble parameter scaling](runs/00_shared_assets/readme_scaling/decay_flow2_ensemble_width_param_scaling_d2m_weng_style.png)
+
+The fitted equation is the analogous fixed-data form:
+
+```math
+L(N) = L_{\mathrm{free}} + A N^{-\alpha}.
+```
+
+The right panel again subtracts the same fitted asymptote rather than the
+Bayes entropy estimate:
+
+```math
+\Delta_N(N) = L(N) - L_{\mathrm{free}},
+\qquad
+\Delta_N(N) = A N^{-\alpha}.
+```
+
+Validation NLL improves from `-3.57210` at `1,346` parameters/member to
+`-3.62744` at `6,506` parameters/member. The raw-NLL fit gives
+`L_free=-3.63095 +/- 0.00096`, exponent `1.750`, exponent standard error
+`0.081`, and raw `R2=0.9996`. This fitted fixed-`D` floor is about `0.00770`
+above the Bayes entropy estimate, so subtracting entropy directly would mix the
+capacity term with the finite-data floor.
+
+These low-width parameter runs were convergence-aware rather than strictly
+fixed-epoch: they validated every epoch, saved the best-validation checkpoint,
+and used a 60-epoch upper cap with `120k` optimizer steps. In practice all
+included runs hit the optimizer-step cap and selected the final epoch, so this
+plot is a clean low-parameter scaling probe but not proof that every point has
+fully plateaued. Full metadata and rows are stored in
+[flow2_ensemble_width_param_scaling_summary.json](runs/00_shared_assets/readme_scaling/decay_flow2_ensemble_width_param_scaling_d2m_summary.json).
 
 #### Population Entropy Floor
 
