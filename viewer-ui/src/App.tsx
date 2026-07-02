@@ -29,18 +29,27 @@ const PREVIOUS_CONTROL_STATE_KEY = "npePosteriorViewer.controls.v3";
 const LEGACY_V2_CONTROL_STATE_KEY = "npePosteriorViewer.controls.v2";
 const LEGACY_CONTROL_STATE_KEY = "npePosteriorViewer.controls.v1";
 
-const NPE_MODEL_IDS = ["local_flow", "broad_mdn", "broad_spline_4m", "broad_spline_8m"] as const;
+const NPE_MODEL_IDS = [
+  "local_flow",
+  "broad_mdn",
+  "broad_spline_4m",
+  "broad_spline_8m",
+  "broad_rawfit_ensemble4",
+  "broad_fresh_e15_ensemble4",
+  "broad_weighted_checkpoint_pool"
+] as const;
 type NpeOverlay = (typeof NPE_MODEL_IDS)[number];
 const GRID_SIZE_OPTIONS = ["45", "60", "90", "120", "150", "180"] as const;
 const NPE_GRID_SIZE_OPTIONS = ["30", "45", "60", "75", "90", "120", "150", "180"] as const;
 const MAX_POSTERIOR_DRAWS = 500_000;
+const DEFAULT_NPE_LAYER: Overlay = "broad_fresh_e15_ensemble4";
 
 const defaultControls: ControlState = {
   mode: "local",
   samples: 7000,
   npeMode: "sample",
   npeGridSize: "60",
-  overlays: ["local_flow"],
+  overlays: [DEFAULT_NPE_LAYER],
   gridSize: "60",
   activeView: "corner"
 };
@@ -79,7 +88,7 @@ function normalizeSelectValue<T extends string>(
 }
 
 function modelIdToLayer(value: unknown): Overlay {
-  return typeof value === "string" && isNpeLayer(value) ? value : "local_flow";
+  return typeof value === "string" && isNpeLayer(value) ? value : DEFAULT_NPE_LAYER;
 }
 
 function migrateNpeOverlay(overlays: unknown[], modelId: unknown): Overlay[] {
@@ -98,7 +107,7 @@ function flagsToOverlays(
   referenceValue: unknown,
   includeMcmcValue: unknown,
   includeNpeValue: unknown = true,
-  modelId: unknown = "local_flow"
+  modelId: unknown = DEFAULT_NPE_LAYER
 ): Overlay[] {
   const overlays: Overlay[] =
     includeNpeValue === false || includeNpeValue === "0" ? [] : [modelIdToLayer(modelId)];
@@ -153,10 +162,10 @@ function parseStoredControls(): Partial<ControlState> {
 }
 
 function comparisonToOverlays(value: string): Overlay[] {
-  if (value === "grid_mcmc") return ["local_flow", "grid", "mcmc"];
-  if (value === "mcmc") return ["local_flow", "mcmc"];
-  if (value === "grid") return ["local_flow", "grid"];
-  return ["local_flow"];
+  if (value === "grid_mcmc") return [DEFAULT_NPE_LAYER, "grid", "mcmc"];
+  if (value === "mcmc") return [DEFAULT_NPE_LAYER, "mcmc"];
+  if (value === "grid") return [DEFAULT_NPE_LAYER, "grid"];
+  return [DEFAULT_NPE_LAYER];
 }
 
 function normalizeControls(input: Partial<ControlState>): ControlState {
@@ -221,6 +230,8 @@ function displayModeLabel(value: unknown) {
   if (mode === "local" || mode === "local_region") return "Local region";
   if (mode === "x0") return "Original x0";
   if (mode === "prior") return "Prior predictive";
+  if (mode === "low_prior_very_low") return "Very-low-probability theta, r=4.33";
+  if (mode === "low_prior_extreme") return "Extremely-low-probability theta, r=6.65";
   return mode ? mode.replace(/_/g, " ") : "Unknown";
 }
 
@@ -623,10 +634,27 @@ export default function App() {
         const availableNpeIds = new Set(
           payload.map((model) => model.id).filter(isNpeLayer)
         );
-        const overlays = current.overlays.filter(
-          (layer) => layer === "grid" || layer === "mcmc" || availableNpeIds.has(layer)
+        const overlays = uniqueOverlays(
+          current.overlays
+            .map((layer) => {
+              if (
+                (
+                  layer === "local_flow" ||
+                  layer === "broad_spline_4m" ||
+                  layer === "broad_spline_8m" ||
+                  layer === "broad_rawfit_ensemble4"
+                ) &&
+                availableNpeIds.has("broad_fresh_e15_ensemble4")
+              ) {
+                return "broad_fresh_e15_ensemble4";
+              }
+              return layer;
+            })
+            .filter(
+              (layer) => layer === "grid" || layer === "mcmc" || availableNpeIds.has(layer)
+            )
         );
-        if (overlays.length === current.overlays.length) return current;
+        if (sameOverlaySet(overlays, current.overlays)) return current;
         return { ...current, overlays };
       });
     }
@@ -766,6 +794,8 @@ export default function App() {
               <option value="local">Local-region signal</option>
               <option value="x0">Original x0</option>
               <option value="prior">Prior predictive</option>
+              <option value="low_prior_very_low">Very-low-probability theta, r=4.33</option>
+              <option value="low_prior_extreme">Extremely-low-probability theta, r=6.65</option>
             </SelectField>
           </Field>
           <Field label="Draws">

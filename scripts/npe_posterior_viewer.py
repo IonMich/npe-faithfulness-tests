@@ -32,6 +32,8 @@ from evaluate_decay_amortization_panel import (
 from mcmc_decay_inference import (
     MCMCConfig,
     PARAMETER_NAMES,
+    PRIOR_LOG_MEAN,
+    PRIOR_LOG_STD,
     arviz_diagnostics,
     choose_device as choose_mcmc_device,
     convergence_flags,
@@ -51,6 +53,7 @@ from npe_stage1_decay import (
     make_model,
     posterior_predictive_band,
     sample_posterior_for_observation,
+    transform_context_features,
 )
 
 matplotlib.use("Agg")
@@ -74,6 +77,15 @@ DEFAULT_BEST_BROAD_EFFICIENCY_MODEL = Path(
     "74_ui_best_8m_checkpoint/train8m_lr004_wd2e4_e27_max212000_seed20260901/"
     "runs/n8192000_seed20260901/results/spline_flow_model.pt"
 )
+DEFAULT_BEST_BROAD_ENSEMBLE_SUMMARY = Path(
+    "runs/01_exponential_decay/15_broad_scaling/"
+    "199_nll63_randperm_e15_cosstep_ensemble4_saved/"
+    "results/ensemble4_proof_summary.json"
+)
+DEFAULT_WEIGHTED_BROAD_ENSEMBLE_SUMMARY = Path(
+    "runs/01_exponential_decay/15_broad_scaling/"
+    "187_nll63_weighted_broad_pool/results/weighted_ensemble_summary.json"
+)
 DEFAULT_UI_DIST = Path("viewer-ui/dist")
 DEFAULT_PORT = 8876
 DEFAULT_NPE_EVAL_GRID_SIZE = 60
@@ -89,6 +101,21 @@ NPE_LAYER_COLORS = {
     "broad_mdn": BROAD_NPE_COLOR,
     "broad_spline_4m": "#c45a2d",
     "broad_spline_8m": "#6d4aff",
+    "broad_fresh_e15_ensemble4": "#0f766e",
+    "broad_weighted_checkpoint_pool": "#7c3aed",
+}
+HIDDEN_UI_MODEL_IDS = {"local_flow", "broad_spline_4m"}
+LOW_PRIOR_SIGNAL_SPECS = {
+    "low_prior_very_low": {
+        "label": "very_low",
+        "standardized_offset": np.asarray([2.5, -2.5, 2.5], dtype=np.float64),
+        "noise_seed": 2026070201,
+    },
+    "low_prior_extreme": {
+        "label": "extremely_low",
+        "standardized_offset": np.asarray([4.0, -4.0, 3.5], dtype=np.float64),
+        "noise_seed": 2026070202,
+    },
 }
 
 
@@ -341,7 +368,32 @@ def stage1_config_from_dict(config: dict[str, object]) -> Stage1Config:
         families=[str(item) for item in config["families"]],
         posterior_samples=int(config["posterior_samples"]),
         reference_grid_size=int(config["reference_grid_size"]),
+        train_sampler=str(config.get("train_sampler", "random")),
+        context_features=str(config.get("context_features", "raw")),
         spline_bins=int(config.get("spline_bins", 12)),
+        lr_schedule=str(config.get("lr_schedule", "constant")),
+        lr_eta_min=float(config.get("lr_eta_min", 0.0)),
+        lr_warmup_steps=int(config.get("lr_warmup_steps", 0)),
+        lr_decay_epochs=int(config.get("lr_decay_epochs", 0)),
+        adam_beta1=float(config.get("adam_beta1", 0.9)),
+        adam_beta2=float(config.get("adam_beta2", 0.999)),
+        adam_eps=float(config.get("adam_eps", 1e-8)),
+        validation_every_epochs=int(config.get("validation_every_epochs", 1)),
+        skip_training_validation=bool(config.get("skip_training_validation", False)),
+        torch_compile=str(config.get("torch_compile", "none")),
+        grad_clip_norm=float(config.get("grad_clip_norm", 20.0)),
+        ema_decay=float(config.get("ema_decay", 0.0)),
+        batching_mode=str(config.get("batching_mode", "dataloader")),
+        max_optimizer_steps=int(config.get("max_optimizer_steps", 0)),
+        loss_weight_mode=str(config.get("loss_weight_mode", "none")),
+        loss_tail_weight=float(config.get("loss_tail_weight", 3.0)),
+        target_transform=str(config.get("target_transform", "none")),
+        target_ridge=float(config.get("target_ridge", 1e-3)),
+        flow_activation=str(config.get("flow_activation", "relu")),
+        flow_residual=bool(config.get("flow_residual", False)),
+        flow_randperm=bool(config.get("flow_randperm", False)),
+        flow_passes=int(config.get("flow_passes", 0)),
+        flow_kind=str(config.get("flow_kind", "nsf")),
     )
 
 
@@ -500,6 +552,8 @@ class NPEPosteriorViewer:
         best_broad_model_path: Path | None,
         best_broad_spline_model_path: Path | None,
         best_broad_efficiency_model_path: Path | None,
+        best_broad_ensemble_summary_path: Path | None,
+        weighted_broad_ensemble_summary_path: Path | None,
         seed: int,
         device: str,
         mcmc_device: str,
@@ -563,8 +617,8 @@ class NPEPosteriorViewer:
         self.model_registry: dict[str, dict[str, object]] = {
             "local_flow": {
                 "id": "local_flow",
-                "label": "Local decay flow q=0.005, 150k",
-                "plot_label": "Local flow NPE",
+                "label": "Local q0.005 spline flow, t8 h192x2 bins16, 150k",
+                "plot_label": "Local q0.005 spline t8 h192 bins16",
                 "color": NPE_LAYER_COLORS["local_flow"],
                 "kind": "flow_decay",
                 "training_scope": "local_prior",
@@ -577,21 +631,23 @@ class NPEPosteriorViewer:
         }
         self.stage1_models: dict[str, torch.nn.Module] = {}
         self.stage1_states: dict[str, dict[str, object]] = {}
+        self.stage1_ensembles: dict[str, list[str]] = {}
+        self.stage1_ensemble_weights: dict[str, np.ndarray] = {}
         # Keep the legacy MDN arguments loadable for explicit debugging, but omit
         # them from the default UI model set after the broad-spline records.
         for model_id, path, label, plot_label, color in (
             (
                 "broad_mdn",
                 broad_model_path,
-                "Broad prior-predictive MDN, 100k",
-                "Broad MDN NPE",
+                "Broad MDN, 5 components, h128x3, 100k",
+                "Broad MDN 5c h128x3 100k",
                 NPE_LAYER_COLORS["broad_mdn"],
             ),
             (
                 "broad_mdn_512k",
                 best_broad_model_path,
-                "Broad prior-predictive MDN, 512k seed 20260902",
-                "Broad MDN 512k",
+                "Broad MDN, 5 components, h128x3, 512k, seed 20260902",
+                "Broad MDN 5c h128x3 512k",
                 "#6d4aff",
             ),
         ):
@@ -611,23 +667,47 @@ class NPEPosteriorViewer:
             self.register_stage1_checkpoint(
                 model_id="broad_spline_4m",
                 path=best_broad_spline_model_path,
-                label="Broad prior-predictive spline flow, 4.096M seed 20260901",
-                plot_label="Broad spline 4.096M",
+                label="Broad flow4 NSF, raw-x, h64x2 bins8, 4.096M x e90",
+                plot_label="Broad flow4 NSF 4.096M e90",
                 color=NPE_LAYER_COLORS["broad_spline_4m"],
                 training_description=(
                     "best panel-W fixed-P broad NPE from the scaling diagnostics "
                     "(4.096M prior-predictive simulations, seed 20260901)"
                 ),
             )
-        if best_broad_efficiency_model_path is not None and best_broad_efficiency_model_path.exists():
+        if best_broad_ensemble_summary_path is not None and best_broad_ensemble_summary_path.exists():
+            self.register_stage1_ensemble(
+                model_id="broad_fresh_e15_ensemble4",
+                summary_path=best_broad_ensemble_summary_path,
+                label="4x flow2 randperm residual NSF, raw-decay-fit, 2.048M x e15",
+                plot_label="4x flow2 randperm NSF e15",
+                color=NPE_LAYER_COLORS["broad_fresh_e15_ensemble4"],
+                training_description=(
+                    "freshly retrained 4-member equal density ensemble; exact full-validation "
+                    "NLL -3.630690 in 246 seconds of direct remote training wall time"
+                ),
+            )
+        if weighted_broad_ensemble_summary_path is not None and weighted_broad_ensemble_summary_path.exists():
+            self.register_stage1_ensemble(
+                model_id="broad_weighted_checkpoint_pool",
+                summary_path=weighted_broad_ensemble_summary_path,
+                label="16x convex-weighted saved NPE pool, mixed broad NSF checkpoints",
+                plot_label="16x convex-weighted NPE pool",
+                color=NPE_LAYER_COLORS["broad_weighted_checkpoint_pool"],
+                training_description=(
+                    "reference NLL record only: convex weighted density ensemble over prior saved "
+                    "broad NPE checkpoints, not the fresh-training proof model"
+                ),
+            )
+        elif best_broad_ensemble_summary_path is None and best_broad_efficiency_model_path is not None and best_broad_efficiency_model_path.exists():
             self.register_stage1_checkpoint(
                 model_id="broad_spline_8m",
                 path=best_broad_efficiency_model_path,
-                label="Broad prior-predictive spline flow, 8.192M seed 20260901",
-                plot_label="Broad spline 8.192M",
+                label="Broad flow3 NSF, raw-x, h80x2 bins8, 8.192M x e27",
+                plot_label="Broad flow3 NSF 8.192M e27",
                 color=NPE_LAYER_COLORS["broad_spline_8m"],
                 training_description=(
-                    "current broad-validation NLL record from the efficiency sweep "
+                    "superseded broad-validation NLL record from the efficiency sweep "
                     "(8.192M prior-predictive simulations, 212k optimizer steps)"
                 ),
             )
@@ -636,6 +716,7 @@ class NPEPosteriorViewer:
         return [
             json_ready(self.model_registry[model_id])
             for model_id in self.model_registry
+            if model_id not in HIDDEN_UI_MODEL_IDS
         ]
 
     def register_stage1_checkpoint(
@@ -669,6 +750,87 @@ class NPEPosteriorViewer:
             **load_stage1_run_metadata(path),
         }
 
+    def register_stage1_ensemble(
+        self,
+        *,
+        model_id: str,
+        summary_path: Path,
+        label: str,
+        plot_label: str,
+        color: str,
+        training_description: str,
+    ) -> None:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        member_paths = [Path(path) for path in summary.get("model_paths", [])]
+        if not member_paths:
+            raise ValueError(f"Ensemble summary has no model_paths: {summary_path}")
+        raw_weights = summary.get("ensemble_weights")
+        if raw_weights is None:
+            weights = np.full(len(member_paths), 1.0 / len(member_paths), dtype=np.float64)
+        else:
+            weights = np.asarray(raw_weights, dtype=np.float64)
+            if weights.shape != (len(member_paths),):
+                raise ValueError(
+                    f"Ensemble weights length {weights.shape[0]} does not match "
+                    f"model_paths length {len(member_paths)}: {summary_path}"
+                )
+            if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
+                raise ValueError(f"Invalid ensemble weights in {summary_path}")
+            weight_sum = float(weights.sum())
+            if weight_sum <= 0.0:
+                raise ValueError(f"Ensemble weights sum to zero in {summary_path}")
+            weights = weights / weight_sum
+        member_ids: list[str] = []
+        for index, path in enumerate(member_paths, start=1):
+            if not path.exists():
+                raise FileNotFoundError(f"Missing ensemble member checkpoint: {path}")
+            member_id = f"{model_id}__member{index}"
+            model, state = load_stage1_checkpoint(path, self.device)
+            self.stage1_models[member_id] = model
+            self.stage1_states[member_id] = state
+            member_ids.append(member_id)
+        self.stage1_ensembles[model_id] = member_ids
+        self.stage1_ensemble_weights[model_id] = weights
+        self.model_registry[model_id] = {
+            "id": model_id,
+            "label": label,
+            "plot_label": plot_label,
+            "color": color,
+            "kind": "stage1_ensemble",
+            "training_scope": "broad_prior_predictive",
+            "training_description": training_description,
+            "family": "spline_flow",
+            "family_label": "Residual spline flow ensemble",
+            "train_simulations": summary.get("train_simulations"),
+            "full_val_nll_z_units": summary.get("full_val_nll_z_units"),
+            "panel_marginal_wasserstein_mean": summary.get("panel_marginal_wasserstein_mean"),
+            "panel_marginal_wasserstein_median": summary.get("panel_marginal_wasserstein_median"),
+            "training_seconds": summary.get("training_wall_seconds"),
+            "run_summary": str(summary_path),
+            "ensemble_size": summary.get("ensemble_size", len(member_ids)),
+            "ensemble_weights": weights.tolist(),
+            "model_paths": [str(path) for path in member_paths],
+            "checkpoint": str(summary_path),
+            "has_local_region": False,
+            "local_quantile": None,
+        }
+
+    def stage1_observed_features(self, model_id: str, x: np.ndarray) -> np.ndarray:
+        state = self.stage1_states[model_id]
+        x_mean = np.asarray(state["x_mean"], dtype=np.float64)
+        raw = np.asarray(x, dtype=np.float64)
+        if raw.shape[0] == x_mean.shape[0]:
+            return raw
+        config = state.get("config", {})
+        mode = str(config.get("context_features", "raw"))
+        features = transform_context_features(raw[None, :], mode)[0]
+        if features.shape[0] != x_mean.shape[0]:
+            raise ValueError(
+                f"Context feature shape mismatch for {model_id}: "
+                f"got {features.shape[0]}, expected {x_mean.shape[0]}"
+            )
+        return features
+
     def context_for_signal(self, x: np.ndarray) -> np.ndarray:
         return make_context_summaries(
             x[None, :],
@@ -701,6 +863,33 @@ class NPEPosteriorViewer:
         context = self.context_for_signal(x)
         distance = self.local_distance(context)
         return z, x, distance, {"mode": "x0", "observed_seed": seed}
+
+    def draw_low_prior_signal(self, mode: str) -> tuple[np.ndarray, np.ndarray, float | None, dict[str, object]]:
+        spec = LOW_PRIOR_SIGNAL_SPECS[mode]
+        offset = np.asarray(spec["standardized_offset"], dtype=np.float64)
+        z_mean = PRIOR_LOG_MEAN.detach().cpu().numpy().astype(np.float64)
+        z_std = PRIOR_LOG_STD.detach().cpu().numpy().astype(np.float64)
+        z = z_mean + z_std * offset
+        theta = np.exp(z)
+        rng = np.random.default_rng(int(spec["noise_seed"]))
+        x = simulate_x_from_z(z[None, :], self.t, rng)[0]
+        context = self.context_for_signal(x)
+        distance = self.local_distance(context)
+        prior_mahalanobis = float(np.linalg.norm(offset))
+        return (
+            z,
+            x,
+            distance,
+            {
+                "mode": mode,
+                "theta": theta.tolist(),
+                "standardized_log_prior_offset": offset.tolist(),
+                "prior_mahalanobis": prior_mahalanobis,
+                "log_prior_density_delta_vs_mean": float(-0.5 * prior_mahalanobis**2),
+                "noise_seed": int(spec["noise_seed"]),
+                "tail_label": str(spec["label"]),
+            },
+        )
 
     def draw_local_signal(self) -> tuple[np.ndarray, np.ndarray, float | None, dict[str, object]]:
         if self.local_region is None or self.observed_context is None:
@@ -743,6 +932,8 @@ class NPEPosteriorViewer:
             return self.draw_prior_signal()
         if mode == "x0":
             return self.draw_x0_signal()
+        if mode in LOW_PRIOR_SIGNAL_SPECS:
+            return self.draw_low_prior_signal(mode)
         return self.draw_local_signal()
 
     def create_draw(self, mode: str) -> DrawRecord:
@@ -894,9 +1085,10 @@ class NPEPosteriorViewer:
             )
         if model_id in self.stage1_models:
             stage1_state = self.stage1_states[model_id]
+            observed_features = self.stage1_observed_features(model_id, x)
             return sample_posterior_for_observation(
                 model=self.stage1_models[model_id],
-                observed_x=x,
+                observed_x=observed_features,
                 x_mean=stage1_state["x_mean"],
                 x_std=stage1_state["x_std"],
                 z_mean=stage1_state["z_mean"],
@@ -904,6 +1096,38 @@ class NPEPosteriorViewer:
                 n=posterior_samples,
                 device=self.device,
             )
+        if model_id in self.stage1_ensembles:
+            member_ids = self.stage1_ensembles[model_id]
+            weights = self.stage1_ensemble_weights.get(
+                model_id,
+                np.full(len(member_ids), 1.0 / len(member_ids), dtype=np.float64),
+            )
+            raw_counts = weights * int(posterior_samples)
+            counts = np.floor(raw_counts).astype(int)
+            remainder = int(posterior_samples) - int(counts.sum())
+            if remainder > 0:
+                order = np.argsort(raw_counts - counts)[::-1]
+                counts[order[:remainder]] += 1
+            z_parts = []
+            theta_parts = []
+            for member_id, count in zip(member_ids, counts, strict=True):
+                if count <= 0:
+                    continue
+                stage1_state = self.stage1_states[member_id]
+                observed_features = self.stage1_observed_features(member_id, x)
+                z_member, theta_member = sample_posterior_for_observation(
+                    model=self.stage1_models[member_id],
+                    observed_x=observed_features,
+                    x_mean=stage1_state["x_mean"],
+                    x_std=stage1_state["x_std"],
+                    z_mean=stage1_state["z_mean"],
+                    z_std=stage1_state["z_std"],
+                    n=count,
+                    device=self.device,
+                )
+                z_parts.append(z_member)
+                theta_parts.append(theta_member)
+            return np.vstack(z_parts), np.vstack(theta_parts)
         available = ", ".join(self.model_registry)
         raise ValueError(f"Unknown model_id {model_id!r}. Available models: {available}")
 
@@ -938,7 +1162,8 @@ class NPEPosteriorViewer:
 
         if model_id in self.stage1_models:
             stage1_state = self.stage1_states[model_id]
-            x_standardized = ((x[None, :] - stage1_state["x_mean"][None, :]) / stage1_state["x_std"][None, :]).astype(np.float32)
+            observed_features = self.stage1_observed_features(model_id, x)
+            x_standardized = ((observed_features[None, :] - stage1_state["x_mean"][None, :]) / stage1_state["x_std"][None, :]).astype(np.float32)
             x_row = torch.from_numpy(x_standardized).to(self.device)
             z_mean = np.asarray(stage1_state["z_mean"], dtype=np.float64)
             z_std = np.asarray(stage1_state["z_std"], dtype=np.float64)
@@ -951,6 +1176,27 @@ class NPEPosteriorViewer:
                     values = self.stage1_models[model_id].log_prob(z_tensor, x_tensor).detach().cpu().numpy()
                 log_prob[start:stop] = values
             return log_prob
+
+        if model_id in self.stage1_ensembles:
+            member_log_probs = []
+            for member_id in self.stage1_ensembles[model_id]:
+                member_log_probs.append(
+                    self.estimator_log_prob_on_z_grid(
+                        model_id=member_id,
+                        x=x,
+                        context=context,
+                        z_grid=z_grid,
+                        chunk_size=chunk_size,
+                    )
+                )
+            weights = self.stage1_ensemble_weights.get(
+                model_id,
+                np.full(len(member_log_probs), 1.0 / len(member_log_probs), dtype=np.float64),
+            )
+            return logsumexp(
+                np.vstack(member_log_probs) + np.log(weights)[:, None],
+                axis=0,
+            )
 
         available = ", ".join(self.model_registry)
         raise ValueError(f"Unknown model_id {model_id!r}. Available models: {available}")
@@ -1698,8 +1944,26 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_BEST_BROAD_EFFICIENCY_MODEL,
         help=(
-            "Optional current broad spline-flow efficiency-record checkpoint. "
-            "If the path is missing, it is omitted from the model dropdown."
+            "Optional superseded broad spline-flow efficiency-record checkpoint. "
+            "Used as a fallback only when --best-broad-ensemble-summary is missing."
+        ),
+    )
+    parser.add_argument(
+        "--best-broad-ensemble-summary",
+        type=Path,
+        default=DEFAULT_BEST_BROAD_ENSEMBLE_SUMMARY,
+        help=(
+            "Optional current fresh broad residual-spline ensemble proof summary. "
+            "If present, it replaces the superseded broad 8.192M efficiency model in the picker."
+        ),
+    )
+    parser.add_argument(
+        "--weighted-broad-ensemble-summary",
+        type=Path,
+        default=DEFAULT_WEIGHTED_BROAD_ENSEMBLE_SUMMARY,
+        help=(
+            "Optional convex-weighted saved-checkpoint reference ensemble. "
+            "Kept separate from the fresh-training proof model."
         ),
     )
     parser.add_argument("--host", default="127.0.0.1")
@@ -1739,6 +2003,8 @@ def main() -> None:
         args.best_broad_model,
         args.best_broad_spline_model,
         args.best_broad_efficiency_model,
+        args.best_broad_ensemble_summary,
+        args.weighted_broad_ensemble_summary,
         seed=args.seed,
         device=args.device,
         mcmc_device=args.mcmc_device,

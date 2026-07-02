@@ -49,6 +49,8 @@ def start_internal_server(args: argparse.Namespace) -> viewer_app.ThreadingHTTPS
         args.best_broad_model,
         args.best_broad_spline_model,
         args.best_broad_efficiency_model,
+        args.best_broad_ensemble_summary,
+        args.weighted_broad_ensemble_summary,
         seed=args.seed,
         device=args.device,
         mcmc_device=args.mcmc_device,
@@ -86,6 +88,16 @@ def parse_args() -> argparse.Namespace:
         "--best-broad-efficiency-model",
         type=Path,
         default=viewer_app.DEFAULT_BEST_BROAD_EFFICIENCY_MODEL,
+    )
+    parser.add_argument(
+        "--best-broad-ensemble-summary",
+        type=Path,
+        default=viewer_app.DEFAULT_BEST_BROAD_ENSEMBLE_SUMMARY,
+    )
+    parser.add_argument(
+        "--weighted-broad-ensemble-summary",
+        type=Path,
+        default=viewer_app.DEFAULT_WEIGHTED_BROAD_ENSEMBLE_SUMMARY,
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=viewer_app.DEFAULT_PORT)

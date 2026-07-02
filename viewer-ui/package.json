@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "dev:phone": "vite --host 0.0.0.0",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "preview:phone": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
     "clsx": "^2.1.1",

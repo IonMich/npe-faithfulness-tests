@@ -18,6 +18,7 @@ export type ModelOption = {
   validation_evaluations?: number;
   model_parameters?: number;
   run_summary?: string;
+  ensemble_weights?: number[];
   local_quantile?: number | null;
   checkpoint: string;
   has_local_region: boolean;
@@ -140,6 +141,9 @@ export type Overlay =
   | "broad_mdn"
   | "broad_spline_4m"
   | "broad_spline_8m"
+  | "broad_rawfit_ensemble4"
+  | "broad_fresh_e15_ensemble4"
+  | "broad_weighted_checkpoint_pool"
   | "grid"
   | "mcmc";
 
