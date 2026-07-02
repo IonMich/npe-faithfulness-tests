@@ -37,15 +37,21 @@ DEFAULT_OUTPUT_ROOT = Path(
     "runs/01_exponential_decay/15_broad_scaling/"
     "38_panel_w_distribution_eval_mdn512k_spline4m"
 )
+DEFAULT_FLOW2_ENSEMBLE_SUMMARY = Path(
+    "runs/01_exponential_decay/15_broad_scaling/"
+    "199_nll63_randperm_e15_cosstep_ensemble4_saved/results/ensemble4_proof_summary.json"
+)
 
 
 MODEL_COLORS = {
     "spline": "#c45a2d",
     "mdn": "#6d4aff",
+    "flow2_ensemble": "#0f766e",
 }
 MODEL_LABELS = {
     "spline": "Broad spline 4.096M",
     "mdn": "Broad MDN 512k",
+    "flow2_ensemble": "4x flow2 randperm NSF e15",
 }
 
 
@@ -121,6 +127,125 @@ def seed_torch(seed: int, device: torch.device) -> None:
         torch.mps.manual_seed(seed)
 
 
+def observed_features_for_state(state: dict[str, object], x: np.ndarray) -> np.ndarray:
+    raw = np.asarray(x, dtype=np.float64)
+    x_mean = np.asarray(state["x_mean"], dtype=np.float64)
+    if raw.shape[0] == x_mean.shape[0]:
+        return raw
+    config = state.get("config", {})
+    mode = str(config.get("context_features", "raw")) if isinstance(config, dict) else "raw"
+    features = stage1.transform_context_features(raw[None, :], mode)[0]
+    if features.shape[0] != x_mean.shape[0]:
+        raise ValueError(
+            f"Context feature shape mismatch for context_features={mode!r}: "
+            f"got {features.shape[0]}, expected {x_mean.shape[0]}"
+        )
+    return features
+
+
+def weighted_sample_counts(total: int, weights: np.ndarray) -> np.ndarray:
+    if total < weights.size:
+        raise ValueError("--posterior-samples must be at least the number of ensemble members")
+    raw_counts = weights * int(total)
+    counts = np.floor(raw_counts).astype(int)
+    remainder = int(total) - int(counts.sum())
+    if remainder > 0:
+        order = np.argsort(raw_counts - counts)[::-1]
+        counts[order[:remainder]] += 1
+    return counts
+
+
+def load_single_stage1_model(path: Path, device: torch.device) -> dict[str, object]:
+    model, state = load_stage1_checkpoint(path, device)
+    return {"type": "single", "model": model, "state": state, "path": str(path)}
+
+
+def load_stage1_ensemble(summary_path: Path, device: torch.device) -> dict[str, object]:
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    member_paths = [Path(path) for path in summary.get("model_paths", [])]
+    if not member_paths:
+        raise ValueError(f"Ensemble summary has no model_paths: {summary_path}")
+    raw_weights = summary.get("ensemble_weights")
+    if raw_weights is None:
+        weights = np.full(len(member_paths), 1.0 / len(member_paths), dtype=np.float64)
+    else:
+        weights = np.asarray(raw_weights, dtype=np.float64)
+        if weights.shape != (len(member_paths),):
+            raise ValueError(
+                f"Ensemble weights length {weights.shape[0]} does not match "
+                f"model_paths length {len(member_paths)}: {summary_path}"
+            )
+        if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
+            raise ValueError(f"Invalid ensemble weights in {summary_path}")
+        weight_sum = float(weights.sum())
+        if weight_sum <= 0.0:
+            raise ValueError(f"Ensemble weights sum to zero in {summary_path}")
+        weights = weights / weight_sum
+    members = []
+    for path in member_paths:
+        if not path.exists():
+            raise FileNotFoundError(f"Missing ensemble member checkpoint: {path}")
+        model, state = load_stage1_checkpoint(path, device)
+        members.append({"model": model, "state": state, "path": str(path)})
+    return {
+        "type": "ensemble",
+        "members": members,
+        "weights": weights,
+        "summary": summary,
+        "summary_path": str(summary_path),
+    }
+
+
+def sample_loaded_stage1_model(
+    *,
+    loaded: dict[str, object],
+    observed_x: np.ndarray,
+    posterior_samples: int,
+    device: torch.device,
+) -> np.ndarray:
+    if loaded["type"] == "single":
+        state = loaded["state"]
+        assert isinstance(state, dict)
+        observed_features = observed_features_for_state(state, observed_x)
+        _, theta_samples = stage1.sample_posterior_for_observation(
+            model=loaded["model"],
+            observed_x=observed_features,
+            x_mean=np.asarray(state["x_mean"], dtype=np.float64),
+            x_std=np.asarray(state["x_std"], dtype=np.float64),
+            z_mean=np.asarray(state["z_mean"], dtype=np.float64),
+            z_std=np.asarray(state["z_std"], dtype=np.float64),
+            n=posterior_samples,
+            device=device,
+        )
+        return theta_samples
+
+    if loaded["type"] == "ensemble":
+        weights = np.asarray(loaded["weights"], dtype=np.float64)
+        counts = weighted_sample_counts(posterior_samples, weights)
+        members = loaded["members"]
+        assert isinstance(members, list)
+        theta_parts = []
+        for member, count in zip(members, counts, strict=True):
+            if int(count) <= 0:
+                continue
+            state = member["state"]
+            observed_features = observed_features_for_state(state, observed_x)
+            _, theta_member = stage1.sample_posterior_for_observation(
+                model=member["model"],
+                observed_x=observed_features,
+                x_mean=np.asarray(state["x_mean"], dtype=np.float64),
+                x_std=np.asarray(state["x_std"], dtype=np.float64),
+                z_mean=np.asarray(state["z_mean"], dtype=np.float64),
+                z_std=np.asarray(state["z_std"], dtype=np.float64),
+                n=int(count),
+                device=device,
+            )
+            theta_parts.append(theta_member)
+        return np.vstack(theta_parts)
+
+    raise ValueError(f"Unknown loaded model type: {loaded['type']!r}")
+
+
 def compare_samples_to_marginals_detailed(
     *,
     theta_samples: np.ndarray,
@@ -144,8 +269,7 @@ def compare_samples_to_marginals_detailed(
 def evaluate_model(
     *,
     model_key: str,
-    model: torch.nn.Module,
-    state: dict[str, object],
+    loaded: dict[str, object],
     panel: dict[str, object],
     posterior_samples: int,
     seed: int,
@@ -159,22 +283,14 @@ def evaluate_model(
     targets = np.asarray(panel["target_wasserstein"], dtype=np.float64)
     labels = list(panel["labels"])
     rows: list[dict[str, object]] = []
-    x_mean = np.asarray(state["x_mean"], dtype=np.float64)
-    x_std = np.asarray(state["x_std"], dtype=np.float64)
-    z_mean = np.asarray(state["z_mean"], dtype=np.float64)
-    z_std = np.asarray(state["z_std"], dtype=np.float64)
     start = time.perf_counter()
     for index, label in enumerate(labels):
         signal_start = time.perf_counter()
         seed_torch(seed + index, device)
-        _, theta_samples = stage1.sample_posterior_for_observation(
-            model=model,
+        theta_samples = sample_loaded_stage1_model(
+            loaded=loaded,
             observed_x=x_panel[index],
-            x_mean=x_mean,
-            x_std=x_std,
-            z_mean=z_mean,
-            z_std=z_std,
-            n=posterior_samples,
+            posterior_samples=posterior_samples,
             device=device,
         )
         w_value, per_axis = compare_samples_to_marginals_detailed(
@@ -213,6 +329,7 @@ def evaluate_model(
 
 
 def combine_rows(model_rows: dict[str, list[dict[str, object]]]) -> list[dict[str, object]]:
+    model_keys = list(model_rows)
     by_model = {
         model_key: {int(row["index"]): row for row in rows}
         for model_key, rows in model_rows.items()
@@ -220,33 +337,41 @@ def combine_rows(model_rows: dict[str, list[dict[str, object]]]) -> list[dict[st
     common_indices = sorted(set.intersection(*(set(rows) for rows in by_model.values())))
     combined = []
     for index in common_indices:
-        spline = by_model["spline"][index]
-        mdn = by_model["mdn"][index]
+        first = by_model[model_keys[0]][index]
         row = {
             "index": index,
-            "label": spline["label"],
-            "A": spline["A"],
-            "k": spline["k"],
-            "sigma": spline["sigma"],
-            "target_wasserstein": spline["target_wasserstein"],
-            "spline_wasserstein": spline["wasserstein"],
-            "spline_target_ratio": spline["target_ratio"],
-            "spline_w_A": spline["w_A"],
-            "spline_w_k": spline["w_k"],
-            "spline_w_sigma": spline["w_sigma"],
-            "mdn_wasserstein": mdn["wasserstein"],
-            "mdn_target_ratio": mdn["target_ratio"],
-            "mdn_w_A": mdn["w_A"],
-            "mdn_w_k": mdn["w_k"],
-            "mdn_w_sigma": mdn["w_sigma"],
-            "spline_minus_mdn": float(spline["wasserstein"] - mdn["wasserstein"]),
-            "spline_over_mdn": (
+            "label": first["label"],
+            "A": first["A"],
+            "k": first["k"],
+            "sigma": first["sigma"],
+            "target_wasserstein": first["target_wasserstein"],
+        }
+        row["best_model"] = min(model_keys, key=lambda key: float(by_model[key][index]["wasserstein"]))
+        for key in model_keys:
+            model_row = by_model[key][index]
+            row[f"{key}_wasserstein"] = model_row["wasserstein"]
+            row[f"{key}_target_ratio"] = model_row["target_ratio"]
+            row[f"{key}_w_A"] = model_row["w_A"]
+            row[f"{key}_w_k"] = model_row["w_k"]
+            row[f"{key}_w_sigma"] = model_row["w_sigma"]
+        if "spline" in by_model and "mdn" in by_model:
+            spline = by_model["spline"][index]
+            mdn = by_model["mdn"][index]
+            row["spline_minus_mdn"] = float(spline["wasserstein"] - mdn["wasserstein"])
+            row["spline_over_mdn"] = (
                 float(spline["wasserstein"] / mdn["wasserstein"])
                 if float(mdn["wasserstein"]) > 0
                 else float("nan")
-            ),
-            "better_model": "spline" if float(spline["wasserstein"]) < float(mdn["wasserstein"]) else "mdn",
-        }
+            )
+        if "flow2_ensemble" in by_model and "spline" in by_model:
+            flow2 = by_model["flow2_ensemble"][index]
+            spline = by_model["spline"][index]
+            row["flow2_ensemble_minus_spline"] = float(flow2["wasserstein"] - spline["wasserstein"])
+            row["flow2_ensemble_over_spline"] = (
+                float(flow2["wasserstein"] / spline["wasserstein"])
+                if float(spline["wasserstein"]) > 0
+                else float("nan")
+            )
         combined.append(row)
     return combined
 
@@ -261,19 +386,38 @@ def write_csv(rows: list[dict[str, object]], path: Path) -> None:
         writer.writerows(rows)
 
 
+def model_keys_from_combined_rows(combined_rows: list[dict[str, object]]) -> list[str]:
+    if not combined_rows:
+        return []
+    suffix = "_wasserstein"
+    present = {
+        key[: -len(suffix)]
+        for key in combined_rows[0]
+        if key.endswith(suffix) and key != "target_wasserstein"
+    }
+    ordered = [key for key in MODEL_LABELS if key in present]
+    ordered.extend(sorted(present - set(ordered)))
+    return ordered
+
+
 def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior_samples: int) -> None:
-    spline_w = np.asarray([row["spline_wasserstein"] for row in combined_rows], dtype=np.float64)
-    mdn_w = np.asarray([row["mdn_wasserstein"] for row in combined_rows], dtype=np.float64)
-    spline_ratio = np.asarray([row["spline_target_ratio"] for row in combined_rows], dtype=np.float64)
-    mdn_ratio = np.asarray([row["mdn_target_ratio"] for row in combined_rows], dtype=np.float64)
+    model_keys = model_keys_from_combined_rows(combined_rows)
+    w_by_model = {
+        key: np.asarray([row[f"{key}_wasserstein"] for row in combined_rows], dtype=np.float64)
+        for key in model_keys
+    }
+    ratio_by_model = {
+        key: np.asarray([row[f"{key}_target_ratio"] for row in combined_rows], dtype=np.float64)
+        for key in model_keys
+    }
     sigma = np.asarray([row["sigma"] for row in combined_rows], dtype=np.float64)
     indices = np.asarray([row["index"] for row in combined_rows], dtype=np.int64)
-    all_w = np.concatenate([spline_w[np.isfinite(spline_w)], mdn_w[np.isfinite(mdn_w)]])
-    all_ratio = np.concatenate([spline_ratio[np.isfinite(spline_ratio)], mdn_ratio[np.isfinite(mdn_ratio)]])
+    all_w = np.concatenate([values[np.isfinite(values)] for values in w_by_model.values()])
+    all_ratio = np.concatenate([values[np.isfinite(values)] for values in ratio_by_model.values()])
     figure, axes = plt.subplots(2, 2, figsize=(13.8, 9.2), constrained_layout=True)
 
     ax = axes[0, 0]
-    for values, key in [(spline_w, "spline"), (mdn_w, "mdn")]:
+    for key, values in w_by_model.items():
         x, y = ecdf(values)
         ax.step(x, y, where="post", lw=2.5, color=MODEL_COLORS[key], label=MODEL_LABELS[key])
         ax.axvline(np.median(values), color=MODEL_COLORS[key], lw=1.6, alpha=0.68)
@@ -286,9 +430,16 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
     ax.legend(frameon=False)
 
     ax = axes[0, 1]
+    if "flow2_ensemble" in w_by_model and "spline" in w_by_model:
+        x_key = "spline"
+        y_key = "flow2_ensemble"
+    else:
+        x_key, y_key = model_keys[:2]
+    x_values = w_by_model[x_key]
+    y_values = w_by_model[y_key]
     scatter = ax.scatter(
-        mdn_w,
-        spline_w,
+        x_values,
+        y_values,
         c=sigma,
         cmap="viridis",
         s=28,
@@ -302,15 +453,15 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
     ax.set_yscale("log")
     ax.set_xlim(lower, upper)
     ax.set_ylim(lower, upper)
-    ax.set_xlabel("Broad MDN 512k W")
-    ax.set_ylabel("Broad spline 4.096M W")
+    ax.set_xlabel(f"{MODEL_LABELS[x_key]} W")
+    ax.set_ylabel(f"{MODEL_LABELS[y_key]} W")
     ax.set_title("Per-signal comparison")
     ax.grid(which="both", alpha=0.22)
     colorbar = figure.colorbar(scatter, ax=ax, fraction=0.046, pad=0.04)
     colorbar.set_label("true sigma")
-    worst_order = np.argsort(np.maximum(spline_w, mdn_w))[::-1][: min(6, len(indices))]
+    worst_order = np.argsort(np.maximum(x_values, y_values))[::-1][: min(6, len(indices))]
     for row_index in worst_order:
-        ax.text(mdn_w[row_index], spline_w[row_index], str(int(indices[row_index])), fontsize=8)
+        ax.text(x_values[row_index], y_values[row_index], str(int(indices[row_index])), fontsize=8)
 
     ax = axes[1, 0]
     if all_ratio.size and np.all(all_ratio > 0):
@@ -318,10 +469,9 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
         ax.set_xscale("log")
     else:
         bins = 24
-    ax.hist(spline_ratio, bins=bins, alpha=0.44, color=MODEL_COLORS["spline"], label=MODEL_LABELS["spline"])
-    ax.hist(mdn_ratio, bins=bins, alpha=0.36, color=MODEL_COLORS["mdn"], label=MODEL_LABELS["mdn"])
-    ax.axvline(np.median(spline_ratio), color=MODEL_COLORS["spline"], lw=2.0)
-    ax.axvline(np.median(mdn_ratio), color=MODEL_COLORS["mdn"], lw=2.0)
+    for key, values in ratio_by_model.items():
+        ax.hist(values, bins=bins, alpha=0.32, color=MODEL_COLORS[key], label=MODEL_LABELS[key])
+        ax.axvline(np.median(values), color=MODEL_COLORS[key], lw=2.0)
     ax.set_xlabel("W / panel target numerical floor")
     ax.set_ylabel("signal count")
     ax.set_title("Distance to evaluation floor")
@@ -329,8 +479,8 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
     ax.legend(frameon=False)
 
     ax = axes[1, 1]
-    ax.scatter(sigma, spline_w, color=MODEL_COLORS["spline"], s=26, alpha=0.68, label=MODEL_LABELS["spline"])
-    ax.scatter(sigma, mdn_w, color=MODEL_COLORS["mdn"], s=26, alpha=0.60, label=MODEL_LABELS["mdn"])
+    for key, values in w_by_model.items():
+        ax.scatter(sigma, values, color=MODEL_COLORS[key], s=24, alpha=0.58, label=MODEL_LABELS[key])
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel("true sigma")
@@ -340,7 +490,7 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
     ax.legend(frameon=False)
 
     figure.suptitle(
-        f"Broad spline 4.096M vs Broad MDN 512k panel marginal W "
+        f"Broad NPE panel marginal W distribution "
         f"(n={len(combined_rows)}, posterior samples={posterior_samples:,})",
         y=1.02,
     )
@@ -356,34 +506,39 @@ def make_summary(
     args: argparse.Namespace,
     outputs: dict[str, str],
 ) -> dict[str, object]:
-    spline_w = np.asarray([row["spline_wasserstein"] for row in combined_rows], dtype=np.float64)
-    mdn_w = np.asarray([row["mdn_wasserstein"] for row in combined_rows], dtype=np.float64)
-    spline_ratio = np.asarray([row["spline_target_ratio"] for row in combined_rows], dtype=np.float64)
-    mdn_ratio = np.asarray([row["mdn_target_ratio"] for row in combined_rows], dtype=np.float64)
+    model_keys = model_keys_from_combined_rows(combined_rows)
+    w_by_model = {
+        key: np.asarray([row[f"{key}_wasserstein"] for row in combined_rows], dtype=np.float64)
+        for key in model_keys
+    }
+    ratio_by_model = {
+        key: np.asarray([row[f"{key}_target_ratio"] for row in combined_rows], dtype=np.float64)
+        for key in model_keys
+    }
     sorted_worst = sorted(
         combined_rows,
-        key=lambda row: max(float(row["spline_wasserstein"]), float(row["mdn_wasserstein"])),
+        key=lambda row: max(float(row[f"{key}_wasserstein"]) for key in model_keys),
         reverse=True,
     )
-    return {
+    model_paths: dict[str, str] = {
+        "spline": str(args.spline_model),
+        "mdn": str(args.mdn_model),
+    }
+    if args.flow2_ensemble_summary is not None:
+        model_paths["flow2_ensemble"] = str(args.flow2_ensemble_summary)
+    summary = {
         "panel": panel_metadata,
         "posterior_samples": int(args.posterior_samples),
         "device": str(args.device),
         "seed": int(args.seed),
-        "models": {
-            "spline": str(args.spline_model),
-            "mdn": str(args.mdn_model),
-        },
+        "models": {key: model_paths[key] for key in model_keys},
         "signal_count": len(combined_rows),
-        "spline_wasserstein": quantile_summary(spline_w),
-        "mdn_wasserstein": quantile_summary(mdn_w),
-        "spline_target_ratio": quantile_summary(spline_ratio),
-        "mdn_target_ratio": quantile_summary(mdn_ratio),
-        "spline_better_count": int(np.sum(spline_w < mdn_w)),
-        "mdn_better_count": int(np.sum(mdn_w < spline_w)),
-        "tie_count": int(np.sum(spline_w == mdn_w)),
-        "mean_improvement_mdn_minus_spline": float(np.mean(mdn_w - spline_w)),
-        "median_improvement_mdn_minus_spline": float(np.median(mdn_w - spline_w)),
+        "wasserstein": {key: quantile_summary(values) for key, values in w_by_model.items()},
+        "target_ratio": {key: quantile_summary(values) for key, values in ratio_by_model.items()},
+        "best_model_counts": {
+            key: int(sum(row["best_model"] == key for row in combined_rows))
+            for key in model_keys
+        },
         "worst_signals": sorted_worst[: min(12, len(sorted_worst))],
         "seconds": {
             key: float(sum(row["seconds"] for row in rows))
@@ -391,6 +546,36 @@ def make_summary(
         },
         "outputs": outputs,
     }
+    if "spline" in w_by_model and "mdn" in w_by_model:
+        spline_w = w_by_model["spline"]
+        mdn_w = w_by_model["mdn"]
+        summary.update(
+            {
+                "spline_wasserstein": quantile_summary(spline_w),
+                "mdn_wasserstein": quantile_summary(mdn_w),
+                "spline_target_ratio": quantile_summary(ratio_by_model["spline"]),
+                "mdn_target_ratio": quantile_summary(ratio_by_model["mdn"]),
+                "spline_better_count": int(np.sum(spline_w < mdn_w)),
+                "mdn_better_count": int(np.sum(mdn_w < spline_w)),
+                "tie_count": int(np.sum(spline_w == mdn_w)),
+                "mean_improvement_mdn_minus_spline": float(np.mean(mdn_w - spline_w)),
+                "median_improvement_mdn_minus_spline": float(np.median(mdn_w - spline_w)),
+            }
+        )
+    if "flow2_ensemble" in w_by_model and "spline" in w_by_model:
+        flow2_w = w_by_model["flow2_ensemble"]
+        spline_w = w_by_model["spline"]
+        summary.update(
+            {
+                "flow2_ensemble_wasserstein": quantile_summary(flow2_w),
+                "flow2_ensemble_target_ratio": quantile_summary(ratio_by_model["flow2_ensemble"]),
+                "flow2_ensemble_better_than_spline_count": int(np.sum(flow2_w < spline_w)),
+                "spline_better_than_flow2_ensemble_count": int(np.sum(spline_w < flow2_w)),
+                "mean_improvement_spline_minus_flow2_ensemble": float(np.mean(spline_w - flow2_w)),
+                "median_improvement_spline_minus_flow2_ensemble": float(np.median(spline_w - flow2_w)),
+            }
+        )
+    return summary
 
 
 def parse_args() -> argparse.Namespace:
@@ -403,6 +588,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--panel-cache", type=Path, default=DEFAULT_PANEL_CACHE)
     parser.add_argument("--spline-model", type=Path, default=DEFAULT_SPLINE_MODEL)
     parser.add_argument("--mdn-model", type=Path, default=DEFAULT_MDN_MODEL)
+    parser.add_argument("--flow2-ensemble-summary", type=Path, default=DEFAULT_FLOW2_ENSEMBLE_SUMMARY)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--posterior-samples", type=int, default=20_000)
     parser.add_argument("--seed", type=int, default=20261101)
@@ -420,19 +606,18 @@ def main() -> None:
     figures_dir.mkdir(parents=True, exist_ok=True)
 
     panel, panel_metadata = load_panel_marginal_cache(args.panel_cache)
-    models = {}
-    states = {}
-    for key, path in [("spline", args.spline_model), ("mdn", args.mdn_model)]:
-        model, state = load_stage1_checkpoint(path, device)
-        models[key] = model
-        states[key] = state
+    loaded_models: dict[str, dict[str, object]] = {
+        "spline": load_single_stage1_model(args.spline_model, device),
+        "mdn": load_single_stage1_model(args.mdn_model, device),
+    }
+    if args.flow2_ensemble_summary is not None:
+        loaded_models["flow2_ensemble"] = load_stage1_ensemble(args.flow2_ensemble_summary, device)
 
     model_rows = {}
-    for offset, key in enumerate(("spline", "mdn")):
+    for offset, key in enumerate(loaded_models):
         model_rows[key] = evaluate_model(
             model_key=key,
-            model=models[key],
-            state=states[key],
+            loaded=loaded_models[key],
             panel=panel,
             posterior_samples=int(args.posterior_samples),
             seed=int(args.seed) + 100_000 * offset,
@@ -444,7 +629,12 @@ def main() -> None:
     per_model_csv = results_dir / "panel_w_per_model_rows.csv"
     combined_csv = results_dir / "panel_w_combined_rows.csv"
     summary_json = results_dir / "panel_w_distribution_summary.json"
-    figure_path = figures_dir / "panel_w_distribution_mdn512k_vs_spline4m.png"
+    figure_name = (
+        "panel_w_distribution_mdn512k_vs_spline4m_flow2ensemble.png"
+        if "flow2_ensemble" in loaded_models
+        else "panel_w_distribution_mdn512k_vs_spline4m.png"
+    )
+    figure_path = figures_dir / figure_name
     write_csv([row for rows in model_rows.values() for row in rows], per_model_csv)
     write_csv(combined_rows, combined_csv)
     plot(combined_rows, figure_path, posterior_samples=int(args.posterior_samples))

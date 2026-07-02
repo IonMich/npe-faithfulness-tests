@@ -262,12 +262,14 @@ Wasserstein distances, then averaged over coordinates.
 
 ![Single decay broad NPE panel W distribution](runs/00_shared_assets/readme_scaling/decay_panel_w_distribution_mdn512k_vs_spline4m_500.png)
 
-On this 500-signal panel, the 4.096M spline-flow checkpoint improves the
-distribution relative to the 512k MDN checkpoint: median panel marginal
-Wasserstein is 0.115 for the spline and 0.161 for the MDN, and the spline is
-better on 351 of 500 signals. Both models still have rare severe failures,
-especially in low-noise or edge-of-prior regimes, so this plot is a diagnostic
-for where scaling helps and where model or training changes are still needed.
+On this 500-signal panel, the latest 4-member flow2 randperm NSF ensemble
+strongly improves the distribution relative to the older broad baselines:
+median panel marginal Wasserstein is 0.0308 for the ensemble, 0.115 for the
+4.096M spline checkpoint, and 0.161 for the 512k MDN. The ensemble is the best
+of the three on 484 of 500 signals and beats the spline checkpoint on 485 of
+500 signals. The remaining outliers are much smaller than before but still mark
+where posterior-shape diagnostics can catch issues not visible from validation
+NLL alone.
 
 ### Sign-Symmetry Stress Test
 
@@ -543,12 +545,14 @@ Best posterior:
 ## Decay Amortization Check
 
 The single-decay best posterior above is the main calibrated result at the
-observed signal $x_0$. The following two plots are a separate diagnostic. They
-compare four posterior layers on fresh signals: local NPE, global/broad NPE,
-MCMC, and grid reference.
+observed signal $x_0$. The following two plots are a separate diagnostic for
+the current broad NPEs in the interactive viewer. They compare the fresh
+4-member flow2 randperm NSF ensemble and the convex-weighted saved-checkpoint
+pool against MCMC and grid references on fresh signals.
 
-This section asks how much of the posterior map has been amortized. The global
-or broad NPE is trained on the full joint simulator distribution:
+This section asks how much of the posterior map has been amortized by broad
+prior-predictive training. Both plotted NPEs are trained on the full joint
+simulator distribution:
 
 ```math
 p_{\mathrm{broad}}(\theta,x)
@@ -574,42 +578,11 @@ and the learned posterior used in the plots is:
 q_{\phi,\mathrm{broad}}(\theta\mid x_\star).
 ```
 
-The local NPE is trained on the simulator distribution restricted to a region
-around $x_0$. Once the local event $R$ is defined below, its training
-distribution is:
-
-```math
-p_{\mathrm{local}}(\theta,x)
-=
-p_R(\theta,x)
-=
-\frac{
-p(\theta)p(x\mid\theta)\mathbf 1\{x\in R\}
-}{
-\Pr(x\in R)
-}.
-```
-
-Its training objective is:
-
-```math
-\phi_{\mathrm{local}}
-=
-\arg\max_\phi
-\mathbb E_{(\theta,x)\sim p_{\mathrm{local}}}
-\left[
-\log q_\phi(\theta\mid x)
-\right],
-```
-
-and the learned posterior used in the plots is:
-
-```math
-q_{\phi,\mathrm{local}}(\theta\mid x_\star).
-```
-
-The local NPE is trained over a restricted prior-predictive region around
-$x_0$. In this decay run, $s(x)$ is an indirect exponential-fit summary. For a
+The two signals are selected using the older local-region diagnostic around
+$x_0$, but the local NPE itself is no longer part of these README overlays. The
+region is still useful as a stress label: one draw is close to the original
+observation, and one is a prior-predictive draw far outside that neighborhood.
+In this decay run, $s(x)$ is an indirect exponential-fit summary. For a
 candidate signal $x=(x_1,\ldots,x_n)$ observed at times
 $t=(t_1,\ldots,t_n)$, the summary first profiles a one-exponential curve over
 decay rates $k$.
@@ -684,37 +657,19 @@ d_s(x,x_0)
 }.
 ```
 
-The local training event is:
+The diagnostic local event is:
 
 ```math
 R=\{x: d_s(x,x_0)\le r\}.
 ```
 
-For any evaluation signal $x_\star$ inside the region, conditioning on
-$x_\star$ removes the selection event because $R$ depends only on $x$:
-
-```math
-p_R(\theta\mid x_\star)
-=
-p(\theta\mid x_\star),
-\qquad x_\star\in R.
-```
-
-For a signal outside the region, the same local network is being evaluated
-outside the distribution it was trained on:
-
-```math
-x_\star \notin R,
-\qquad
-q_{\phi,\mathrm{local}}(\theta\mid x_\star)
-\text{ is extrapolation.}
-```
-
-The first plot checks interpolation inside the local amortization region. The
-second checks how the same local estimator behaves on a prior-predictive signal
-outside that region, where the broad estimator is the more naturally amortized
-model. The grid and MCMC layers remain exact-likelihood references for each
-fresh signal.
+The first plot uses a signal just inside this diagnostic region
+($d_s=0.1435$, $r=0.1459$). The fresh 4-member flow2 ensemble has mean
+normalized Wasserstein 0.0597 to the grid reference, the weighted pool has
+0.0632, and MCMC has 0.0598. The second plot uses a prior-predictive signal
+outside the region ($d_s=0.9886$). There the fresh ensemble has Wasserstein
+0.0947, the weighted pool has 0.0878, and MCMC has 0.0874. The grid and MCMC
+layers remain exact-likelihood references for each fresh signal.
 
 Local-region signal:
 
@@ -754,10 +709,10 @@ uv run scripts/build_runs_view.py
 ## UI Summary
 
 The interactive posterior viewer supports the single-exponential decay
-diagnostics. It lets you draw signals, toggle local and broad NPE layers,
+diagnostics. It lets you draw signals, toggle the current broad NPE layers,
 compare against grid and MCMC references, and inspect corner plots, predictive
-plots, posterior quantiles, local-region status, Wasserstein-to-grid distances,
-and runtime diagnostics.
+plots, posterior quantiles, local-region status, low-prior signal stress cases,
+Wasserstein-to-grid distances, and runtime diagnostics.
 
 To run the built viewer:
 
@@ -769,6 +724,17 @@ cd ..
 uv run scripts/npe_posterior_viewer.py
 ```
 
+To view the built UI from the Pixel, keep Tailscale enabled on the phone and
+run:
+
+```sh
+scripts/start_posterior_viewer_phone.sh
+```
+
+The script builds `viewer-ui/dist`, binds the viewer to the MacBook Tailnet
+address when available, and prints the phone URL. Override `HOST`, `PUBLIC_HOST`,
+or `PORT` if you need a LAN address or alternate port.
+
 For frontend development, run the backend and Vite dev server separately:
 
 ```sh
@@ -778,4 +744,12 @@ uv run scripts/npe_posterior_viewer.py
 ```sh
 cd viewer-ui
 npm run dev
+```
+
+For phone-based frontend development, keep the backend running locally and use
+the Tailnet URL printed by Vite:
+
+```sh
+cd viewer-ui
+npm run dev:phone
 ```
