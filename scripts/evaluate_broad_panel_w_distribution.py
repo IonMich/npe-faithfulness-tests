@@ -47,16 +47,19 @@ MODEL_COLORS = {
     "spline": "#c45a2d",
     "mdn": "#6d4aff",
     "flow2_ensemble": "#0f766e",
+    "mcmc": "#26323f",
 }
 MODEL_LABELS = {
     "spline": "Spline-flow NPE, 4.096M",
     "mdn": "MDN, 512k",
     "flow2_ensemble": "4-member Flow2 residual NSF",
+    "mcmc": "Random-walk MCMC",
 }
 SCATTER_AXIS_LABELS = {
     "spline": "spline-flow NPE distance",
     "mdn": "mixture density network distance",
     "flow2_ensemble": "Flow2 residual NSF ensemble distance",
+    "mcmc": "MCMC distance",
 }
 
 
@@ -502,7 +505,7 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
     )
 
     figure.suptitle(
-        f"Single-decay NPE panel marginal Wasserstein distribution "
+        f"Single-decay posterior panel marginal Wasserstein distribution "
         f"(n={len(combined_rows)}, posterior samples={posterior_samples:,})",
         y=1.075,
     )

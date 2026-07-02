@@ -474,13 +474,17 @@ Wasserstein distance.
 
 ![Single decay NPE panel Wasserstein distribution](runs/00_shared_assets/readme_scaling/decay_panel_w_distribution_mdn512k_vs_spline4m_500.png)
 
-On this 500-signal panel, the 4-member Flow2 residual NSF ensemble with random
-permutations has the best distribution of the three plotted estimators: median
-$`D_{\mathrm{panel}}`$ is 0.0308 for the ensemble, 0.115 for the 4.096M
-conditional spline-flow checkpoint, and 0.161 for the 512k MDN. The ensemble is
-the best of the three on 484 of 500 signals and beats the spline-flow checkpoint
-on 485 of 500 signals. The remaining outliers show where posterior-shape
-diagnostics can catch issues not visible from validation NLL alone.
+Adding exact-likelihood random-walk MCMC to the same 500-signal panel gives
+median $`D_{\mathrm{panel}}`$ values of 0.0273 for MCMC, 0.0308 for the
+4-member Flow2 residual NSF ensemble, 0.115 for the 4.096M conditional
+spline-flow checkpoint, and 0.161 for the 512k MDN. MCMC is lowest on 274 of
+500 signals, the Flow2 ensemble is lowest on 223, the spline-flow checkpoint is
+lowest on 3, and the MDN is never lowest. The MCMC curve is a useful
+exact-likelihood sampler diagnostic, not a replacement for the exact grid
+marginals used as the reference here: 287 of 500 MCMC fits pass the current
+R-hat and effective-sample-size convergence flags. The remaining outliers show
+where posterior-shape diagnostics can catch issues not visible from validation
+NLL alone.
 
 ### Sign-Symmetry Stress Test
 
