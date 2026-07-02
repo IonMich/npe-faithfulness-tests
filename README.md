@@ -11,7 +11,7 @@ The basic simulator setup is:
 \theta \sim p(\theta), \qquad x \sim p(x \mid \theta).
 ```
 
-For a requested observed signal $x_\star$, the Bayesian target is:
+For a requested observed signal $`x_\star`$, the Bayesian target is:
 
 ```math
 p(\theta \mid x_\star)
@@ -20,7 +20,7 @@ p(\theta \mid x_\star)
 {\int p(x_\star \mid \vartheta)p(\vartheta)\,d\vartheta}.
 ```
 
-NPE trains a conditional density estimator $q_\phi(\theta \mid x)$ from
+NPE trains a conditional density estimator $`q_\phi(\theta \mid x)`$ from
 simulated pairs:
 
 ```math
@@ -29,7 +29,7 @@ simulated pairs:
 \left[\log q_\phi(\theta \mid x)\right].
 ```
 
-After training, the object under test is $q_\phi(\theta \mid x_\star)$.
+After training, the object under test is $`q_\phi(\theta \mid x_\star)`$.
 
 ## Evaluation
 
@@ -38,7 +38,7 @@ permits it, exact-likelihood random-walk Metropolis Markov chain Monte Carlo
 (MCMC), and exact-likelihood Hamiltonian Monte Carlo (HMC). MCMC and HMC use
 the same prior and likelihood as the simulator under test.
 
-For a diagnostic parameterization $g(\theta)$, the main scalar comparison is
+For a diagnostic parameterization $`g(\theta)`$, the main scalar comparison is
 mean marginal normalized Wasserstein distance:
 
 ```math
@@ -55,20 +55,20 @@ W_1\!\left(g_j(\theta_q), g_j(\theta_{\mathrm{ref}})\right)
 
 The symbols in this diagnostic are:
 
-- $p_{\mathrm{ref}}(\theta \mid x_\star)$: the reference posterior for the
-  requested observed signal $x_\star$.
-- $q(\theta \mid x_\star)$: the learned posterior being evaluated, usually an NPE
+- $`p_{\mathrm{ref}}(\theta \mid x_\star)`$: the reference posterior for the
+  requested observed signal $`x_\star`$.
+- $`q(\theta \mid x_\star)`$: the learned posterior being evaluated, usually an NPE
   flow posterior.
-- $\theta_q$: samples drawn from $q(\theta \mid x_\star)$.
-- $\theta_{\mathrm{ref}}$: samples drawn from, or weighted grid points
-  representing, $p_{\mathrm{ref}}(\theta \mid x_\star)$.
-- $g(\theta)$ is the diagnostic parameterization used for comparison; it may
+- $`\theta_q`$: samples drawn from $`q(\theta \mid x_\star)`$.
+- $`\theta_{\mathrm{ref}}`$: samples drawn from, or weighted grid points
+  representing, $`p_{\mathrm{ref}}(\theta \mid x_\star)`$.
+- $`g(\theta)`$ is the diagnostic parameterization used for comparison; it may
   be the raw parameter vector, a physical-parameter transform, or a
-  symmetry-aware transform. $g_j(\theta)$ is coordinate $j$ of that diagnostic
-  vector, and $d$ is the number of diagnostic coordinates.
-- $W_1(a,b)$: the one-dimensional Wasserstein-1 distance between two scalar
+  symmetry-aware transform. $`g_j(\theta)`$ is coordinate $`j`$ of that diagnostic
+  vector, and $`d`$ is the number of diagnostic coordinates.
+- $`W_1(a,b)`$: the one-dimensional Wasserstein-1 distance between two scalar
   distributions. For distributions with cumulative distribution functions
-  $F_a$ and $F_b$, it is:
+  $`F_a`$ and $`F_b`$, it is:
 
 ```math
 W_1(a,b)
@@ -77,7 +77,7 @@ W_1(a,b)
 \left|F_a(t)-F_b(t)\right|\,dt.
 ```
 
-  Equivalently, using quantile functions $F_a^{-1}$ and $F_b^{-1}$:
+  Equivalently, using quantile functions $`F_a^{-1}`$ and $`F_b^{-1}`$:
 
 ```math
 W_1(a,b)
@@ -88,8 +88,8 @@ W_1(a,b)
 
   In the run summaries, $a$ and $b$ are empirical one-dimensional sample sets
   or weighted grid marginals for one diagnostic coordinate.
-- $\mathrm{sd}_{p_{\mathrm{ref}}}(g_j(\theta))$: the posterior standard
-  deviation of diagnostic coordinate $j$ under the reference posterior.
+- $`\mathrm{sd}_{p_{\mathrm{ref}}}(g_j(\theta))`$: the posterior standard
+  deviation of diagnostic coordinate $`j`$ under the reference posterior.
 
 The division by the reference standard deviation turns each coordinate's
 Wasserstein distance into a scale-free error. The final value averages those
@@ -98,8 +98,8 @@ reported in one summary.
 
 The diagnostic parameterization is usually the raw parameter vector. Symmetric
 models use transformed coordinates such as
-$\left(|\theta_1|,\theta_2\right)$ or
-$\left(\mu_{\mathrm{low}},\mu_{\mathrm{high}},\sigma\right)$ so that sampler
+$`\left(|\theta_1|,\theta_2\right)`$ or
+$`\left(\mu_{\mathrm{low}},\mu_{\mathrm{high}},\sigma\right)`$ so that sampler
 diagnostics measure posterior shape independently of arbitrary label
 assignments.
 
@@ -122,7 +122,7 @@ x \sim p(x\mid\theta),
 x_\star = f(\theta_\star,\epsilon_\star).
 ```
 
-The posterior target for the requested signal $x_\star$ is:
+The posterior target for the requested signal $`x_\star`$ is:
 
 ```math
 p(\theta\mid x_\star)
@@ -136,8 +136,8 @@ Define the parameterization used for numerical comparison at the same time:
 g:\Theta\to\mathbb R^d.
 ```
 
-For an identifiable model, $g(\theta)$ is often the raw parameter vector. For a
-model with signs, labels, ridges, or ordered components, choose $g$ so that the
+For an identifiable model, $`g(\theta)`$ is often the raw parameter vector. For a
+model with signs, labels, ridges, or ordered components, choose $`g`$ so that the
 comparison measures the statistical posterior rather than an arbitrary
 coordinate convention.
 
@@ -148,17 +148,17 @@ NPE is faithful:
    transform, and diagnostic transform. Simple stress tests usually belong in
    `scripts/npe_flow_stress_tests.py`; decay-style models with specialized
    references can use a dedicated script.
-2. Pick a truth $\theta_\star$ and generate one observed signal $x_\star$. Keep
+2. Pick a truth $`\theta_\star`$ and generate one observed signal $`x_\star`$. Keep
    this signal fixed while comparing methods, otherwise the reference target is
    changing between runs.
-3. Build an independent reference posterior. Use a grid when $d$ is small
+3. Build an independent reference posterior. Use a grid when $`d`$ is small
    enough for direct quadrature; otherwise use exact-likelihood MCMC or HMC and
    check trace behavior, acceptance, `Rhat`, and effective sample size.
 4. Run a smoke NPE experiment first. It should verify that the simulator,
    context, neural posterior, sampling code, and plotting code all work before
    spending time on a larger run.
 5. Run the serious NPE fit and compare posterior samples with the reference
-   using the normalized Wasserstein diagnostic $D(q,p_{\mathrm{ref}})$ already
+   using the normalized Wasserstein diagnostic $`D(q,p_{\mathrm{ref}})`$ already
    defined above. Inspect marginal overlays, corner plots, posterior
    predictive overlays, and any model-specific mode or symmetry diagnostics.
 6. Decide the run status from the reference comparison. A passing run should
@@ -236,10 +236,10 @@ c_{\mathrm{raw}}(x)=(y_1,\ldots,y_{40}).
 
 The decay-summary context adds 12 deterministic statistics: the intercept and
 negative slope of a least-squares line through
-$\log\max(y_i,10^{-4})$, the standard deviation of the log residuals, mean,
+$`\log\max(y_i,10^{-4})`$, the standard deviation of the log residuals, mean,
 standard deviation, minimum, maximum, first value, last value, early mean, late
 mean, and first-to-last log ratio. The fit-summary context is a coarse
-least-squares exponential fit. For a 64-point grid over $\log k$ spanning
+least-squares exponential fit. For a 64-point grid over $`\log k`$ spanning
 three prior standard deviations on either side of the prior mean,
 
 ```math
@@ -249,23 +249,23 @@ three prior standard deviations on either side of the prior mean,
 \frac{\sum_i y_i\phi_k(t_i)}{\sum_i \phi_k(t_i)^2},
 ```
 
-and $k_\star$ is the grid point with the smallest residual sum of squares
-$\operatorname{SSE}(k)$. The six fit features are
+and $`k_\star`$ is the grid point with the smallest residual sum of squares
+$`\mathrm{SSE}(k)`$. The six fit features are
 
 ```math
 \left(
 \log \hat A(k_\star),
 \log k_\star,
 \log \hat\sigma,
-\log(1+\operatorname{SSE}_\star),
-\log(1+\operatorname{SSE}_{2}-\operatorname{SSE}_\star),
+\log(1+\mathrm{SSE}_\star),
+\log(1+\mathrm{SSE}_{2}-\mathrm{SSE}_\star),
 d_{\mathrm{edge}}
 \right),
 ```
 
-where $\hat\sigma=\sqrt{\operatorname{SSE}_\star/40}$,
-$\operatorname{SSE}_2$ is the second-best grid SSE, and $d_{\mathrm{edge}}$
-is the normalized distance of $k_\star$ from the grid edge. Thus
+where $`\hat\sigma=\sqrt{\mathrm{SSE}_\star/40}`$,
+$`\mathrm{SSE}_2`$ is the second-best grid SSE, and $`d_{\mathrm{edge}}`$
+is the normalized distance of $`k_\star`$ from the grid edge. Thus
 `raw_fit_summary` has 46 context features and `raw_decay_fit_summary` has
 58 context features.
 
@@ -281,11 +281,11 @@ q_\phi(z\mid c)
 ```
 
 The MDN used in the fixed parameter-count diagnostic has
-$M=5$ components, raw-curve context, a three-hidden-layer SiLU multilayer
+$`M=5`$ components, raw-curve context, a three-hidden-layer SiLU multilayer
 perceptron (MLP) with width 128, and 44,722 trainable parameters.
 
-A neural spline flow (NSF) represents $z$ by an invertible conditional
-transformation $T_\phi(\cdot;c)$ of a standard normal base variable:
+A neural spline flow (NSF) represents $`z`$ by an invertible conditional
+transformation $`T_\phi(\cdot;c)`$ of a standard normal base variable:
 
 ```math
 u=T_\phi^{-1}(z;c),
@@ -318,8 +318,8 @@ w_m\ge 0,\quad \sum_m w_m=1.
 ```
 
 The ensemble log density is evaluated with `logsumexp` over member log
-densities plus $\log w_m$. The equal-weight 4-member ensemble has
-$w_m=1/4$. The convex-weighted 16-member ensemble fits the weights by
+densities plus $`\log w_m`$. The equal-weight 4-member ensemble has
+$`w_m=1/4`$. The convex-weighted 16-member ensemble fits the weights by
 minimizing validation NLL on 200,000 validation examples,
 
 ```math
@@ -368,9 +368,9 @@ The viewer includes two population-trained NPEs:
 | 16-member convex-weighted density ensemble | Ensemble whose nonnegative weights are fitted on validation data; its measured cache NLL is slightly lower, but the difference is not statistically resolved. | `-3.63128073481036` |
 
 The following prior-predictive signal was sampled from
-$p(\theta)p(x\mid\theta)$. The plot compares both NPE estimates with an exact
+$`p(\theta)p(x\mid\theta)`$. The plot compares both NPE estimates with an exact
 numerical grid and a Markov chain Monte Carlo (MCMC) reference. The mean
-normalized marginal Wasserstein distance $D(q,p_{\mathrm{ref}})$ is the
+normalized marginal Wasserstein distance $`D(q,p_{\mathrm{ref}})`$ is the
 diagnostic defined in the Evaluation section. Smaller values mean the posterior
 marginals are closer to the exact grid reference. For this signal, the distance
 is `0.0597` for the 4-member Flow2 residual NSF ensemble, `0.0592` for the
@@ -419,7 +419,7 @@ evaluation floor.
 #### Population Entropy Floor
 
 For the population validation NLL, the Bayes-optimal density is the exact
-posterior $p(\theta\mid x)$. The irreducible loss is the conditional population
+posterior $`p(\theta\mid x)`$. The irreducible loss is the conditional population
 entropy:
 
 ```math
@@ -435,8 +435,8 @@ H(\theta\mid X).
 
 The adaptive oracle estimate recorded in
 [npe-next-2x-efficiency-decision-diary.md](notes/npe-next-2x-efficiency-decision-diary.md)
-is approximately `-3.64122 +/- 0.008` in $z$ units. That is the estimated
-population-NLL floor for validation on $p(\theta)p(x\mid\theta)$.
+is approximately `-3.64122 +/- 0.008` in $`z`$ units. That is the estimated
+population-NLL floor for validation on $`p(\theta)p(x\mid\theta)`$.
 
 The reported model NLLs are measured on a finite 1M-example validation cache.
 Per-example NLL standard-error estimates are about `0.00252`, or roughly
@@ -466,17 +466,17 @@ single-model NSF runs, followed by ensemble runs at lower wall time. The
 Because panel means can hide rare failures, the comparison also looks at the
 full distribution of per-signal panel marginal Wasserstein values. The
 metric is the same coordinate-wise diagnostic defined in the evaluation
-section: for each signal, exact grid posterior marginals over $A$, $k$, and
-$\sigma$ are compared with NPE posterior samples using normalized 1D
+section: for each signal, exact grid posterior marginals over $`A`$, $`k`$, and
+$`\sigma`$ are compared with NPE posterior samples using normalized 1D
 Wasserstein distances, then averaged over coordinates. In this subsection,
-$D_{\mathrm{panel}}$ denotes that per-signal mean normalized marginal
+$`D_{\mathrm{panel}}`$ denotes that per-signal mean normalized marginal
 Wasserstein distance.
 
 ![Single decay NPE panel Wasserstein distribution](runs/00_shared_assets/readme_scaling/decay_panel_w_distribution_mdn512k_vs_spline4m_500.png)
 
 On this 500-signal panel, the 4-member Flow2 residual NSF ensemble with random
 permutations has the best distribution of the three plotted estimators: median
-$D_{\mathrm{panel}}$ is 0.0308 for the ensemble, 0.115 for the 4.096M
+$`D_{\mathrm{panel}}`$ is 0.0308 for the ensemble, 0.115 for the 4.096M
 conditional spline-flow checkpoint, and 0.161 for the 512k MDN. The ensemble is
 the best of the three on 484 of 500 signals and beats the spline-flow checkpoint
 on 485 of 500 signals. The remaining outliers show where posterior-shape
@@ -515,7 +515,7 @@ The benchmark observation is generated from:
 \theta_0=(0.85,-0.45).
 ```
 
-The posterior is symmetric in the sign of $\theta_1$. The diagnostic
+The posterior is symmetric in the sign of $`\theta_1`$. The diagnostic
 coordinates are:
 
 ```math
@@ -523,8 +523,8 @@ g(\theta)=(|\theta_1|,\theta_2).
 ```
 
 Progress: the calibrated grid-faithful run trains the flow on
-$\left(|\theta_1|,\theta_2\right)$, then restores sign symmetry by randomly assigning
-the sign of $\theta_1$ after sampling. This run passes the exact-grid
+$`\left(|\theta_1|,\theta_2\right)`$, then restores sign symmetry by randomly assigning
+the sign of $`\theta_1`$ after sampling. This run passes the exact-grid
 diagnostic target and has good mode-mass behavior.
 
 Best posterior:
@@ -613,7 +613,7 @@ The benchmark observation is generated from:
 (\mu_1,\mu_2,\sigma)=(-1.25,1.15,0.34).
 ```
 
-The raw posterior is invariant to swapping $\mu_1$ and $\mu_2$. The
+The raw posterior is invariant to swapping $`\mu_1`$ and $`\mu_2`$. The
 diagnostic coordinates sort the component means:
 
 ```math
@@ -708,7 +708,7 @@ A_2\exp(-k_2 t_i)
 \epsilon_i \sim \mathcal N(0,\sigma^2).
 ```
 
-The ordered variant enforces $k_2>k_1$ through the code parameterization:
+The ordered variant enforces $`k_2>k_1`$ through the code parameterization:
 
 ```math
 z=(\log A_1,\log k_1,\log A_2,\log\Delta k,\log\sigma),
