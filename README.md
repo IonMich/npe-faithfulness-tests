@@ -280,9 +280,9 @@ q_\phi(z\mid c)
 \mathcal N\!\left(z;\mu_j(c),L_j(c)L_j(c)^\top\right).
 ```
 
-The MDN used in the fixed parameter-count diagnostic has
-$`M=5`$ components, raw-curve context, a three-hidden-layer SiLU multilayer
-perceptron (MLP) with width 128, and 44,722 trainable parameters.
+One earlier MDN baseline has $`M=5`$ components, raw-curve context, a
+three-hidden-layer SiLU multilayer perceptron (MLP) with width 128, and 44,722
+trainable parameters.
 
 A neural spline flow (NSF) represents $`z`$ by an invertible conditional
 transformation $`T_\phi(\cdot;c)`$ of a standard normal base variable:
@@ -423,30 +423,7 @@ excess-loss exponent from about `0.490` to `0.997`.
 The fixed-panel posterior diagnostic moves in the same direction: panel mean
 normalized marginal Wasserstein decreases from `0.11046` to `0.03613`. Full
 metadata and rows are stored in
-[flow2_ensemble_data_scaling_summary.json](runs/01_exponential_decay/15_broad_scaling/201_flow2_ensemble_data_scaling/results/flow2_ensemble_data_scaling_summary.json).
-
-#### Older Fixed Parameter-Count Diagnostic
-
-The older fixed parameter-count experiment below holds the architecture family
-roughly fixed and scales only the number of simulated training pairs. It is
-still useful as a historical MDN-vs-spline comparison, but it is no longer the
-best single-decay scaling-law plot. Other improvements in this section come
-from architecture changes, context features, learning-rate schedules,
-hyperparameter search, ensembling, and convex weight optimization on the same
-population validation objective, so they should not be read as single-axis data
-scaling evidence.
-
-The fixed parameter-count plot compares a mixture density network (MDN) and a
-conditional spline-flow NPE with about 45k parameters each. It reports both
-validation NLL over population validation samples and panel marginal
-Wasserstein distance over cached exact grid marginals for a fixed panel of
-signals.
-
-![Single decay fixed parameter-count scaling](runs/00_shared_assets/readme_scaling/decay_mdn_vs_spline_fixed_p_2x2_16m.png)
-
-The log-log panels show useful scaling through the tested range up to 16.384M
-simulations, but the panel Wasserstein distance remains far above the numerical
-evaluation floor.
+[flow2_ensemble_data_scaling_summary.json](runs/00_shared_assets/readme_scaling/decay_flow2_ensemble_data_scaling_summary.json).
 
 #### Population Entropy Floor
 
