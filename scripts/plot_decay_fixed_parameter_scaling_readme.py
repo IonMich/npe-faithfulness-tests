@@ -22,12 +22,12 @@ DEFAULT_OUTPUT = (
 
 SERIES_STYLE = {
     "mdn_base": {
-        "label": "Mixture density network (MDN), 44,722 parameters",
+        "label": "MDN, 44.7k parameters",
         "color": "#5b56b3",
         "marker": "o",
     },
     "spline_flow_small": {
-        "label": "Conditional spline-flow NPE, 45,844 parameters",
+        "label": "Spline-flow NPE, 45.8k parameters",
         "color": "#c45a2d",
         "marker": "s",
     },
@@ -74,7 +74,6 @@ def draw_panel(
     ax.set_xlabel("simulated training pairs")
     ax.set_ylabel(ylabel)
     ax.grid(alpha=0.24, which="both")
-    ax.legend(frameon=False, fontsize=8)
 
 
 def plot(summary_path: Path = DEFAULT_SUMMARY, output_path: Path = DEFAULT_OUTPUT) -> Path:
@@ -102,7 +101,17 @@ def plot(summary_path: Path = DEFAULT_SUMMARY, output_path: Path = DEFAULT_OUTPU
     for ax, (metric, ylabel, log_y) in zip(axes.ravel(), panels, strict=True):
         draw_panel(ax=ax, summary=summary, metric=metric, ylabel=ylabel, log_y=log_y)
 
-    figure.suptitle("Fixed parameter-count single-decay NPE data scaling", y=1.02)
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    figure.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.025),
+        ncol=2,
+        frameon=False,
+        fontsize=9,
+    )
+    figure.suptitle("Fixed parameter-count single-decay NPE data scaling", y=1.075)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=180, bbox_inches="tight")
     plt.close(figure)

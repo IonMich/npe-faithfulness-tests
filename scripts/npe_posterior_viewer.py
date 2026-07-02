@@ -691,12 +691,11 @@ class NPEPosteriorViewer:
             self.register_stage1_ensemble(
                 model_id="broad_weighted_checkpoint_pool",
                 summary_path=weighted_broad_ensemble_summary_path,
-                label="16-member convex-weighted checkpoint ensemble, mixed NSF checkpoints",
-                plot_label="16-member weighted checkpoint ensemble",
+                label="16-member convex-weighted density ensemble, mixed NSF members",
+                plot_label="16-member weighted density ensemble",
                 color=NPE_LAYER_COLORS["broad_weighted_checkpoint_pool"],
                 training_description=(
-                    "reference NLL record only: convex weighted density ensemble over saved "
-                    "population-trained NPE checkpoints, not a direct training run"
+                    "convex-weighted density ensemble over saved population-trained NPEs"
                 ),
             )
         elif best_broad_ensemble_summary_path is None and best_broad_efficiency_model_path is not None and best_broad_efficiency_model_path.exists():
@@ -1917,7 +1916,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_BROAD_MODEL,
         help=(
-            "Optional older population-trained decay NPE checkpoint to expose "
+            "Optional population-trained decay NPE checkpoint to expose "
             "in the posterior-estimator dropdown. Omitted by default."
         ),
     )
@@ -1926,7 +1925,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_BEST_BROAD_MODEL,
         help=(
-            "Optional legacy population-trained MDN checkpoint from earlier scaling-law runs. "
+            "Optional population-trained MDN checkpoint from fixed parameter-count scaling diagnostics. "
             "Omitted by default."
         ),
     )
@@ -1935,7 +1934,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_BEST_BROAD_SPLINE_MODEL,
         help=(
-            "Optional older spline-flow checkpoint from the fixed parameter-count scaling "
+            "Optional spline-flow checkpoint from the fixed parameter-count scaling "
             "diagnostics. If the path is missing, it is omitted from the model dropdown."
         ),
     )
@@ -1944,7 +1943,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_BEST_BROAD_EFFICIENCY_MODEL,
         help=(
-            "Optional superseded population-trained spline-flow efficiency-record checkpoint. "
+            "Optional population-trained spline-flow checkpoint. "
             "Used as a fallback only when --best-broad-ensemble-summary is missing."
         ),
     )
@@ -1953,8 +1952,8 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_BEST_BROAD_ENSEMBLE_SUMMARY,
         help=(
-            "Optional current residual neural spline-flow ensemble summary. "
-            "If present, it replaces the superseded 8.192M efficiency model in the picker."
+            "Optional residual neural spline-flow ensemble summary. "
+            "If present, it replaces the fallback spline-flow checkpoint in the picker."
         ),
     )
     parser.add_argument(
@@ -1962,8 +1961,8 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_WEIGHTED_BROAD_ENSEMBLE_SUMMARY,
         help=(
-            "Optional convex-weighted saved-checkpoint reference ensemble. "
-            "Kept separate from directly trained ensemble records."
+            "Optional convex-weighted density ensemble. "
+            "Loaded as a separate selectable ensemble."
         ),
     )
     parser.add_argument("--host", default="127.0.0.1")

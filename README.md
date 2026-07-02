@@ -200,9 +200,9 @@ z \sim \mathcal N\!\left(
 \right).
 ```
 
-The current single-decay result is a population-trained neural posterior
-estimator (NPE). It learns a conditional density for signals sampled from the
-same population used by the simulator:
+The single-decay estimator is a population-trained neural posterior estimator
+(NPE). It learns a conditional density for signals sampled from the same
+population used by the simulator:
 
 ```math
 p_{\mathrm{train}}(\theta,x)=p(\theta)p(x\mid\theta),
@@ -220,24 +220,24 @@ with objective
 \right].
 ```
 
-The main UI exposes two current population-trained NPEs. Flow2, Flow3, and
-Flow4 denote two, three, or four flow coupling blocks. Negative log likelihood
-(NLL) is reported in the log-coordinate parameterization
+The viewer includes two population-trained NPEs. Flow2, Flow3, and Flow4 denote
+two, three, or four flow coupling blocks. Negative log likelihood (NLL) is
+reported in the log-coordinate parameterization
 $z=(\log A,\log k,\log\sigma)$.
 
-| Model | Role | Full validation negative log likelihood (NLL) |
+| Model | Description | Full validation negative log likelihood (NLL) |
 | --- | --- | ---: |
-| 4-member ensemble of Flow2 residual neural spline flows (NSFs) with random permutations, raw curve features, and exponential-fit context features; 2.048M simulations per member, 15 epochs | Directly trained model under the five-minute wall-time budget. | `-3.6306901328125` |
-| 16-member convex-weighted checkpoint ensemble | Reference ensemble assembled from saved population-trained checkpoints; its measured cache NLL is slightly lower, but the difference is not statistically resolved. | `-3.63128073481036` |
+| 4-member ensemble of Flow2 residual neural spline flows (NSFs) with random permutations, raw curve features, and exponential-fit context features; 2.048M simulations per member, 15 epochs | Equal-weight ensemble trained from initialization. | `-3.6306901328125` |
+| 16-member convex-weighted density ensemble | Ensemble whose nonnegative weights are fitted on validation data; its measured cache NLL is slightly lower, but the difference is not statistically resolved. | `-3.63128073481036` |
 
 The following prior-predictive signal was sampled from
-$p(\theta)p(x\mid\theta)$. The plot compares the current NPE overlays with an
-exact numerical grid and a Markov chain Monte Carlo (MCMC) reference. The mean
+$p(\theta)p(x\mid\theta)$. The plot compares both NPE estimates with an exact
+numerical grid and a Markov chain Monte Carlo (MCMC) reference. The mean
 normalized marginal Wasserstein distance $D(q,p_{\mathrm{ref}})$ is the
 diagnostic defined in the Evaluation section. Smaller values mean the posterior
 marginals are closer to the exact grid reference. For this signal, the distance
 is `0.0597` for the 4-member Flow2 residual NSF ensemble, `0.0592` for the
-convex-weighted checkpoint ensemble, and `0.0733` for MCMC.
+convex-weighted density ensemble, and `0.0733` for MCMC.
 
 ![Single decay population posterior overlay](runs/00_shared_assets/readme_decay_posteriors/decay_population_posterior_corner.png)
 
@@ -247,7 +247,7 @@ The low-prior-density stress signal is harder. It was generated from a
 parameter vector 4.33 prior standard deviations from the prior mean in
 log-parameter space, with log prior density `9.375` below the prior mean. The
 4-member Flow2 residual NSF ensemble has mean normalized marginal Wasserstein
-distance `0.1868`, the convex-weighted checkpoint ensemble has `0.2379`, and
+distance `0.1868`, the convex-weighted density ensemble has `0.2379`, and
 MCMC has `0.0761`. This is a useful counterexample to relying only on average
 NLL.
 
@@ -260,12 +260,12 @@ The generated metadata for these diagnostic views is stored in
 
 #### Fixed Parameter-Count Scaling Diagnostic
 
-The older fixed parameter-count experiment below is the scaling-law diagnostic.
-It holds the architecture family roughly fixed and scales only the number of
-simulated training pairs. The later gains are not scaling-law evidence. They
-came from architecture changes, context features, learning-rate schedules,
-hyperparameter search, ensembling, and convex weight optimization on the same
-population validation objective.
+The fixed parameter-count experiment below is the scaling-law diagnostic. It
+holds the architecture family roughly fixed and scales only the number of
+simulated training pairs. The other improvements in this section come from
+architecture changes, context features, learning-rate schedules, hyperparameter
+search, ensembling, and convex weight optimization on the same population
+validation objective, so they should not be read as scaling-law evidence.
 
 The fixed parameter-count plot compares a mixture density network (MDN) and a
 conditional spline-flow NPE with about 45k parameters each. It reports both
@@ -277,8 +277,7 @@ signals.
 
 The log-log panels show useful scaling through the tested range up to 16.384M
 simulations, but the panel Wasserstein distance remains far above the numerical
-evaluation floor. This is only a fixed-architecture scaling diagnostic; it is
-not the source of the current best population-trained models.
+evaluation floor.
 
 #### Population Entropy Floor
 
@@ -297,17 +296,17 @@ entropy:
 H(\theta\mid X).
 ```
 
-The current adaptive oracle estimate recorded in
+The adaptive oracle estimate recorded in
 [npe-next-2x-efficiency-decision-diary.md](notes/npe-next-2x-efficiency-decision-diary.md)
 is approximately `-3.64122 +/- 0.008` in $z$ units. That is the estimated
 population-NLL floor for validation on $p(\theta)p(x\mid\theta)$.
 
 The reported model NLLs are measured on a finite 1M-example validation cache.
 Per-example NLL standard-error estimates are about `0.00252`, or roughly
-`+/-0.00495` for a 95% Monte Carlo half-width, for both current UI NPEs. The
+`+/-0.00495` for a 95% Monte Carlo half-width, for both NPEs listed above. The
 oracle floor also has finite numerical uncertainty, reported above as
-`+/-0.008`. The 4-member ensemble and convex-weighted checkpoint ensemble are
-therefore close enough that the checkpoint ensemble's `0.00059` measured NLL
+`+/-0.008`. The 4-member ensemble and convex-weighted density ensemble are
+therefore close enough that the density ensemble's `0.00059` measured NLL
 advantage should not be interpreted as a resolved population-level ordering
 without a larger validation estimate. The validation-cache uncertainty
 calculation is stored in
@@ -315,25 +314,20 @@ calculation is stored in
 
 #### Training Efficiency
 
-The wall-time plot below is not a scaling-law plot. It tracks single-decay
-population-training records by wall time. Curves show training NLL where a
-training curve exists; markers show exact full-cache validation NLL. The legend
-uses technical model descriptions and final validation NLLs.
+The wall-time plot below is an empirical training-efficiency comparison for
+directly trained models, not a scaling-law plot. Curves show training NLL;
+markers show exact full-cache validation NLL. The legend gives the model
+description and final validation NLL for each line.
 
-The plot includes the earlier records at approximately 4x and 2x the later
-780s wall time: `3140.0s -> 1569.2s` (`2.00x`) and
-`1569.2s -> 775.6s` (`2.02x`). It also includes the later sub-780s ensemble
-records. To avoid duplicate curves at the same time scale, the older 260.0s
-single-model curve is omitted; the 4-member Flow2 residual NSF ensemble is the
-shown approximately-260s model (`-3.6307` in `246s`). The violet diamond is the
-convex-weighted checkpoint ensemble (`-3.6313` in `73.63s` assembly and
-evaluation time); it is a point because it optimizes weights over already saved
-checkpoints rather than training a new model.
+The plot includes representative trained models sorted by wall time:
+`3140.0s -> 1569.2s` (`2.00x`) and `1569.2s -> 775.6s` (`2.02x`) for
+single-model NSF runs, followed by ensemble runs at lower wall time. The
+4-member Flow2 residual NSF ensemble reaches `-3.6307` in `246s`.
 
 ![Single decay NPE training efficiency curves](runs/00_shared_assets/readme_scaling/decay_population_npe_training_efficiency_curves.png)
 
-Because panel means can hide rare failures, the current comparison also looks
-at the full distribution of per-signal panel marginal Wasserstein values. The
+Because panel means can hide rare failures, the comparison also looks at the
+full distribution of per-signal panel marginal Wasserstein values. The
 metric is the same coordinate-wise diagnostic defined in the evaluation
 section: for each signal, exact grid posterior marginals over $A$, $k$, and
 $\sigma$ are compared with NPE posterior samples using normalized 1D
@@ -343,13 +337,12 @@ Wasserstein distance.
 
 ![Single decay NPE panel Wasserstein distribution](runs/00_shared_assets/readme_scaling/decay_panel_w_distribution_mdn512k_vs_spline4m_500.png)
 
-On this 500-signal panel, the latest 4-member Flow2 residual NSF ensemble with
-random permutations strongly improves the distribution relative to the older
-population-trained baselines: median $D_{\mathrm{panel}}$ is 0.0308 for the
-ensemble, 0.115 for the 4.096M conditional spline-flow checkpoint, and 0.161
-for the 512k MDN. The ensemble is the best of the three on 484 of 500 signals
-and beats the spline-flow checkpoint on 485 of 500 signals. The remaining
-outliers are much smaller than before but still mark where posterior-shape
+On this 500-signal panel, the 4-member Flow2 residual NSF ensemble with random
+permutations has the best distribution of the three plotted estimators: median
+$D_{\mathrm{panel}}$ is 0.0308 for the ensemble, 0.115 for the 4.096M
+conditional spline-flow checkpoint, and 0.161 for the 512k MDN. The ensemble is
+the best of the three on 484 of 500 signals and beats the spline-flow checkpoint
+on 485 of 500 signals. The remaining outliers show where posterior-shape
 diagnostics can catch issues not visible from validation NLL alone.
 
 ### Sign-Symmetry Stress Test

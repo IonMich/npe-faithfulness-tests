@@ -49,7 +49,7 @@
         "ensemble_size": 16,
         "full_val_nll_z_units": -3.63128073481036,
         "id": "convex_weighted_checkpoint_ensemble",
-        "label": "16-member convex-weighted checkpoint ensemble, mixed NSF checkpoints",
+        "label": "16-member convex-weighted density ensemble, mixed NSF members",
         "training_seconds": 73.63113179197535
       }
     ],
@@ -65,13 +65,13 @@
     "grid": {
       "grid_points": 216000,
       "grid_size": 60,
-      "max_edge_mass": 8.664054578297811e-07
+      "max_edge_mass": 7.654602927749656e-07
     },
     "mcmc": {
       "acceptance_rate": 0.8617239583333334,
       "convergence_ok": false,
       "max_rhat": 1.0717409322409388,
-      "mean_normalized_wasserstein": 0.07325284212842936,
+      "mean_normalized_wasserstein": 0.07500189407655371,
       "min_bulk_ess": 81.88147413432914,
       "min_tail_ess": 110.15849603237865
     },
@@ -80,8 +80,8 @@
       "mode": "prior_predictive"
     },
     "npe_mean_normalized_wasserstein": {
-      "convex_weighted_checkpoint_ensemble": 0.059158112536436165,
-      "flow2_residual_nsf_ensemble4": 0.059709043287081875
+      "convex_weighted_checkpoint_ensemble": 0.06147230031621643,
+      "flow2_residual_nsf_ensemble4": 0.06440091663907004
     },
     "posterior_samples": 7000,
     "selected_models": [
@@ -96,7 +96,7 @@
         "ensemble_size": 16,
         "full_val_nll_z_units": -3.63128073481036,
         "id": "convex_weighted_checkpoint_ensemble",
-        "label": "16-member convex-weighted checkpoint ensemble, mixed NSF checkpoints",
+        "label": "16-member convex-weighted density ensemble, mixed NSF members",
         "training_seconds": 73.63113179197535
       }
     ],

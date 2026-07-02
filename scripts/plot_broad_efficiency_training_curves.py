@@ -27,7 +27,7 @@ RUNS = [
         / "runs/01_exponential_decay/15_broad_scaling/38_spline_lr_schedule_proof/"
         "cosine_4m_seed20260901/results/broad_scaling_summary.json",
         "color": "#374151",
-        "label": "Flow4 NSF, 4.096M, 90 epochs",
+        "label": "Flow4 NSF, 4.096M simulations, 90 epochs",
     },
     {
         "kind": "single",
@@ -40,7 +40,7 @@ RUNS = [
         "batch1024_hidden80_wd1e4_lr004_e74_max294000_seed20260901/"
         "runs/n4096000_seed20260901/results/training_progress.jsonl",
         "color": "#64748b",
-        "label": "Flow3 NSF, 4.096M, batch 1024, 74 epochs",
+        "label": "Flow3 NSF, 4.096M simulations, batch 1024, 74 epochs",
     },
     {
         "kind": "single",
@@ -52,7 +52,7 @@ RUNS = [
         "train8m_lr004_wd2e4_e27_max212000_seed20260901/runs/n8192000_seed20260901/"
         "results/training_progress.jsonl",
         "color": "#6f7378",
-        "label": "Flow3 NSF, 8.192M, 27 epochs",
+        "label": "Flow3 NSF, 8.192M simulations, 27 epochs",
     },
     {
         "kind": "ensemble",
@@ -86,14 +86,6 @@ RUNS = [
         "rp_seed*/runs/*/results/training_progress.jsonl",
         "color": "#0f766e",
         "label": "4-member Flow2 residual NSF + fit features, 2.048M/member, 15 epochs",
-    },
-    {
-        "kind": "point",
-        "summary": ROOT
-        / "runs/01_exponential_decay/15_broad_scaling/187_nll63_weighted_broad_pool/"
-        "results/weighted_ensemble_summary.json",
-        "color": "#7c3aed",
-        "label": "16x convex-weighted checkpoint ensemble",
     },
 ]
 
@@ -305,7 +297,7 @@ def configure_axis(ax: plt.Axes) -> None:
     ax.xaxis.set_major_formatter(mticker.ScalarFormatter())
     ax.xaxis.set_minor_formatter(mticker.NullFormatter())
     ax.set_ylim(-3.67, -2.15)
-    ax.set_xlabel("training or assembly wall seconds")
+    ax.set_xlabel("training wall seconds")
     ax.set_ylabel("negative log likelihood, z units (lower is better)")
     ax.set_title("Single-decay NPE loss by wall time")
 
@@ -343,8 +335,8 @@ def plot(output_path: Path = DEFAULT_OUTPUT) -> Path:
         handles=legend_handles(runs),
         title="final validation NLL",
         loc="upper right",
-        fontsize=7.4,
-        title_fontsize=8.0,
+        fontsize=12.0,
+        title_fontsize=12.5,
         ncol=1,
         frameon=True,
         framealpha=0.86,

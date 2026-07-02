@@ -49,9 +49,9 @@ MODEL_COLORS = {
     "flow2_ensemble": "#0f766e",
 }
 MODEL_LABELS = {
-    "spline": "Population-trained conditional spline-flow NPE, 4.096M",
-    "mdn": "Population-trained mixture density network, 512k",
-    "flow2_ensemble": "4-member Flow2 residual NSF, random permutations, 15 epochs",
+    "spline": "Spline-flow NPE, 4.096M",
+    "mdn": "MDN, 512k",
+    "flow2_ensemble": "4-member Flow2 residual NSF",
 }
 SCATTER_AXIS_LABELS = {
     "spline": "spline-flow NPE distance",
@@ -432,7 +432,6 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
     ax.set_ylabel("empirical CDF")
     ax.set_title("Distribution across panel signals")
     ax.grid(which="both", alpha=0.22)
-    ax.legend(frameon=False)
 
     ax = axes[0, 1]
     if "flow2_ensemble" in w_by_model and "spline" in w_by_model:
@@ -481,7 +480,6 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
     ax.set_ylabel("signal count")
     ax.set_title("Distance to evaluation floor")
     ax.grid(which="both", alpha=0.22)
-    ax.legend(frameon=False)
 
     ax = axes[1, 1]
     for key, values in w_by_model.items():
@@ -492,12 +490,21 @@ def plot(combined_rows: list[dict[str, object]], output_path: Path, *, posterior
     ax.set_ylabel("mean normalized marginal Wasserstein distance")
     ax.set_title("Failure concentration by noise level")
     ax.grid(which="both", alpha=0.22)
-    ax.legend(frameon=False)
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    figure.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.025),
+        ncol=len(labels),
+        frameon=False,
+        fontsize=8.5,
+    )
 
     figure.suptitle(
         f"Single-decay NPE panel marginal Wasserstein distribution "
         f"(n={len(combined_rows)}, posterior samples={posterior_samples:,})",
-        y=1.02,
+        y=1.075,
     )
     figure.savefig(output_path, dpi=170, bbox_inches="tight")
     plt.close(figure)
