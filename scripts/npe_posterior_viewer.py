@@ -325,20 +325,14 @@ def add_diagonal_interval_titles(
         ax = axes[index, index]
         ax.text(
             0.5,
-            0.98,
+            1.01,
             stacked_interval_title(row),
             transform=ax.transAxes,
             ha="center",
-            va="top",
+            va="bottom",
             fontsize=fontsize,
             color="#111827",
             clip_on=False,
-            bbox={
-                "facecolor": "white",
-                "edgecolor": "none",
-                "alpha": 0.82,
-                "pad": 0.15,
-            },
         )
 
 
@@ -493,11 +487,11 @@ def render_corner_layers(
             labels=labels,
             sample_layers=prepared_sample_layers,
         )
-        hspace = 0.035
+        hspace = 0.0
     else:
-        hspace = 0.035
+        hspace = 0.0
     figure.legend(handles=handles, loc="upper right", bbox_to_anchor=(0.97, 0.96))
-    figure.subplots_adjust(top=top, hspace=hspace, wspace=0.035)
+    figure.subplots_adjust(top=top, hspace=hspace, wspace=0.0)
     figure.suptitle(formatted_title, y=0.985, fontsize=title_fontsize)
     return figure
 
