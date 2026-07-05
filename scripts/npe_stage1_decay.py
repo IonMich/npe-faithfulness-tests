@@ -467,15 +467,24 @@ def transform_context_features(x: np.ndarray, mode: str) -> np.ndarray:
     raise ValueError(f"Unknown context feature mode: {mode}")
 
 
+def lower_cholesky_param_count(dim: int) -> int:
+    return dim * (dim + 1) // 2
+
+
 def lower_cholesky_from_params(params: torch.Tensor, dim: int = 3) -> torch.Tensor:
+    expected = lower_cholesky_param_count(dim)
+    if params.shape[-1] != expected:
+        raise ValueError(f"Expected {expected} Cholesky parameters for dim={dim}, got {params.shape[-1]}.")
     leading_shape = params.shape[:-1]
     tril = torch.zeros(*leading_shape, dim, dim, device=params.device, dtype=params.dtype)
-    tril[..., 0, 0] = torch.nn.functional.softplus(params[..., 0]) + 1e-4
-    tril[..., 1, 0] = params[..., 1]
-    tril[..., 1, 1] = torch.nn.functional.softplus(params[..., 2]) + 1e-4
-    tril[..., 2, 0] = params[..., 3]
-    tril[..., 2, 1] = params[..., 4]
-    tril[..., 2, 2] = torch.nn.functional.softplus(params[..., 5]) + 1e-4
+    index = 0
+    for row in range(dim):
+        for col in range(row + 1):
+            if row == col:
+                tril[..., row, col] = torch.nn.functional.softplus(params[..., index]) + 1e-4
+            else:
+                tril[..., row, col] = params[..., index]
+            index += 1
     return tril
 
 
@@ -529,7 +538,7 @@ class DiagonalGaussianPosterior(nn.Module):
 class FullGaussianPosterior(nn.Module):
     def __init__(self, x_dim: int, z_dim: int, hidden_dim: int, hidden_layers: int) -> None:
         super().__init__()
-        self.net = make_mlp(x_dim, z_dim + 6, hidden_dim, hidden_layers)
+        self.net = make_mlp(x_dim, z_dim + lower_cholesky_param_count(z_dim), hidden_dim, hidden_layers)
         self.z_dim = z_dim
 
     def parameters_from_x(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -562,10 +571,11 @@ class MixtureDensityPosterior(nn.Module):
         super().__init__()
         self.components = components
         self.z_dim = z_dim
-        self.net = make_mlp(x_dim, components * (1 + z_dim + 6), hidden_dim, hidden_layers)
+        self.tril_params = lower_cholesky_param_count(z_dim)
+        self.net = make_mlp(x_dim, components * (1 + z_dim + self.tril_params), hidden_dim, hidden_layers)
 
     def parameters_from_x(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        output = self.net(x).reshape(x.shape[0], self.components, 1 + self.z_dim + 6)
+        output = self.net(x).reshape(x.shape[0], self.components, 1 + self.z_dim + self.tril_params)
         logits = output[..., 0]
         mean = output[..., 1 : 1 + self.z_dim]
         tril = lower_cholesky_from_params(output[..., 1 + self.z_dim :], self.z_dim)

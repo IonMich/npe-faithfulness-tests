@@ -34,7 +34,7 @@ and the entropy-floor estimate.
 | Banana | `floor_pass` full-prior raw-coordinate NLL result | Second completed transfer after Linear6; gap is within the entropy-floor uncertainty under the common criterion. |
 | Label-switching mixture | `near_floor` full-prior sorted z-NLL result | Third completed transfer after Linear6/Banana; combined uncertainty does not resolve the gap, but the paired cache still resolves a small residual. |
 | Linear6 | `near_floor` full-prior z-NLL result | First completed transfer after sign; remaining gap is real but at the same practical near-floor level as single decay and sign. |
-| Ordered two-exponential decay | `fail` | First build a reliable full-prior floor/evidence pipeline; only then claim or tune global NLL. |
+| Ordered two-exponential decay | `blocked` after floor probe | The full-prior floor probe is now repeatable, but the transferred Flow2/nearby recipes are still far above it. Do not claim global faithfulness without a better target/context/family. |
 
 ## Reusable Workflow
 
@@ -306,46 +306,80 @@ Diagnostics:
 
 ### 4. Ordered Two-Exponential Decay
 
-This is the hard case. Do not spend large training runs before the full-prior
-floor/evidence method is credible.
+This is now the remaining blocker. The floor-first part of the workflow exists,
+but the single-decay/sign training recipe has not transferred successfully.
 
-Coordinate decision:
+Current target coordinates:
 
-- Choose one NLL target and keep it fixed:
-  either ordered log coordinates
-  `(log A_1, log k_1, log A_2, log Delta k, log sigma)` or displayed physical
-  coordinates `(A_1, k_1, A_2, k_2, sigma)`.
-- Physical coordinates are nicer for plots but require more Jacobian bookkeeping.
-- Log coordinates are likely more stable for NLL and floor estimation.
+```text
+g(z) = (log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)
+```
 
-Floor plan:
+The transform is invertible and has unit Jacobian, so NPE NLL and floor NLL are
+reported in the same ridge coordinates without an additional correction.
 
-- Start with a `10k` to `50k` validation floor probe, not `1M`.
-- For each signal, build a proposal from multi-start profiled two-rate
-  least-squares fits plus local curvature.
-- Estimate `log p(x)` with adaptive importance, bridge sampling, or SMC/AIS.
-- Compare evidence estimates across at least two independent numerical methods
-  on a smaller subset.
-- Only scale the validation cache after evidence error is clearly below the
-  expected NPE-floor gap.
+Current floor probe:
 
-Training plan:
+```text
+10k validation, seed 23  -3.28149 +/- 0.02423
+10k validation, seed 31  -3.28349 +/- 0.02427
+```
 
-- Use the single-decay Flow2 recipe as the first controlled baseline, but keep
-  the model-specific context that worked best so far:
-  profiled two-rate least-squares summaries, ridge/profiling diagnostics, and
-  raw curve if it helps.
-- Train a residual target around the profiled fit if the coordinate decision
-  allows an invertible target transform with a known Jacobian.
-- If Flow2 at `512k` is far from the floor, escalate in this order:
-  `2.048M` data, then Flow3/Flow4, then density ensembles or mixture-of-experts.
+Both runs use the same posterior-centered Gaussian-mixture importance sampler.
+The independent seeds agree at the reported precision, but this should still be
+treated as a probe-scale floor until the final method is cross-checked or scaled.
 
-Diagnostics:
+Training probes tried:
 
-- MCMC/HMC agreement remains required as a sampler sanity check, but it is not a
-  global pass criterion.
-- Use posterior predictive overlays and pairwise marginal diagnostics to find
-  ridge or mode failures.
+```text
+512k x 4 Flow2, 15 epochs       NLL -3.19327, gap 0.08823
+512k x 4 Flow2, 30 epochs       NLL -3.19892, gap 0.08257
+1.024M x 1 Flow2, 30 epochs     NLL -3.19045, gap 0.09104
+512k x 1 Flow4, 30 epochs       NLL -3.17108, gap 0.11041
+512k x 1 MAF4, 30 epochs        NLL -3.17836, gap 0.10314
+512k x 1 augmented context      NLL -3.17555, gap 0.10595
+128k x 1 CPU MDN8 smoke         NLL -3.01387, gap 0.26762
+```
+
+The best plain NPE result is the 4-member Flow2 30-epoch ensemble, and it is
+still about `0.083` NLL units above the floor. A diverse ensemble over the
+available probes improves only to about `-3.2036`, still roughly `0.078` above
+the floor. This is qualitatively different from Linear6/Banana/Label Switching
+and should be treated as a real miss, not an uncertainty issue.
+
+Useful infrastructure completed:
+
+- `train_sign_population_npe.py` can now sample, train, evaluate, and floor-probe
+  `--model two_exp` on the full prior.
+- Two-exponential sampling is chunked, avoiding the large profile-context memory
+  spike seen in the 2M probe.
+- The full Gaussian and MDN covariance heads in `npe_stage1_decay.py` now use
+  dimension-generic Cholesky parameter counts, fixing the prior 5D MDN bug.
+- `plot_broad_efficiency_training_curves.py` has a reusable two-exponential
+  population-loss mode ready once there is a result worth documenting.
+
+Next viable experiments:
+
+- Cross-check the 10k floor with a second numerical evidence method on a smaller
+  subset before spending more full validation time.
+- Stop scaling the same Flow2 recipe blindly; the 1M single-member probe did not
+  improve fixed-cache NLL.
+- Try a genuinely richer conditional posterior family, such as a conditional
+  mixture of flows or mixture-of-experts, rather than another single normalizing
+  flow.
+- Revisit target/context design with an invertible transform that separates the
+  ridge more cleanly than the current log-sum/log-ratio coordinates.
+- Use exact-posterior or high-quality importance samples for a subset of signals
+  to diagnose where the amortized posterior misses mass before launching another
+  Mac mini training run.
+
+Diagnostics still required before any eventual pass:
+
+- MCMC/HMC agreement as a sampler sanity check.
+- Posterior predictive overlays and pairwise marginals for representative
+  full-prior signals.
+- A final held-out validation cache and floor estimate with uncertainty small
+  enough to resolve a near-floor gap.
 
 ## Sign And Single-Decay Follow-Up
 
@@ -385,8 +419,11 @@ Use the same stop/go logic for every model.
 
 ## Immediate Next Work
 
-1. Commit and push the completed Label Switching near-floor model slice.
-2. Repeat the same floor-first workflow for Ordered Two-Exponential Decay only
-   after its full-prior evidence method is credible.
-3. For any new posterior figures, keep the exact/reference layer in the same
+1. Treat Ordered Two-Exponential Decay as the only remaining unresolved model.
+2. Commit and push successful model slices as they finish; for Two-Exponential,
+   commit only reusable infrastructure or clearly labeled blocker/probe notes
+   until there is a near-floor result.
+3. Cross-check the two-exponential floor estimator before launching another
+   expensive training family.
+4. For any new posterior figures, keep the exact/reference layer in the same
    reusable renderer and use deterministic seeded NPE samples.

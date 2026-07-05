@@ -42,6 +42,12 @@ DEFAULT_LINEAR6_OUTPUT = (
 DEFAULT_LINEAR6_SUMMARY = (
     ROOT / "runs/00_shared_assets/readme_linear6_posteriors/linear6_population_training_loss_summary.json"
 )
+DEFAULT_TWO_EXP_OUTPUT = (
+    ROOT / "runs/00_shared_assets/readme_two_exp_posteriors/two_exp_population_training_loss.png"
+)
+DEFAULT_TWO_EXP_SUMMARY = (
+    ROOT / "runs/00_shared_assets/readme_two_exp_posteriors/two_exp_population_training_loss_summary.json"
+)
 DEFAULT_SIGN_ENSEMBLE_SUMMARY = (
     ROOT
     / "runs/02_stress_sign/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/"
@@ -61,6 +67,11 @@ DEFAULT_LINEAR6_ENSEMBLE_SUMMARY = (
     ROOT
     / "runs/05_stress_linear6/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/"
     "results/linear6_population_ensemble_summary.json"
+)
+DEFAULT_TWO_EXP_ENSEMBLE_SUMMARY = (
+    ROOT
+    / "runs/06_two_exponential/03_population_npe/02_flow2_ridge_full_prior_512k_ensemble4/"
+    "results/two_exp_population_ensemble_summary.json"
 )
 POPULATION_ENTROPY_NLL = -3.6386545787958
 
@@ -647,11 +658,33 @@ def plot_label_switch_population(
     )
 
 
+def plot_two_exp_population(
+    *,
+    ensemble_summary: Path = DEFAULT_TWO_EXP_ENSEMBLE_SUMMARY,
+    output_path: Path = DEFAULT_TWO_EXP_OUTPUT,
+    summary_output: Path = DEFAULT_TWO_EXP_SUMMARY,
+) -> Path:
+    return plot_population_training(
+        ensemble_summary=ensemble_summary,
+        output_path=output_path,
+        summary_output=summary_output,
+        title="Two-exponential population NPE loss by wall time",
+        ylabel="NLL in ridge target units",
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot population NPE training-loss curves.")
     parser.add_argument(
         "--mode",
-        choices=("single_decay", "sign_population", "banana_population", "label_switch_population", "linear6_population"),
+        choices=(
+            "single_decay",
+            "sign_population",
+            "banana_population",
+            "label_switch_population",
+            "linear6_population",
+            "two_exp_population",
+        ),
         default="single_decay",
     )
     parser.add_argument("--output", type=Path, default=None)
@@ -660,6 +693,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--banana-ensemble-summary", type=Path, default=DEFAULT_BANANA_ENSEMBLE_SUMMARY)
     parser.add_argument("--label-switch-ensemble-summary", type=Path, default=DEFAULT_LABEL_SWITCH_ENSEMBLE_SUMMARY)
     parser.add_argument("--linear6-ensemble-summary", type=Path, default=DEFAULT_LINEAR6_ENSEMBLE_SUMMARY)
+    parser.add_argument("--two-exp-ensemble-summary", type=Path, default=DEFAULT_TWO_EXP_ENSEMBLE_SUMMARY)
     return parser.parse_args()
 
 
@@ -685,11 +719,17 @@ def main() -> None:
             output_path=args.output or DEFAULT_LABEL_SWITCH_OUTPUT,
             summary_output=args.summary_output or DEFAULT_LABEL_SWITCH_SUMMARY,
         )
-    else:
+    elif args.mode == "linear6_population":
         output_path = plot_linear6_population(
             ensemble_summary=args.linear6_ensemble_summary,
             output_path=args.output or DEFAULT_LINEAR6_OUTPUT,
             summary_output=args.summary_output or DEFAULT_LINEAR6_SUMMARY,
+        )
+    else:
+        output_path = plot_two_exp_population(
+            ensemble_summary=args.two_exp_ensemble_summary,
+            output_path=args.output or DEFAULT_TWO_EXP_OUTPUT,
+            summary_output=args.summary_output or DEFAULT_TWO_EXP_SUMMARY,
         )
     print(output_path)
 

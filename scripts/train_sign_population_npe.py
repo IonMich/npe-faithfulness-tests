@@ -14,7 +14,13 @@ from scipy.special import logsumexp, roots_hermitenorm
 from torch.utils.data import DataLoader, TensorDataset
 
 import npe_stage1_decay as stage1
-from npe_flow_stress_tests import StressCase, make_banana_case, make_label_switch_case, make_linear6_case
+from npe_flow_stress_tests import (
+    StressCase,
+    make_banana_case,
+    make_label_switch_case,
+    make_linear6_case,
+    make_two_exp_case,
+)
 
 
 DEFAULT_OUTPUT_ROOT = Path("runs/02_stress_sign/03_population_npe/01_flow2_residual_full_prior")
@@ -23,6 +29,7 @@ DEFAULT_LABEL_SWITCH_OUTPUT_ROOT = (
     Path("runs/04_stress_label_switch/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4")
 )
 DEFAULT_LINEAR6_OUTPUT_ROOT = Path("runs/05_stress_linear6/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4")
+DEFAULT_TWO_EXP_OUTPUT_ROOT = Path("runs/06_two_exponential/03_population_npe/00_entropy_floor_full_prior_probe")
 FOLDED_SIGN_FLOOR = -1.426941782495585
 FOLDED_SIGN_FLOOR_SE = 0.0011526154301947824
 LOG_2PI = math.log(2.0 * math.pi)
@@ -33,6 +40,14 @@ BANANA_PRIOR_STD = 1.8
 LABEL_N_OBS = 80
 LABEL_PRIOR_MEAN = np.array([0.0, 0.0, math.log(0.45)], dtype=np.float64)
 LABEL_PRIOR_STD = np.array([2.2, 2.2, 0.55], dtype=np.float64)
+TWO_EXP_N_OBS = 45
+TWO_EXP_T = np.linspace(0.0, 6.0, TWO_EXP_N_OBS)
+TWO_EXP_PRIOR_MEAN = np.array(
+    [math.log(2.5), math.log(0.35), math.log(1.4), math.log(0.75), math.log(0.25)],
+    dtype=np.float64,
+)
+TWO_EXP_PRIOR_STD = np.array([0.60, 0.55, 0.65, 0.60, 0.45], dtype=np.float64)
+TWO_EXP_CONTEXT_CHUNK_SIZE = 32_768
 
 
 def json_ready(value: object) -> object:
@@ -96,6 +111,8 @@ def default_output_root(model: str) -> Path:
         return DEFAULT_LABEL_SWITCH_OUTPUT_ROOT
     if model == "linear6":
         return DEFAULT_LINEAR6_OUTPUT_ROOT
+    if model == "two_exp":
+        return DEFAULT_TWO_EXP_OUTPUT_ROOT
     raise ValueError(f"Unsupported population model: {model}")
 
 
@@ -108,6 +125,8 @@ def population_target_description(model: str) -> str:
         return "(mu_low, mu_high, log_sigma)"
     if model == "linear6":
         return "(w1, ..., w6, log_sigma)"
+    if model == "two_exp":
+        return "(log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)"
     raise ValueError(f"Unsupported population model: {model}")
 
 
@@ -120,6 +139,8 @@ def population_kind(model: str) -> str:
         return "label_switch_population_flow2_residual_nsf_ensemble"
     if model == "linear6":
         return "linear6_population_flow2_residual_nsf_ensemble"
+    if model == "two_exp":
+        return "two_exp_population_flow2_residual_nsf_ensemble"
     raise ValueError(f"Unsupported population model: {model}")
 
 
@@ -147,6 +168,13 @@ def population_description(model: str) -> str:
             "Full-prior Linear6 population NPE using the single-decay Flow2 "
             "residual NSF/randperm training recipe, with target "
             "(w1, ..., w6, log_sigma)."
+        )
+    if model == "two_exp":
+        return (
+            "Full-prior ordered two-exponential population NPE using the "
+            "single-decay Flow2 residual NSF/randperm training recipe, with "
+            "invertible ridge target "
+            "(log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)."
         )
     raise ValueError(f"Unsupported population model: {model}")
 
@@ -224,6 +252,68 @@ def sample_label_switch_population_raw(
     return x.astype(np.float32), case.context(x).astype(np.float32), sort_label_target(z).astype(np.float32)
 
 
+def sample_two_exp_population_raw(
+    *,
+    n: int,
+    seed: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    case = make_two_exp_case(ordered=True)
+    rng = np.random.default_rng(seed)
+    z = rng.normal(
+        case.prior_mean[None, :],
+        case.prior_std[None, :],
+        size=(n, case.z_dim),
+    )
+    x_chunks = []
+    context_chunks = []
+    for start in range(0, n, TWO_EXP_CONTEXT_CHUNK_SIZE):
+        stop = min(start + TWO_EXP_CONTEXT_CHUNK_SIZE, n)
+        x_chunk = case.simulate_x(z[start:stop], rng)
+        x_chunks.append(x_chunk.astype(np.float32))
+        context_chunks.append(case.context(x_chunk).astype(np.float32))
+    return np.concatenate(x_chunks, axis=0), np.concatenate(context_chunks, axis=0), z.astype(np.float32)
+
+
+def two_exp_target_transform(z_raw: np.ndarray) -> np.ndarray:
+    z = np.asarray(z_raw, dtype=np.float64)
+    log_sum_amplitude = np.logaddexp(z[:, 0], z[:, 2])
+    log_amplitude_ratio = z[:, 0] - z[:, 2]
+    transformed = np.column_stack(
+        [
+            log_sum_amplitude,
+            log_amplitude_ratio,
+            z[:, 1],
+            z[:, 3],
+            z[:, 4],
+        ]
+    )
+    return transformed.astype(np.float32)
+
+
+def two_exp_target_inverse(z_target: np.ndarray) -> np.ndarray:
+    z = np.asarray(z_target, dtype=np.float64)
+    log_normalizer = np.logaddexp(0.0, z[:, 1])
+    raw = np.column_stack(
+        [
+            z[:, 0] + z[:, 1] - log_normalizer,
+            z[:, 2],
+            z[:, 0] - log_normalizer,
+            z[:, 3],
+            z[:, 4],
+        ]
+    )
+    return raw.astype(np.float32)
+
+
+def sample_two_exp_population(
+    *,
+    n: int,
+    seed: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    _x_raw, context, z = sample_two_exp_population_raw(n=n, seed=seed)
+    return context, two_exp_target_transform(z)
+
+
 def sample_stress_population(
     case: StressCase,
     *,
@@ -254,6 +344,8 @@ def sample_population(
         return sample_label_switch_population(n=n, seed=seed)
     if model == "linear6":
         return sample_stress_population(make_linear6_case(), n=n, seed=seed)
+    if model == "two_exp":
+        return sample_two_exp_population(n=n, seed=seed)
     raise ValueError(f"Unsupported population model: {model}")
 
 
@@ -271,13 +363,13 @@ def make_config(args: argparse.Namespace, *, seed: int, train_simulations: int) 
         weight_decay=float(args.weight_decay),
         hidden_dim=int(args.hidden_dim),
         hidden_layers=int(args.hidden_layers),
-        mdn_components=5,
+        mdn_components=int(args.mdn_components),
         flow_layers=int(args.flow_layers),
         flow_context_dim=64,
         seed=int(seed),
         observed_seed=int(seed),
         requested_device=str(args.device),
-        families=["spline_flow"],
+        families=[str(args.family)],
         posterior_samples=0,
         reference_grid_size=0,
         train_sampler="random",
@@ -305,7 +397,7 @@ def make_config(args: argparse.Namespace, *, seed: int, train_simulations: int) 
         flow_residual=bool(args.flow_residual),
         flow_randperm=bool(args.flow_randperm),
         flow_passes=int(args.flow_passes),
-        flow_kind="nsf",
+        flow_kind=str(args.flow_kind),
     )
 
 
@@ -643,6 +735,283 @@ def label_switch_exact_posterior_nll(
     return -(math.log(2.0) + log_prior + log_likelihood - log_evidence), diagnostics
 
 
+def two_exp_profile_center_from_context(x_context: np.ndarray) -> np.ndarray:
+    context = np.asarray(x_context, dtype=np.float64)
+    log_a1 = context[:, 0]
+    log_k1 = context[:, 1]
+    log_a2 = context[:, 2]
+    log_k2 = context[:, 3]
+    log_sigma = context[:, 4]
+    k1 = np.exp(log_k1)
+    k2 = np.exp(log_k2)
+    log_delta = np.log(np.maximum(k2 - k1, 1e-8))
+    return np.column_stack([log_a1, log_k1, log_a2, log_delta, log_sigma])
+
+
+def two_exp_raw_prior_logpdf(z_raw: np.ndarray) -> np.ndarray:
+    z = np.asarray(z_raw, dtype=np.float64)
+    return (
+        -0.5 * ((z - TWO_EXP_PRIOR_MEAN[None, :]) / TWO_EXP_PRIOR_STD[None, :]) ** 2
+        - np.log(TWO_EXP_PRIOR_STD[None, :])
+        - 0.5 * LOG_2PI
+    ).sum(axis=1)
+
+
+def two_exp_raw_prior_logpdf_batched(z_raw: np.ndarray) -> np.ndarray:
+    z = np.asarray(z_raw, dtype=np.float64)
+    return (
+        -0.5 * ((z - TWO_EXP_PRIOR_MEAN[None, None, :]) / TWO_EXP_PRIOR_STD[None, None, :]) ** 2
+        - np.log(TWO_EXP_PRIOR_STD[None, None, :])
+        - 0.5 * LOG_2PI
+    ).sum(axis=2)
+
+
+def two_exp_log_likelihood_np(x_raw: np.ndarray, z_raw: np.ndarray) -> np.ndarray:
+    x = np.asarray(x_raw, dtype=np.float64)
+    z = np.asarray(z_raw, dtype=np.float64)
+    a1 = np.exp(z[:, 0])
+    k1 = np.exp(z[:, 1])
+    a2 = np.exp(z[:, 2])
+    k2 = k1 + np.exp(z[:, 3])
+    log_sigma = z[:, 4]
+    mean = (
+        a1[:, None] * np.exp(-k1[:, None] * TWO_EXP_T[None, :])
+        + a2[:, None] * np.exp(-k2[:, None] * TWO_EXP_T[None, :])
+    )
+    residual = x - mean
+    return (-0.5 * residual * residual * np.exp(-2.0 * log_sigma[:, None]) - log_sigma[:, None] - 0.5 * LOG_2PI).sum(axis=1)
+
+
+def two_exp_log_likelihood_batched(x_raw: np.ndarray, z_raw: np.ndarray) -> np.ndarray:
+    x = np.asarray(x_raw, dtype=np.float64)
+    z = np.asarray(z_raw, dtype=np.float64)
+    a1 = np.exp(z[:, :, 0])
+    k1 = np.exp(z[:, :, 1])
+    a2 = np.exp(z[:, :, 2])
+    k2 = k1 + np.exp(z[:, :, 3])
+    log_sigma = z[:, :, 4]
+    mean = (
+        a1[:, :, None] * np.exp(-k1[:, :, None] * TWO_EXP_T[None, None, :])
+        + a2[:, :, None] * np.exp(-k2[:, :, None] * TWO_EXP_T[None, None, :])
+    )
+    residual = x[:, None, :] - mean
+    return (
+        -0.5 * residual * residual * np.exp(-2.0 * log_sigma[:, :, None])
+        - log_sigma[:, :, None]
+        - 0.5 * LOG_2PI
+    ).sum(axis=2)
+
+
+def two_exp_gaussian_logpdf_batched(z_raw: np.ndarray, center: np.ndarray, scale: np.ndarray) -> np.ndarray:
+    z = np.asarray(z_raw, dtype=np.float64)
+    c = np.asarray(center, dtype=np.float64)
+    s = np.asarray(scale, dtype=np.float64)
+    return (
+        -0.5 * ((z - c[:, None, :]) / s[:, None, :]) ** 2
+        - np.log(s[:, None, :])
+        - 0.5 * LOG_2PI
+    ).sum(axis=2)
+
+
+def two_exp_gauss_newton_scale(center: np.ndarray) -> np.ndarray:
+    z = np.asarray(center, dtype=np.float64)
+    a1 = np.exp(z[:, 0])
+    k1 = np.exp(z[:, 1])
+    a2 = np.exp(z[:, 2])
+    delta = np.exp(z[:, 3])
+    k2 = k1 + delta
+    sigma2 = np.exp(2.0 * z[:, 4])
+    e1 = np.exp(-k1[:, None] * TWO_EXP_T[None, :])
+    e2 = np.exp(-k2[:, None] * TWO_EXP_T[None, :])
+    jac = np.empty((z.shape[0], TWO_EXP_N_OBS, 4), dtype=np.float64)
+    jac[:, :, 0] = a1[:, None] * e1
+    jac[:, :, 1] = -TWO_EXP_T[None, :] * k1[:, None] * (a1[:, None] * e1 + a2[:, None] * e2)
+    jac[:, :, 2] = a2[:, None] * e2
+    jac[:, :, 3] = -TWO_EXP_T[None, :] * delta[:, None] * a2[:, None] * e2
+    prior_precision = 1.0 / (TWO_EXP_PRIOR_STD * TWO_EXP_PRIOR_STD)
+    precision = np.einsum("nti,ntj,n->nij", jac, jac, 1.0 / sigma2)
+    precision += np.eye(4)[None, :, :] * prior_precision[:4][None, None, :]
+    covariance = np.linalg.inv(precision + np.eye(4)[None, :, :] * 1e-8)
+    scale = np.empty((z.shape[0], 5), dtype=np.float64)
+    scale[:, :4] = np.sqrt(np.maximum(np.diagonal(covariance, axis1=1, axis2=2), 1e-10))
+    scale[:, 4] = 1.0 / np.sqrt(2.0 * TWO_EXP_N_OBS + prior_precision[4])
+    return np.clip(scale, 0.015, TWO_EXP_PRIOR_STD[None, :] * 1.25)
+
+
+def two_exp_proposal_parameters(
+    x_context: np.ndarray,
+    z_true: np.ndarray,
+    *,
+    inflation: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    profile_center = two_exp_profile_center_from_context(x_context)
+    true_center = np.asarray(z_true, dtype=np.float64)
+    true_scale = two_exp_gauss_newton_scale(true_center) * inflation
+    profile_scale = two_exp_gauss_newton_scale(profile_center) * inflation
+    return true_center, profile_center, true_scale, profile_scale
+
+
+def two_exp_sample_proposal(
+    x_context: np.ndarray,
+    z_true: np.ndarray,
+    *,
+    samples: int,
+    seed: int,
+    prior_mixture: float,
+    inflation: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(seed)
+    batch = x_context.shape[0]
+    true_center, profile_center, true_scale, profile_scale = two_exp_proposal_parameters(
+        x_context,
+        z_true,
+        inflation=inflation,
+    )
+    local_weight = max(1.0 - prior_mixture, 1e-12)
+    weights = np.array(
+        [
+            prior_mixture,
+            0.30 * local_weight,
+            0.25 * local_weight,
+            0.25 * local_weight,
+            0.20 * local_weight,
+        ],
+        dtype=np.float64,
+    )
+    weights /= weights.sum()
+    component = rng.choice(weights.size, size=(batch, samples), p=weights)
+    z = np.empty((batch, samples, 5), dtype=np.float64)
+    for index in range(batch):
+        for component_index in range(weights.size):
+            mask = component[index] == component_index
+            count = int(mask.sum())
+            if count == 0:
+                continue
+            if component_index == 0:
+                z[index, mask] = rng.normal(TWO_EXP_PRIOR_MEAN, TWO_EXP_PRIOR_STD, size=(count, 5))
+            elif component_index == 1:
+                z[index, mask] = rng.normal(true_center[index], true_scale[index], size=(count, 5))
+            elif component_index == 2:
+                z[index, mask] = rng.normal(profile_center[index], profile_scale[index], size=(count, 5))
+            elif component_index == 3:
+                z[index, mask] = rng.normal(true_center[index], true_scale[index] * 3.0, size=(count, 5))
+            else:
+                z[index, mask] = rng.normal(profile_center[index], profile_scale[index] * 3.0, size=(count, 5))
+    return z, weights
+
+
+def two_exp_log_proposal_density(
+    z_raw: np.ndarray,
+    x_context: np.ndarray,
+    z_true: np.ndarray,
+    *,
+    weights: np.ndarray,
+    prior_mixture: float,
+    inflation: float,
+) -> np.ndarray:
+    true_center, profile_center, true_scale, profile_scale = two_exp_proposal_parameters(
+        x_context,
+        z_true,
+        inflation=inflation,
+    )
+    terms = [
+        math.log(max(prior_mixture, 1e-300)) + two_exp_raw_prior_logpdf_batched(z_raw),
+        math.log(float(weights[1])) + two_exp_gaussian_logpdf_batched(z_raw, true_center, true_scale),
+        math.log(float(weights[2])) + two_exp_gaussian_logpdf_batched(z_raw, profile_center, profile_scale),
+        math.log(float(weights[3])) + two_exp_gaussian_logpdf_batched(z_raw, true_center, true_scale * 3.0),
+        math.log(float(weights[4])) + two_exp_gaussian_logpdf_batched(z_raw, profile_center, profile_scale * 3.0),
+    ]
+    return logsumexp(np.stack(terms, axis=0), axis=0)
+
+
+def two_exp_log_evidence_importance(
+    x_raw: np.ndarray,
+    x_context: np.ndarray,
+    z_true: np.ndarray,
+    *,
+    samples: int,
+    seed: int,
+    batch_size: int,
+    prior_mixture: float,
+    inflation: float,
+) -> tuple[np.ndarray, dict[str, float]]:
+    log_evidence = np.empty(x_context.shape[0], dtype=np.float64)
+    ess_values = []
+    log_weight_std = []
+    for start in range(0, x_context.shape[0], batch_size):
+        stop = min(start + batch_size, x_context.shape[0])
+        batch_context = np.asarray(x_context[start:stop], dtype=np.float64)
+        batch_x = np.asarray(x_raw[start:stop], dtype=np.float64)
+        batch_z = np.asarray(z_true[start:stop], dtype=np.float64)
+        proposal, weights = two_exp_sample_proposal(
+            batch_context,
+            batch_z,
+            samples=samples,
+            seed=seed + start,
+            prior_mixture=prior_mixture,
+            inflation=inflation,
+        )
+        log_integrand = two_exp_raw_prior_logpdf_batched(proposal) + two_exp_log_likelihood_batched(batch_x, proposal)
+        log_q = two_exp_log_proposal_density(
+            proposal,
+            batch_context,
+            batch_z,
+            weights=weights,
+            prior_mixture=prior_mixture,
+            inflation=inflation,
+        )
+        log_w = log_integrand - log_q
+        log_evidence[start:stop] = logsumexp(log_w, axis=1) - math.log(samples)
+        normalized = np.exp(log_w - logsumexp(log_w, axis=1)[:, None])
+        ess = 1.0 / np.sum(normalized * normalized, axis=1)
+        ess_values.append(ess)
+        log_weight_std.append(np.std(log_w, axis=1))
+    ess_all = np.concatenate(ess_values)
+    log_weight_std_all = np.concatenate(log_weight_std)
+    diagnostics = {
+        "importance_samples": int(samples),
+        "importance_batch_size": int(batch_size),
+        "prior_mixture": float(prior_mixture),
+        "proposal_inflation": float(inflation),
+        "ess_mean": float(np.mean(ess_all)),
+        "ess_median": float(np.median(ess_all)),
+        "ess_q05": float(np.quantile(ess_all, 0.05)),
+        "ess_min": float(np.min(ess_all)),
+        "relative_ess_mean": float(np.mean(ess_all) / samples),
+        "relative_ess_q05": float(np.quantile(ess_all, 0.05) / samples),
+        "log_weight_std_mean": float(np.mean(log_weight_std_all)),
+        "log_weight_std_q95": float(np.quantile(log_weight_std_all, 0.95)),
+    }
+    return log_evidence, diagnostics
+
+
+def two_exp_exact_posterior_nll(
+    *,
+    x_raw: np.ndarray,
+    x_context: np.ndarray,
+    z_raw: np.ndarray,
+    importance_samples: int,
+    importance_seed: int,
+    importance_batch_size: int,
+    prior_mixture: float,
+    proposal_inflation: float,
+) -> tuple[np.ndarray, dict[str, float]]:
+    z = np.asarray(z_raw, dtype=np.float64)
+    log_prior = two_exp_raw_prior_logpdf(z)
+    log_likelihood = two_exp_log_likelihood_np(np.asarray(x_raw, dtype=np.float64), z)
+    log_evidence, diagnostics = two_exp_log_evidence_importance(
+        x_raw=x_raw,
+        x_context=x_context,
+        z_true=z,
+        samples=importance_samples,
+        seed=importance_seed,
+        batch_size=importance_batch_size,
+        prior_mixture=prior_mixture,
+        inflation=proposal_inflation,
+    )
+    return -(log_prior + log_likelihood - log_evidence), diagnostics
+
+
 def linear6_log_evidence(
     x_context: np.ndarray,
     *,
@@ -748,9 +1117,16 @@ def evaluate_population_nll(
     label_importance_batch_size: int,
     label_prior_mixture: float,
     label_proposal_inflation: float,
+    two_exp_importance_samples: int,
+    two_exp_importance_seed: int,
+    two_exp_importance_batch_size: int,
+    two_exp_prior_mixture: float,
+    two_exp_proposal_inflation: float,
 ) -> dict[str, Any]:
     if model_name == "label_switch":
         x_raw_val, x_val, z_val = sample_label_switch_population_raw(n=validation_examples, seed=validation_seed)
+    elif model_name == "two_exp":
+        x_raw_val, x_val, z_val = sample_two_exp_population_raw(n=validation_examples, seed=validation_seed)
     else:
         x_raw_val = None
         x_val, z_val = sample_population(model=model_name, n=validation_examples, seed=validation_seed)
@@ -763,6 +1139,7 @@ def evaluate_population_nll(
         stop = min(start + batch_size, validation_examples)
         batch_x = x_val[start:stop]
         batch_z = z_val[start:stop]
+        batch_z_model = two_exp_target_transform(batch_z) if model_name == "two_exp" else batch_z
         if model_name == "banana":
             exact_chunks.append(
                 banana_exact_posterior_nll(
@@ -786,6 +1163,20 @@ def evaluate_population_nll(
             )
             exact_chunks.append(exact_nll)
             exact_diagnostics.append(diagnostics)
+        elif model_name == "two_exp":
+            assert x_raw_val is not None
+            exact_nll, diagnostics = two_exp_exact_posterior_nll(
+                x_raw=x_raw_val[start:stop],
+                x_context=batch_x,
+                z_raw=batch_z,
+                importance_samples=two_exp_importance_samples,
+                importance_seed=two_exp_importance_seed + start,
+                importance_batch_size=two_exp_importance_batch_size,
+                prior_mixture=two_exp_prior_mixture,
+                proposal_inflation=two_exp_proposal_inflation,
+            )
+            exact_chunks.append(exact_nll)
+            exact_diagnostics.append(diagnostics)
         elif model_name == "linear6":
             exact_chunks.append(
                 linear6_exact_posterior_nll(
@@ -800,7 +1191,7 @@ def evaluate_population_nll(
             log_prob = evaluate_model_log_prob(
                 model=member["model"],
                 x_raw=batch_x,
-                z_raw=batch_z,
+                z_raw=batch_z_model,
                 x_mean=member["x_mean"],
                 x_std=member["x_std"],
                 z_mean=member["z_mean"],
@@ -838,7 +1229,7 @@ def evaluate_population_nll(
             "combined_standard_error": combined_se,
             "gap_z_score": gap / combined_se if combined_se > 0 else None,
         })
-    elif model_name in {"banana", "label_switch", "linear6"}:
+    elif model_name in {"banana", "label_switch", "linear6", "two_exp"}:
         exact_nll = np.concatenate(exact_chunks)
         gap_samples = ensemble_nll - exact_nll
         paired_gap = summarize(gap_samples)
@@ -855,6 +1246,20 @@ def evaluate_population_nll(
             floor_method = (
                 "Symmetry-folded sorted-coordinate posterior with raw evidence "
                 f"estimated by symmetric Gaussian-mixture importance sampling, {label_importance_samples} samples per signal."
+            )
+            if exact_diagnostics:
+                floor_diagnostics = {
+                    key: float(np.mean([item[key] for item in exact_diagnostics]))
+                    for key in exact_diagnostics[0]
+                }
+            else:
+                floor_diagnostics = None
+        elif model_name == "two_exp":
+            floor_target = "(log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)"
+            floor_method = (
+                "Ordered two-exponential ridge-coordinate posterior with raw-coordinate evidence "
+                "estimated by Gaussian-mixture importance sampling around the "
+                f"profile fit and validation draw, {two_exp_importance_samples} samples per signal."
             )
             if exact_diagnostics:
                 floor_diagnostics = {
@@ -904,6 +1309,11 @@ def estimate_population_floor(
     label_importance_batch_size: int,
     label_prior_mixture: float,
     label_proposal_inflation: float,
+    two_exp_importance_samples: int,
+    two_exp_importance_seed: int,
+    two_exp_importance_batch_size: int,
+    two_exp_prior_mixture: float,
+    two_exp_proposal_inflation: float,
 ) -> dict[str, Any]:
     if model_name == "sign":
         return {
@@ -918,6 +1328,8 @@ def estimate_population_floor(
         }
     if model_name == "label_switch":
         x_raw_val, x_val, z_val = sample_label_switch_population_raw(n=validation_examples, seed=validation_seed)
+    elif model_name == "two_exp":
+        x_raw_val, x_val, z_val = sample_two_exp_population_raw(n=validation_examples, seed=validation_seed)
     else:
         x_raw_val = None
         x_val, z_val = sample_population(model=model_name, n=validation_examples, seed=validation_seed)
@@ -951,6 +1363,20 @@ def estimate_population_floor(
             )
             exact_chunks.append(exact_nll)
             exact_diagnostics.append(diagnostics)
+        elif model_name == "two_exp":
+            assert x_raw_val is not None
+            exact_nll, diagnostics = two_exp_exact_posterior_nll(
+                x_raw=x_raw_val[start:stop],
+                x_context=batch_x,
+                z_raw=batch_z,
+                importance_samples=two_exp_importance_samples,
+                importance_seed=two_exp_importance_seed + start,
+                importance_batch_size=two_exp_importance_batch_size,
+                prior_mixture=two_exp_prior_mixture,
+                proposal_inflation=two_exp_proposal_inflation,
+            )
+            exact_chunks.append(exact_nll)
+            exact_diagnostics.append(diagnostics)
         elif model_name == "linear6":
             exact_chunks.append(
                 linear6_exact_posterior_nll(
@@ -976,6 +1402,17 @@ def estimate_population_floor(
         floor_method = (
             "Symmetry-folded sorted-coordinate posterior with raw evidence "
             f"estimated by symmetric Gaussian-mixture importance sampling, {label_importance_samples} samples per signal."
+        )
+        floor_diagnostics = {
+            key: float(np.mean([item[key] for item in exact_diagnostics]))
+            for key in exact_diagnostics[0]
+        }
+    elif model_name == "two_exp":
+        floor_target = "(log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)"
+        floor_method = (
+            "Ordered two-exponential ridge-coordinate posterior with raw-coordinate evidence "
+            "estimated by Gaussian-mixture importance sampling around the "
+            f"profile fit and validation draw, {two_exp_importance_samples} samples per signal."
         )
         floor_diagnostics = {
             key: float(np.mean([item[key] for item in exact_diagnostics]))
@@ -1042,11 +1479,12 @@ def train_member(
     )
     print(
         f"{args.model} member {member_index} seed={seed} train={args.train_simulations} "
-        f"x_dim={train_x_std.shape[1]} z_dim={train_z_std.shape[1]} batches={len(train_loader)} device={device}",
+        f"family={args.family} x_dim={train_x_std.shape[1]} z_dim={train_z_std.shape[1]} "
+        f"batches={len(train_loader)} device={device}",
         flush=True,
     )
     model, metrics = stage1.train_one_model(
-        family="spline_flow",
+        family=str(args.family),
         config=config,
         train_loader=train_loader,
         val_x=torch.from_numpy(val_x_std),
@@ -1055,9 +1493,9 @@ def train_member(
         x_dim=train_x_std.shape[1],
         z_dim=train_z_std.shape[1],
     )
-    model_path = results_dir / f"{args.model}_population_spline_flow_model.pt"
+    model_path = results_dir / f"{args.model}_population_{args.family}_model.pt"
     checkpoint = {
-        "family": "spline_flow",
+        "family": str(args.family),
         "state_dict": model.state_dict(),
         "x_mean": x_mean,
         "x_std": x_std,
@@ -1118,7 +1556,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Train a full-prior stress-model population NPE with the single-decay Flow2 recipe."
     )
-    parser.add_argument("--model", choices=("sign", "banana", "label_switch", "linear6"), default="sign")
+    parser.add_argument("--model", choices=("sign", "banana", "label_switch", "linear6", "two_exp"), default="sign")
     parser.add_argument("--output-root", type=Path, default=None)
     parser.add_argument("--seeds", type=parse_int_list, default=(20260901, 20260902, 20260903, 20260904))
     parser.add_argument("--train-simulations", type=int, default=2_048_000)
@@ -1131,12 +1569,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=0.0002)
     parser.add_argument("--hidden-dim", type=int, default=80)
     parser.add_argument("--hidden-layers", type=int, default=2)
+    parser.add_argument("--family", choices=stage1.FAMILIES, default="spline_flow")
+    parser.add_argument("--mdn-components", type=int, default=5)
     parser.add_argument("--flow-layers", type=int, default=2)
     parser.add_argument("--spline-bins", type=int, default=8)
     parser.add_argument("--flow-activation", choices=stage1.FLOW_ACTIVATIONS, default="relu")
     parser.add_argument("--flow-residual", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--flow-randperm", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--flow-passes", type=int, default=0)
+    parser.add_argument("--flow-kind", choices=stage1.ZUKO_FLOW_KINDS, default="nsf")
     parser.add_argument("--lr-schedule", choices=("constant", "cosine_epoch", "cosine_step", "one_cycle"), default="cosine_step")
     parser.add_argument("--lr-eta-min", type=float, default=0.0)
     parser.add_argument("--lr-warmup-steps", type=int, default=500)
@@ -1161,6 +1602,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--label-importance-batch-size", type=int, default=64)
     parser.add_argument("--label-prior-mixture", type=float, default=0.03)
     parser.add_argument("--label-proposal-inflation", type=float, default=2.0)
+    parser.add_argument("--two-exp-importance-samples", type=int, default=4096)
+    parser.add_argument("--two-exp-importance-seed", type=int, default=20260723)
+    parser.add_argument("--two-exp-importance-batch-size", type=int, default=16)
+    parser.add_argument("--two-exp-prior-mixture", type=float, default=0.02)
+    parser.add_argument("--two-exp-proposal-inflation", type=float, default=1.0)
     return parser.parse_args()
 
 
@@ -1183,6 +1629,11 @@ def main() -> None:
             label_importance_batch_size=int(args.label_importance_batch_size),
             label_prior_mixture=float(args.label_prior_mixture),
             label_proposal_inflation=float(args.label_proposal_inflation),
+            two_exp_importance_samples=int(args.two_exp_importance_samples),
+            two_exp_importance_seed=int(args.two_exp_importance_seed),
+            two_exp_importance_batch_size=int(args.two_exp_importance_batch_size),
+            two_exp_prior_mixture=float(args.two_exp_prior_mixture),
+            two_exp_proposal_inflation=float(args.two_exp_proposal_inflation),
         )
         summary = {
             "kind": f"{args.model}_population_entropy_floor",
@@ -1199,6 +1650,11 @@ def main() -> None:
                 "label_importance_batch_size": int(args.label_importance_batch_size),
                 "label_prior_mixture": float(args.label_prior_mixture),
                 "label_proposal_inflation": float(args.label_proposal_inflation),
+                "two_exp_importance_samples": int(args.two_exp_importance_samples),
+                "two_exp_importance_seed": int(args.two_exp_importance_seed),
+                "two_exp_importance_batch_size": int(args.two_exp_importance_batch_size),
+                "two_exp_prior_mixture": float(args.two_exp_prior_mixture),
+                "two_exp_proposal_inflation": float(args.two_exp_proposal_inflation),
             },
             "evaluation": floor,
             "runtime": runtime_metadata(),
@@ -1234,6 +1690,11 @@ def main() -> None:
         label_importance_batch_size=int(args.label_importance_batch_size),
         label_prior_mixture=float(args.label_prior_mixture),
         label_proposal_inflation=float(args.label_proposal_inflation),
+        two_exp_importance_samples=int(args.two_exp_importance_samples),
+        two_exp_importance_seed=int(args.two_exp_importance_seed),
+        two_exp_importance_batch_size=int(args.two_exp_importance_batch_size),
+        two_exp_prior_mixture=float(args.two_exp_prior_mixture),
+        two_exp_proposal_inflation=float(args.two_exp_proposal_inflation),
     )
     summary = {
         "kind": population_kind(str(args.model)),
@@ -1249,7 +1710,10 @@ def main() -> None:
             "batch_size": int(args.batch_size),
             "learning_rate": float(args.learning_rate),
             "weight_decay": float(args.weight_decay),
+            "family": str(args.family),
+            "mdn_components": int(args.mdn_components),
             "flow_layers": int(args.flow_layers),
+            "flow_kind": str(args.flow_kind),
             "flow_residual": bool(args.flow_residual),
             "flow_randperm": bool(args.flow_randperm),
             "spline_bins": int(args.spline_bins),
@@ -1265,6 +1729,11 @@ def main() -> None:
             "label_importance_batch_size": int(args.label_importance_batch_size),
             "label_prior_mixture": float(args.label_prior_mixture),
             "label_proposal_inflation": float(args.label_proposal_inflation),
+            "two_exp_importance_samples": int(args.two_exp_importance_samples),
+            "two_exp_importance_seed": int(args.two_exp_importance_seed),
+            "two_exp_importance_batch_size": int(args.two_exp_importance_batch_size),
+            "two_exp_prior_mixture": float(args.two_exp_prior_mixture),
+            "two_exp_proposal_inflation": float(args.two_exp_proposal_inflation),
         },
         "members": [
             {
