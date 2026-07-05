@@ -24,6 +24,12 @@ DEFAULT_SIGN_OUTPUT = (
 DEFAULT_SIGN_SUMMARY = (
     ROOT / "runs/00_shared_assets/readme_sign_posteriors/sign_population_training_loss_summary.json"
 )
+DEFAULT_BANANA_OUTPUT = (
+    ROOT / "runs/00_shared_assets/readme_banana_posteriors/banana_population_training_loss.png"
+)
+DEFAULT_BANANA_SUMMARY = (
+    ROOT / "runs/00_shared_assets/readme_banana_posteriors/banana_population_training_loss_summary.json"
+)
 DEFAULT_LINEAR6_OUTPUT = (
     ROOT / "runs/00_shared_assets/readme_linear6_posteriors/linear6_population_training_loss.png"
 )
@@ -34,6 +40,11 @@ DEFAULT_SIGN_ENSEMBLE_SUMMARY = (
     ROOT
     / "runs/02_stress_sign/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/"
     "results/sign_population_ensemble_summary.json"
+)
+DEFAULT_BANANA_ENSEMBLE_SUMMARY = (
+    ROOT
+    / "runs/03_stress_banana/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/"
+    "results/banana_population_ensemble_summary.json"
 )
 DEFAULT_LINEAR6_ENSEMBLE_SUMMARY = (
     ROOT
@@ -595,16 +606,32 @@ def plot_linear6_population(
     )
 
 
+def plot_banana_population(
+    *,
+    ensemble_summary: Path = DEFAULT_BANANA_ENSEMBLE_SUMMARY,
+    output_path: Path = DEFAULT_BANANA_OUTPUT,
+    summary_output: Path = DEFAULT_BANANA_SUMMARY,
+) -> Path:
+    return plot_population_training(
+        ensemble_summary=ensemble_summary,
+        output_path=output_path,
+        summary_output=summary_output,
+        title="Banana population NPE loss by wall time",
+        ylabel="NLL in raw target units",
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot population NPE training-loss curves.")
     parser.add_argument(
         "--mode",
-        choices=("single_decay", "sign_population", "linear6_population"),
+        choices=("single_decay", "sign_population", "banana_population", "linear6_population"),
         default="single_decay",
     )
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--summary-output", type=Path, default=None)
     parser.add_argument("--sign-ensemble-summary", type=Path, default=DEFAULT_SIGN_ENSEMBLE_SUMMARY)
+    parser.add_argument("--banana-ensemble-summary", type=Path, default=DEFAULT_BANANA_ENSEMBLE_SUMMARY)
     parser.add_argument("--linear6-ensemble-summary", type=Path, default=DEFAULT_LINEAR6_ENSEMBLE_SUMMARY)
     return parser.parse_args()
 
@@ -618,6 +645,12 @@ def main() -> None:
             ensemble_summary=args.sign_ensemble_summary,
             output_path=args.output or DEFAULT_SIGN_OUTPUT,
             summary_output=args.summary_output or DEFAULT_SIGN_SUMMARY,
+        )
+    elif args.mode == "banana_population":
+        output_path = plot_banana_population(
+            ensemble_summary=args.banana_ensemble_summary,
+            output_path=args.output or DEFAULT_BANANA_OUTPUT,
+            summary_output=args.summary_output or DEFAULT_BANANA_SUMMARY,
         )
     else:
         output_path = plot_linear6_population(

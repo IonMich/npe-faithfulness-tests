@@ -14,14 +14,19 @@ from scipy.special import logsumexp, roots_hermitenorm
 from torch.utils.data import DataLoader, TensorDataset
 
 import npe_stage1_decay as stage1
-from npe_flow_stress_tests import StressCase, make_linear6_case
+from npe_flow_stress_tests import StressCase, make_banana_case, make_linear6_case
 
 
 DEFAULT_OUTPUT_ROOT = Path("runs/02_stress_sign/03_population_npe/01_flow2_residual_full_prior")
+DEFAULT_BANANA_OUTPUT_ROOT = Path("runs/03_stress_banana/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4")
 DEFAULT_LINEAR6_OUTPUT_ROOT = Path("runs/05_stress_linear6/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4")
 FOLDED_SIGN_FLOOR = -1.426941782495585
 FOLDED_SIGN_FLOOR_SE = 0.0011526154301947824
 LOG_2PI = math.log(2.0 * math.pi)
+BANANA_SIGMA = np.array([0.20, 0.18], dtype=np.float64)
+BANANA_B = 0.65
+BANANA_C = 0.70
+BANANA_PRIOR_STD = 1.8
 
 
 def json_ready(value: object) -> object:
@@ -79,6 +84,8 @@ def runtime_metadata() -> dict[str, object]:
 def default_output_root(model: str) -> Path:
     if model == "sign":
         return DEFAULT_OUTPUT_ROOT
+    if model == "banana":
+        return DEFAULT_BANANA_OUTPUT_ROOT
     if model == "linear6":
         return DEFAULT_LINEAR6_OUTPUT_ROOT
     raise ValueError(f"Unsupported population model: {model}")
@@ -87,6 +94,8 @@ def default_output_root(model: str) -> Path:
 def population_target_description(model: str) -> str:
     if model == "sign":
         return "(abs(theta1), theta2)"
+    if model == "banana":
+        return "(theta1, theta2)"
     if model == "linear6":
         return "(w1, ..., w6, log_sigma)"
     raise ValueError(f"Unsupported population model: {model}")
@@ -95,6 +104,8 @@ def population_target_description(model: str) -> str:
 def population_kind(model: str) -> str:
     if model == "sign":
         return "sign_population_flow2_residual_nsf_ensemble"
+    if model == "banana":
+        return "banana_population_flow2_residual_nsf_ensemble"
     if model == "linear6":
         return "linear6_population_flow2_residual_nsf_ensemble"
     raise ValueError(f"Unsupported population model: {model}")
@@ -106,6 +117,12 @@ def population_description(model: str) -> str:
             "Full-prior sign-symmetry population NPE using the single-decay "
             "Flow2 residual NSF/randperm training recipe, with folded target "
             "(abs(theta1), theta2)."
+        )
+    if model == "banana":
+        return (
+            "Full-prior Banana population NPE using the single-decay Flow2 "
+            "residual NSF/randperm training recipe, with raw target "
+            "(theta1, theta2)."
         )
     if model == "linear6":
         return (
@@ -133,6 +150,31 @@ def sample_sign_population(
     return x.astype(np.float32), folded.astype(np.float32)
 
 
+def banana_context(x: np.ndarray) -> np.ndarray:
+    x_raw = np.asarray(x, dtype=np.float64)
+    x1 = x_raw[:, 0]
+    x2 = x_raw[:, 1]
+    curvature = x1 * x1 - BANANA_C
+    dewarped_theta2 = x2 - BANANA_B * curvature
+    return np.column_stack([x1, x2, dewarped_theta2, curvature])
+
+
+def sample_banana_population(
+    *,
+    n: int,
+    seed: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    case = make_banana_case()
+    rng = np.random.default_rng(seed)
+    z = rng.normal(
+        case.prior_mean[None, :],
+        case.prior_std[None, :],
+        size=(n, case.z_dim),
+    )
+    x = case.simulate_x(z, rng)
+    return banana_context(x).astype(np.float32), z.astype(np.float32)
+
+
 def sample_stress_population(
     case: StressCase,
     *,
@@ -157,6 +199,8 @@ def sample_population(
 ) -> tuple[np.ndarray, np.ndarray]:
     if model == "sign":
         return sample_sign_population(n=n, seed=seed)
+    if model == "banana":
+        return sample_banana_population(n=n, seed=seed)
     if model == "linear6":
         return sample_stress_population(make_linear6_case(), n=n, seed=seed)
     raise ValueError(f"Unsupported population model: {model}")
@@ -248,6 +292,85 @@ def linear6_log_py_given_log_sigma(
 def normal_logpdf_1d(value: np.ndarray, mean: float, std: float) -> np.ndarray:
     standardized = (value - mean) / std
     return -0.5 * standardized * standardized - math.log(std) - 0.5 * LOG_2PI
+
+
+def normal_logpdf(value: np.ndarray, mean: np.ndarray | float, std: np.ndarray | float) -> np.ndarray:
+    standardized = (value - mean) / std
+    return -0.5 * standardized * standardized - np.log(std) - 0.5 * LOG_2PI
+
+
+def banana_raw_x(x_context: np.ndarray) -> np.ndarray:
+    return np.asarray(x_context[:, :2], dtype=np.float64)
+
+
+def banana_log_evidence(
+    x_context: np.ndarray,
+    *,
+    quadrature_order: int,
+    chunk_size: int,
+) -> np.ndarray:
+    x_raw = banana_raw_x(x_context)
+    x1 = x_raw[:, 0]
+    x2 = x_raw[:, 1]
+    prior_var = BANANA_PRIOR_STD * BANANA_PRIOR_STD
+    sigma1_var = BANANA_SIGMA[0] * BANANA_SIGMA[0]
+    x1_var = prior_var + sigma1_var
+    theta1_var_given_x1 = 1.0 / (1.0 / prior_var + 1.0 / sigma1_var)
+    theta1_std_given_x1 = math.sqrt(theta1_var_given_x1)
+    theta1_mean_given_x1 = theta1_var_given_x1 * x1 / sigma1_var
+    x2_std_given_theta1 = math.sqrt(prior_var + BANANA_SIGMA[1] * BANANA_SIGMA[1])
+    log_px1 = normal_logpdf(x1, 0.0, math.sqrt(x1_var))
+    nodes, weights = roots_hermitenorm(int(quadrature_order))
+    log_weights = np.log(weights) - 0.5 * LOG_2PI
+    result = np.empty(x_context.shape[0], dtype=np.float64)
+    for start in range(0, x_context.shape[0], chunk_size):
+        stop = min(start + chunk_size, x_context.shape[0])
+        theta1_nodes = (
+            theta1_mean_given_x1[start:stop, None]
+            + theta1_std_given_x1 * np.asarray(nodes, dtype=np.float64)[None, :]
+        )
+        x2_mean = BANANA_B * (theta1_nodes * theta1_nodes - BANANA_C)
+        log_terms = log_weights[None, :] + normal_logpdf(
+            x2[start:stop, None],
+            x2_mean,
+            x2_std_given_theta1,
+        )
+        result[start:stop] = log_px1[start:stop] + logsumexp(log_terms, axis=1)
+    return result
+
+
+def banana_log_likelihood(x_context: np.ndarray, z_raw: np.ndarray) -> np.ndarray:
+    x_raw = banana_raw_x(x_context)
+    z = np.asarray(z_raw, dtype=np.float64)
+    mean1 = z[:, 0]
+    mean2 = z[:, 1] + BANANA_B * (z[:, 0] * z[:, 0] - BANANA_C)
+    return normal_logpdf(x_raw[:, 0], mean1, BANANA_SIGMA[0]) + normal_logpdf(
+        x_raw[:, 1],
+        mean2,
+        BANANA_SIGMA[1],
+    )
+
+
+def banana_exact_posterior_nll(
+    *,
+    x_context: np.ndarray,
+    z_raw: np.ndarray,
+    quadrature_order: int,
+    chunk_size: int,
+) -> np.ndarray:
+    z = np.asarray(z_raw, dtype=np.float64)
+    log_prior = normal_logpdf(z[:, 0], 0.0, BANANA_PRIOR_STD) + normal_logpdf(
+        z[:, 1],
+        0.0,
+        BANANA_PRIOR_STD,
+    )
+    log_likelihood = banana_log_likelihood(x_context, z)
+    log_evidence = banana_log_evidence(
+        x_context,
+        quadrature_order=quadrature_order,
+        chunk_size=chunk_size,
+    )
+    return -(log_prior + log_likelihood - log_evidence)
 
 
 def linear6_log_evidence(
@@ -349,6 +472,7 @@ def evaluate_population_nll(
     batch_size: int,
     device: torch.device,
     linear6_quadrature_order: int,
+    banana_quadrature_order: int,
 ) -> dict[str, Any]:
     x_val, z_val = sample_population(model=model_name, n=validation_examples, seed=validation_seed)
     individual_chunks: list[list[np.ndarray]] = [[] for _ in members]
@@ -359,7 +483,16 @@ def evaluate_population_nll(
         stop = min(start + batch_size, validation_examples)
         batch_x = x_val[start:stop]
         batch_z = z_val[start:stop]
-        if model_name == "linear6":
+        if model_name == "banana":
+            exact_chunks.append(
+                banana_exact_posterior_nll(
+                    x_context=batch_x,
+                    z_raw=batch_z,
+                    quadrature_order=banana_quadrature_order,
+                    chunk_size=batch_size,
+                )
+            )
+        elif model_name == "linear6":
             exact_chunks.append(
                 linear6_exact_posterior_nll(
                     x_context=batch_x,
@@ -411,20 +544,29 @@ def evaluate_population_nll(
             "combined_standard_error": combined_se,
             "gap_z_score": gap / combined_se if combined_se > 0 else None,
         })
-    elif model_name == "linear6":
+    elif model_name in {"banana", "linear6"}:
         exact_nll = np.concatenate(exact_chunks)
         gap_samples = ensemble_nll - exact_nll
         paired_gap = summarize(gap_samples)
         floor_summary = summarize(exact_nll)
+        if model_name == "banana":
+            floor_target = "(theta1, theta2)"
+            floor_method = (
+                "Analytic theta2 integration with posterior-centered "
+                f"one-dimensional Gauss-Hermite evidence integration over theta1, order {banana_quadrature_order}."
+            )
+        else:
+            floor_target = "(w1, ..., w6, log_sigma)"
+            floor_method = (
+                "Linear-Gaussian conditional posterior with one-dimensional "
+                f"Gauss-Hermite evidence integration, order {linear6_quadrature_order}."
+            )
         output.update({
             "floor": {
                 "estimate": float(floor_summary["mean"]),
                 "standard_error": float(floor_summary["std_error"]),
-                "coordinate_target": "(w1, ..., w6, log_sigma)",
-                "method": (
-                    "Linear-Gaussian conditional posterior with one-dimensional "
-                    f"Gauss-Hermite evidence integration, order {linear6_quadrature_order}."
-                ),
+                "coordinate_target": floor_target,
+                "method": floor_method,
                 "summary": floor_summary,
             },
             "ensemble_gap_to_floor": float(paired_gap["mean"]),
@@ -437,6 +579,81 @@ def evaluate_population_nll(
     else:
         raise ValueError(f"Unsupported population model: {model_name}")
     return output
+
+
+def estimate_population_floor(
+    *,
+    model_name: str,
+    validation_examples: int,
+    validation_seed: int,
+    batch_size: int,
+    linear6_quadrature_order: int,
+    banana_quadrature_order: int,
+) -> dict[str, Any]:
+    if model_name == "sign":
+        return {
+            "validation_examples": 0,
+            "validation_seed": int(validation_seed),
+            "floor": {
+                "estimate": FOLDED_SIGN_FLOOR,
+                "standard_error": FOLDED_SIGN_FLOOR_SE,
+                "coordinate_target": "(abs(theta1), theta2)",
+                "method": "Previously computed folded sign entropy floor.",
+            },
+        }
+    x_val, z_val = sample_population(model=model_name, n=validation_examples, seed=validation_seed)
+    exact_chunks: list[np.ndarray] = []
+    start_time = time.perf_counter()
+    for start in range(0, validation_examples, batch_size):
+        stop = min(start + batch_size, validation_examples)
+        batch_x = x_val[start:stop]
+        batch_z = z_val[start:stop]
+        if model_name == "banana":
+            exact_chunks.append(
+                banana_exact_posterior_nll(
+                    x_context=batch_x,
+                    z_raw=batch_z,
+                    quadrature_order=banana_quadrature_order,
+                    chunk_size=batch_size,
+                )
+            )
+        elif model_name == "linear6":
+            exact_chunks.append(
+                linear6_exact_posterior_nll(
+                    x_context=batch_x,
+                    z_raw=batch_z,
+                    quadrature_order=linear6_quadrature_order,
+                    chunk_size=batch_size,
+                )
+            )
+        else:
+            raise ValueError(f"Unsupported population model: {model_name}")
+    exact_nll = np.concatenate(exact_chunks)
+    floor_summary = summarize(exact_nll)
+    if model_name == "banana":
+        floor_target = "(theta1, theta2)"
+        floor_method = (
+            "Analytic theta2 integration with posterior-centered "
+            f"one-dimensional Gauss-Hermite evidence integration over theta1, order {banana_quadrature_order}."
+        )
+    else:
+        floor_target = "(w1, ..., w6, log_sigma)"
+        floor_method = (
+            "Linear-Gaussian conditional posterior with one-dimensional "
+            f"Gauss-Hermite evidence integration, order {linear6_quadrature_order}."
+        )
+    return {
+        "validation_examples": int(validation_examples),
+        "validation_seed": int(validation_seed),
+        "evaluation_seconds": float(time.perf_counter() - start_time),
+        "floor": {
+            "estimate": float(floor_summary["mean"]),
+            "standard_error": float(floor_summary["std_error"]),
+            "coordinate_target": floor_target,
+            "method": floor_method,
+            "summary": floor_summary,
+        },
+    }
 
 
 def train_member(
@@ -554,7 +771,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Train a full-prior stress-model population NPE with the single-decay Flow2 recipe."
     )
-    parser.add_argument("--model", choices=("sign", "linear6"), default="sign")
+    parser.add_argument("--model", choices=("sign", "banana", "linear6"), default="sign")
     parser.add_argument("--output-root", type=Path, default=None)
     parser.add_argument("--seeds", type=parse_int_list, default=(20260901, 20260902, 20260903, 20260904))
     parser.add_argument("--train-simulations", type=int, default=2_048_000)
@@ -589,6 +806,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-optimizer-steps", type=int, default=0)
     parser.add_argument("--device", choices=("auto", "cpu", "mps", "cuda"), default="auto")
     parser.add_argument("--eval-batch-size", type=int, default=65_536)
+    parser.add_argument("--floor-only", action="store_true")
+    parser.add_argument("--banana-quadrature-order", type=int, default=64)
     parser.add_argument("--linear6-quadrature-order", type=int, default=64)
     return parser.parse_args()
 
@@ -599,6 +818,34 @@ def main() -> None:
     results_dir = output_root / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
     device = stage1.choose_training_device(args.device)
+    if bool(args.floor_only):
+        floor = estimate_population_floor(
+            model_name=str(args.model),
+            validation_examples=int(args.validation_examples),
+            validation_seed=int(args.validation_seed),
+            batch_size=int(args.eval_batch_size),
+            linear6_quadrature_order=int(args.linear6_quadrature_order),
+            banana_quadrature_order=int(args.banana_quadrature_order),
+        )
+        summary = {
+            "kind": f"{args.model}_population_entropy_floor",
+            "description": f"Full-prior {args.model} population entropy-floor estimate.",
+            "target": population_target_description(str(args.model)),
+            "recipe": {
+                "validation_examples": int(args.validation_examples),
+                "validation_seed": int(args.validation_seed),
+                "eval_batch_size": int(args.eval_batch_size),
+                "banana_quadrature_order": int(args.banana_quadrature_order),
+                "linear6_quadrature_order": int(args.linear6_quadrature_order),
+            },
+            "evaluation": floor,
+            "runtime": runtime_metadata(),
+        }
+        summary_path = results_dir / f"{args.model}_population_floor_summary.json"
+        summary_path.write_text(json.dumps(json_ready(summary), indent=2, sort_keys=True), encoding="utf-8")
+        print(json.dumps(json_ready(summary), indent=2, sort_keys=True))
+        print(f"summary_json: {summary_path}", flush=True)
+        return
     started = time.perf_counter()
     members = []
     for member_index, seed in enumerate(args.seeds, start=1):
@@ -619,6 +866,7 @@ def main() -> None:
         batch_size=int(args.eval_batch_size),
         device=device,
         linear6_quadrature_order=int(args.linear6_quadrature_order),
+        banana_quadrature_order=int(args.banana_quadrature_order),
     )
     summary = {
         "kind": population_kind(str(args.model)),

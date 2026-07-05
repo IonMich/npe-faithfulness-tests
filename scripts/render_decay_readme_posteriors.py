@@ -13,7 +13,7 @@ from scipy.special import logsumexp
 
 import npe_stage1_decay as stage1
 from calibrate_sign_target import build_grid_reference, compare_samples_to_reference, mode_summary
-from npe_flow_stress_tests import make_linear6_case, make_sign_case, run_random_walk_mcmc
+from npe_flow_stress_tests import make_banana_case, make_linear6_case, make_sign_case, run_random_walk_mcmc
 from npe_posterior_viewer import (
     DEFAULT_BEST_BROAD_ENSEMBLE_SUMMARY,
     DEFAULT_BEST_BROAD_EFFICIENCY_MODEL,
@@ -27,18 +27,34 @@ from npe_posterior_viewer import (
     WeightedCornerLayer,
     render_corner_layers,
 )
-from train_sign_population_npe import linear6_log_py_given_log_sigma, linear6_sufficient_stats
+from train_sign_population_npe import (
+    BANANA_B,
+    BANANA_C,
+    BANANA_PRIOR_STD,
+    BANANA_SIGMA,
+    banana_context,
+    banana_log_evidence,
+    banana_log_likelihood,
+    linear6_log_py_given_log_sigma,
+    linear6_sufficient_stats,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "runs/00_shared_assets/readme_decay_posteriors"
 SUMMARY_PATH = OUTPUT_DIR / "decay_population_readme_posteriors_summary.json"
 SIGN_OUTPUT_DIR = ROOT / "runs/00_shared_assets/readme_sign_posteriors"
+BANANA_OUTPUT_DIR = ROOT / "runs/00_shared_assets/readme_banana_posteriors"
 LINEAR6_OUTPUT_DIR = ROOT / "runs/00_shared_assets/readme_linear6_posteriors"
 SIGN_ENSEMBLE_SUMMARY = (
     ROOT
     / "runs/02_stress_sign/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/"
     "results/sign_population_ensemble_summary.json"
+)
+BANANA_ENSEMBLE_SUMMARY = (
+    ROOT
+    / "runs/03_stress_banana/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/"
+    "results/banana_population_ensemble_summary.json"
 )
 LINEAR6_ENSEMBLE_SUMMARY = (
     ROOT
@@ -240,9 +256,105 @@ def sample_linear6_prior_predictive_signal(*, seed: int, draw_index: int) -> tup
     return z[draw_index].astype(np.float64), x[draw_index].astype(np.float64), case.context(x)[draw_index].astype(np.float64)
 
 
+def sample_banana_prior_predictive_signal(*, seed: int, draw_index: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    case = make_banana_case()
+    rng = np.random.default_rng(seed)
+    z = rng.normal(
+        case.prior_mean[None, :],
+        case.prior_std[None, :],
+        size=(draw_index + 1, case.z_dim),
+    )
+    x = case.simulate_x(z, rng)
+    return z[draw_index].astype(np.float64), x[draw_index].astype(np.float64), banana_context(x)[draw_index]
+
+
 def normal_logpdf(value: np.ndarray, mean: float, std: float) -> np.ndarray:
     standardized = (value - mean) / std
     return -0.5 * standardized * standardized - np.log(std) - 0.5 * LOG_2PI
+
+
+def banana_exact_grid_layer(
+    *,
+    x_context: np.ndarray,
+    grid_size: int,
+    grid_limit: float,
+) -> WeightedCornerLayer:
+    x_context_2d = x_context[None, :]
+    x_raw = x_context[:2]
+    center = np.array([x_raw[0], x_raw[1] - BANANA_B * (x_raw[0] * x_raw[0] - BANANA_C)])
+    theta1 = np.linspace(center[0] - grid_limit, center[0] + grid_limit, grid_size)
+    theta2 = np.linspace(center[1] - grid_limit, center[1] + grid_limit, grid_size)
+    theta1_grid, theta2_grid = np.meshgrid(theta1, theta2, indexing="ij")
+    values = np.column_stack([theta1_grid.ravel(), theta2_grid.ravel()])
+    log_prior = normal_logpdf(values[:, 0], 0.0, BANANA_PRIOR_STD) + normal_logpdf(
+        values[:, 1],
+        0.0,
+        BANANA_PRIOR_STD,
+    )
+    repeated_context = np.repeat(x_context_2d, values.shape[0], axis=0)
+    log_post = log_prior + banana_log_likelihood(repeated_context, values)
+    log_post -= float(
+        banana_log_evidence(
+            x_context_2d,
+            quadrature_order=64,
+            chunk_size=1,
+        )[0]
+    )
+    log_mass = log_post.reshape(grid_size, grid_size)
+    step1 = float(theta1[1] - theta1[0]) if grid_size > 1 else 1.0
+    step2 = float(theta2[1] - theta2[0]) if grid_size > 1 else 1.0
+    weights = np.exp(log_mass - logsumexp(log_mass))
+
+    def widths(axis: np.ndarray) -> np.ndarray:
+        if axis.size <= 1:
+            return np.ones_like(axis)
+        return np.full_like(axis, float(axis[1] - axis[0]), dtype=np.float64)
+
+    return WeightedCornerLayer(
+        label="Exact grid",
+        color="#172033",
+        values=values,
+        weights=weights.ravel(),
+        grid_shape=weights.shape,
+        axes=(theta1, theta2),
+        widths=(widths(theta1), widths(theta2)),
+        hist_lw=2.0,
+        contour_lw=1.55,
+    )
+
+
+def sample_banana_exact_posterior(
+    *,
+    x_context: np.ndarray,
+    samples: int,
+    seed: int,
+    grid_size: int = 2400,
+    grid_limit: float = 6.5,
+) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    x_raw = x_context[:2]
+    center = float(x_raw[0])
+    theta1_grid = np.linspace(center - grid_limit, center + grid_limit, grid_size)
+    log_theta1_prior = normal_logpdf(theta1_grid, 0.0, BANANA_PRIOR_STD)
+    log_x1 = normal_logpdf(x_raw[0], theta1_grid, BANANA_SIGMA[0])
+    theta2_integrated_std = np.sqrt(BANANA_PRIOR_STD * BANANA_PRIOR_STD + BANANA_SIGMA[1] * BANANA_SIGMA[1])
+    x2_mean = BANANA_B * (theta1_grid * theta1_grid - BANANA_C)
+    log_x2_integrated = normal_logpdf(x_raw[1], x2_mean, theta2_integrated_std)
+    log_theta1_post = log_theta1_prior + log_x1 + log_x2_integrated
+    probabilities = np.exp(log_theta1_post - logsumexp(log_theta1_post))
+    indices = rng.choice(grid_size, size=samples, replace=True, p=probabilities)
+    step = float(theta1_grid[1] - theta1_grid[0])
+    theta1 = np.clip(
+        theta1_grid[indices] + rng.uniform(-0.5 * step, 0.5 * step, size=samples),
+        theta1_grid[0],
+        theta1_grid[-1],
+    )
+    posterior_var = 1.0 / (1.0 / (BANANA_PRIOR_STD * BANANA_PRIOR_STD) + 1.0 / (BANANA_SIGMA[1] * BANANA_SIGMA[1]))
+    posterior_mean = posterior_var * (x_raw[1] - BANANA_B * (theta1 * theta1 - BANANA_C)) / (
+        BANANA_SIGMA[1] * BANANA_SIGMA[1]
+    )
+    theta2 = rng.normal(posterior_mean, np.sqrt(posterior_var), size=samples)
+    return np.column_stack([theta1, theta2])
 
 
 def sample_linear6_exact_posterior(
@@ -280,6 +392,30 @@ def compare_sample_marginals(estimate: np.ndarray, reference: np.ndarray) -> dic
     from scipy.stats import wasserstein_distance
 
     names = [f"w{i}" for i in range(1, 7)] + ["log_sigma"]
+    rows = {}
+    normalized = []
+    for index, name in enumerate(names):
+        scale = max(float(np.std(reference[:, index], ddof=1)), 1e-12)
+        distance = float(wasserstein_distance(reference[:, index], estimate[:, index]))
+        rows[name] = {
+            "wasserstein": distance,
+            "reference_sd": scale,
+            "normalized_wasserstein": distance / scale,
+        }
+        normalized.append(distance / scale)
+    return {
+        "mean_normalized_wasserstein": float(np.mean(normalized)),
+        "parameters": rows,
+    }
+
+
+def compare_sample_marginals_named(
+    estimate: np.ndarray,
+    reference: np.ndarray,
+    names: list[str],
+) -> dict[str, object]:
+    from scipy.stats import wasserstein_distance
+
     rows = {}
     normalized = []
     for index, name in enumerate(names):
@@ -488,6 +624,115 @@ def render_sign_population_case(args: argparse.Namespace) -> None:
     print(summary_path)
 
 
+def render_banana_population_case(args: argparse.Namespace) -> None:
+    BANANA_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    device = stage1.choose_training_device(args.device)
+    case = make_banana_case()
+    theta, x_raw, x_context = sample_banana_prior_predictive_signal(
+        seed=args.signal_seed,
+        draw_index=args.draw_index,
+    )
+    members = load_sign_ensemble(args.banana_ensemble_summary, device)
+    exact_samples = sample_banana_exact_posterior(
+        x_context=x_context,
+        samples=args.exact_samples,
+        seed=args.seed + 3000,
+        grid_limit=args.grid_limit,
+    )
+    npe_samples = sample_stage1_ensemble(
+        members=members,
+        x_context=x_context,
+        samples=args.npe_samples,
+        seed=args.seed + 1000,
+        device=device,
+    )
+    mcmc_samples, mcmc_accept, mcmc_seconds = run_random_walk_mcmc(
+        case,
+        x_raw,
+        chains=args.mcmc_chains,
+        steps=args.mcmc_steps,
+        seed=args.seed,
+        device=torch.device("cpu"),
+        dtype=torch.float64,
+    )
+    mcmc_post = mcmc_samples[:, args.mcmc_burn_in :, :].reshape(-1, case.z_dim)
+    grid_layer = banana_exact_grid_layer(
+        x_context=x_context,
+        grid_size=args.grid_size,
+        grid_limit=args.grid_limit,
+    )
+    weight_grid = grid_layer.weights.reshape(grid_layer.grid_shape)
+    edge_mass = float(
+        np.sum(weight_grid[0, :])
+        + np.sum(weight_grid[-1, :])
+        + np.sum(weight_grid[1:-1, 0])
+        + np.sum(weight_grid[1:-1, -1])
+    )
+
+    figure = render_corner_layers(
+        labels=[r"$\theta_1$", r"$\theta_2$"],
+        true_values=theta,
+        weighted_layers=[grid_layer],
+        sample_layers=[
+            SampleCornerLayer("MCMC", "#b85c38", mcmc_post, hist_lw=1.5, contour_lw=1.35),
+            SampleCornerLayer("Population NPE", "#0f766e", npe_samples, hist_lw=1.5, contour_lw=1.35),
+        ],
+        true_color="#172033",
+        title="Banana posterior: exact grid vs MCMC vs NPE",
+        rng=np.random.default_rng(args.seed + 2000),
+    )
+    figure_path = BANANA_OUTPUT_DIR / "banana_population_prior_signal_corner.png"
+    summary_path = BANANA_OUTPUT_DIR / "banana_population_prior_signal_summary.json"
+    figure.savefig(figure_path, dpi=180, bbox_inches="tight")
+
+    names = ["theta1", "theta2"]
+    summary = {
+        "description": (
+            "Fresh full-prior Banana posterior check for the population-trained "
+            "Flow2 residual NSF ensemble. The comparison is in raw theta coordinates."
+        ),
+        "signal": {
+            "seed": int(args.signal_seed),
+            "draw_index": int(args.draw_index),
+            "theta": theta,
+            "x": x_raw,
+            "context": x_context,
+        },
+        "grid": {
+            "grid_size": int(args.grid_size),
+            "grid_limit": float(args.grid_limit),
+            "edge_mass": edge_mass,
+        },
+        "exact": {
+            "posterior_samples": int(exact_samples.shape[0]),
+        },
+        "mcmc": {
+            "chains": int(args.mcmc_chains),
+            "steps": int(args.mcmc_steps),
+            "burn_in": int(args.mcmc_burn_in),
+            "posterior_samples": int(mcmc_post.shape[0]),
+            "acceptance_rate": float(np.mean(mcmc_accept)),
+            "seconds": float(mcmc_seconds),
+            "to_exact": compare_sample_marginals_named(mcmc_post, exact_samples, names),
+        },
+        "npe": {
+            "ensemble_summary": args.banana_ensemble_summary,
+            "members": int(len(members)),
+            "posterior_samples": int(npe_samples.shape[0]),
+            "to_exact": compare_sample_marginals_named(npe_samples, exact_samples, names),
+        },
+        "outputs": {
+            "figure": figure_path,
+            "summary": summary_path,
+        },
+    }
+    summary_path.write_text(
+        json.dumps(json_ready(summary), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(summary_path)
+
+
 def render_linear6_population_case(args: argparse.Namespace) -> None:
     LINEAR6_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     device = stage1.choose_training_device(args.device)
@@ -572,11 +817,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Render README posterior comparison figures.")
     parser.add_argument(
         "--mode",
-        choices=("single_decay", "sign_population", "linear6_population"),
+        choices=("single_decay", "sign_population", "banana_population", "linear6_population"),
         default="single_decay",
     )
     parser.add_argument("--device", choices=("auto", "cpu", "mps", "cuda"), default="auto")
     parser.add_argument("--sign-ensemble-summary", type=Path, default=SIGN_ENSEMBLE_SUMMARY)
+    parser.add_argument("--banana-ensemble-summary", type=Path, default=BANANA_ENSEMBLE_SUMMARY)
     parser.add_argument("--linear6-ensemble-summary", type=Path, default=LINEAR6_ENSEMBLE_SUMMARY)
     parser.add_argument("--signal-seed", type=int, default=20260707)
     parser.add_argument("--draw-index", type=int, default=1)
@@ -597,6 +843,8 @@ def main() -> None:
         render_decay_cases()
     elif args.mode == "sign_population":
         render_sign_population_case(args)
+    elif args.mode == "banana_population":
+        render_banana_population_case(args)
     else:
         render_linear6_population_case(args)
 

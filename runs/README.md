@@ -17,6 +17,7 @@ Status labels:
 - `pass`: calibrated target metric was met by the run summary.
 - `reference`: sampler/reference run with convergence or baseline agreement.
 - `diagnostic_pass`: diagnostic/reference metric met the target, but it is not a direct NPE success claim.
+- `floor_pass`: full-prior population NLL is statistically indistinguishable from the model-specific entropy floor under the documented comparison criterion.
 - `near_floor`: full-prior population NLL is close to the model-specific entropy floor, but the remaining gap is still resolved or otherwise not a strict floor hit.
 - `legacy_pairwise_pass`: passed an inherited pairwise agreement target, but has not been calibrated against a model-specific truth target.
 - `near`: missed the target but stayed within 25% of it.
@@ -32,7 +33,7 @@ Best run by model:
 | --- | --- | --- | --- |
 | `01_exponential_decay` | `pass` | [05_abc_faithfulness / 07_abc_faithfulness_validation_snpe_diag_refined](01_exponential_decay/05_abc_faithfulness/07_abc_faithfulness_validation_snpe_diag_refined) | best mean normalized Wasserstein: 0.03129 |
 | `02_stress_sign` | `grid-faithful` | [01_npe_flow / 21_npe_flow_stress_tests_sign_absfold_q008_linear](02_stress_sign/01_npe_flow/21_npe_flow_stress_tests_sign_absfold_q008_linear) | NPE-to-grid diagnostic W: 0.02326 / calibrated target 0.02331 |
-| `03_stress_banana` | `legacy_pairwise_pass` | [01_npe_flow / 03_npe_flow_stress_tests_banana_q008](03_stress_banana/01_npe_flow/03_npe_flow_stress_tests_banana_q008) | pairwise max diagnostic Wasserstein: 0.01844 / inherited target 0.034 |
+| `03_stress_banana` | `floor_pass` | [03_population_npe / 01_flow2_residual_full_prior_512k_ensemble4](03_stress_banana/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4) | full-prior raw NLL: -0.52753 / entropy floor: -0.52826 / gap 0.00073 |
 | `04_stress_label_switch` | `legacy_pairwise_pass` | [01_npe_flow / 05_npe_flow_stress_tests_label_em](04_stress_label_switch/01_npe_flow/05_npe_flow_stress_tests_label_em) | pairwise max diagnostic Wasserstein: 0.02868 / inherited target 0.034 |
 | `05_stress_linear6` | `near_floor` | [03_population_npe / 01_flow2_residual_full_prior_512k_ensemble4](05_stress_linear6/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4) | full-prior z-NLL: -10.77984 / entropy floor: -10.78631 / gap 0.00647 |
 | `06_two_exponential` | `fail` | [01_npe_flow / 12_npe_flow_stress_tests_two_exp_ordered_residual](06_two_exponential/01_npe_flow/12_npe_flow_stress_tests_two_exp_ordered_residual) | max diagnostic Wasserstein: 0.05317 |

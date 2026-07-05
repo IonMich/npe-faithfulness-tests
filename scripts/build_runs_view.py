@@ -452,13 +452,15 @@ def format_score(run: Run) -> str:
 def status_order(status: str) -> int:
     return {
         "grid-faithful": 0,
-        "pass": 1,
-        "diagnostic_pass": 2,
-        "reference": 3,
-        "legacy_pairwise_pass": 4,
-        "near": 5,
-        "diagnostic": 6,
-        "fail": 7,
+        "floor_pass": 1,
+        "pass": 2,
+        "diagnostic_pass": 3,
+        "reference": 4,
+        "near_floor": 5,
+        "legacy_pairwise_pass": 6,
+        "near": 7,
+        "diagnostic": 8,
+        "fail": 9,
     }.get(status, 99)
 
 
@@ -478,8 +480,8 @@ def link_from(base_dir: Path, target: Path, label: str | None = None) -> str:
 
 def write_indexes(runs: list[Run]) -> None:
     RUNS.mkdir(exist_ok=True)
-    successful = [r for r in runs if r.status in {"grid-faithful", "pass", "diagnostic_pass", "reference"}]
-    target_pass = [r for r in runs if r.status in {"grid-faithful", "pass"}]
+    successful = [r for r in runs if r.status in {"grid-faithful", "floor_pass", "pass", "diagnostic_pass", "reference"}]
+    target_pass = [r for r in runs if r.status in {"grid-faithful", "floor_pass", "pass"}]
     reference = [r for r in runs if r.status in {"reference", "diagnostic_pass"}]
     near = [r for r in runs if r.status == "near"]
     legacy_pairwise = [r for r in runs if r.status == "legacy_pairwise_pass"]
@@ -514,6 +516,8 @@ def write_indexes(runs: list[Run]) -> None:
         "- `pass`: calibrated target metric was met by the run summary.",
         "- `reference`: sampler/reference run with convergence or baseline agreement.",
         "- `diagnostic_pass`: diagnostic/reference metric met the target, but it is not a direct NPE success claim.",
+        "- `floor_pass`: full-prior population NLL is statistically indistinguishable from the model-specific entropy floor under the documented comparison criterion.",
+        "- `near_floor`: full-prior population NLL is close to the model-specific entropy floor, but the remaining gap is still resolved or otherwise not a strict floor hit.",
         "- `legacy_pairwise_pass`: passed an inherited pairwise agreement target, but has not been calibrated against a model-specific truth target.",
         "- `near`: missed the target but stayed within 25% of it.",
         "- `fail`: explicit target metric was not met.",

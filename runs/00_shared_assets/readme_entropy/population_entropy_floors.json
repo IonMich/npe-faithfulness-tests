@@ -28,6 +28,15 @@
       "source": "runs/00_shared_assets/readme_entropy/sign_bayes_entropy_hybrid_1m.json"
     },
     {
+      "model": "banana",
+      "coordinate_target": "theta=(theta1, theta2)",
+      "estimate": -0.5282618872901833,
+      "standard_error": 0.0009994588666007852,
+      "examples": 1000000,
+      "method": "Analytic theta2 integration with posterior-centered one-dimensional Gauss-Hermite evidence integration over theta1, order 64.",
+      "source": "runs/03_stress_banana/03_population_npe/00_entropy_floor_full_prior/results/banana_population_floor_summary.json"
+    },
+    {
       "model": "linear6",
       "coordinate_target": "z=(w1, ..., w6, log sigma)",
       "estimate": -10.786310881823061,

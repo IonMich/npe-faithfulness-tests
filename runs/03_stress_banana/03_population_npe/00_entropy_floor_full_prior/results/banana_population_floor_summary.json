@@ -1,0 +1,40 @@
+{
+  "description": "Full-prior banana population entropy-floor estimate.",
+  "evaluation": {
+    "evaluation_seconds": 0.8241597500164062,
+    "floor": {
+      "coordinate_target": "(theta1, theta2)",
+      "estimate": -0.5282618872901833,
+      "method": "Analytic theta2 integration with posterior-centered one-dimensional Gauss-Hermite evidence integration over theta1, order 64.",
+      "standard_error": 0.0009994588666007852,
+      "summary": {
+        "max": 11.56831130562583,
+        "mean": -0.5282618872901833,
+        "median": -0.8343448000778069,
+        "min": -1.8735420133892777,
+        "n": 1000000,
+        "q01": -1.5420402502181991,
+        "q05": -1.4752041567493948,
+        "q95": 1.4656889048034412,
+        "q99": 3.062977031322543,
+        "std": 0.9994588666007852,
+        "std_error": 0.0009994588666007852
+      }
+    },
+    "validation_examples": 1000000,
+    "validation_seed": 20260705
+  },
+  "kind": "banana_population_entropy_floor",
+  "recipe": {
+    "banana_quadrature_order": 64,
+    "eval_batch_size": 65536,
+    "linear6_quadrature_order": 64,
+    "validation_examples": 1000000,
+    "validation_seed": 20260705
+  },
+  "runtime": {
+    "numpy_version": "2.5.0",
+    "torch_version": "2.12.1"
+  },
+  "target": "(theta1, theta2)"
+}

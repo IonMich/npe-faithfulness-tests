@@ -1,0 +1,76 @@
+{
+  "description": "Fresh full-prior Banana posterior check for the population-trained Flow2 residual NSF ensemble. The comparison is in raw theta coordinates.",
+  "exact": {
+    "posterior_samples": 50000
+  },
+  "grid": {
+    "edge_mass": 8.678338717491315e-16,
+    "grid_limit": 4.0,
+    "grid_size": 701
+  },
+  "mcmc": {
+    "acceptance_rate": 0.41190625,
+    "burn_in": 3000,
+    "chains": 8,
+    "posterior_samples": 72000,
+    "seconds": 0.5944675829960033,
+    "steps": 12000,
+    "to_exact": {
+      "mean_normalized_wasserstein": 0.010720786842272345,
+      "parameters": {
+        "theta1": {
+          "normalized_wasserstein": 0.011795688940155835,
+          "reference_sd": 0.19349163019855917,
+          "wasserstein": 0.002282367082345867
+        },
+        "theta2": {
+          "normalized_wasserstein": 0.009645884744388855,
+          "reference_sd": 0.37697203974580007,
+          "wasserstein": 0.003636228847245162
+        }
+      }
+    }
+  },
+  "npe": {
+    "ensemble_summary": "/Users/ioannism/repos/npe/runs/03_stress_banana/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/results/banana_population_ensemble_summary.json",
+    "members": 4,
+    "posterior_samples": 50000,
+    "to_exact": {
+      "mean_normalized_wasserstein": 0.010220268729064307,
+      "parameters": {
+        "theta1": {
+          "normalized_wasserstein": 0.0099970121295573,
+          "reference_sd": 0.19349163019855917,
+          "wasserstein": 0.0019343381740628118
+        },
+        "theta2": {
+          "normalized_wasserstein": 0.010443525328571311,
+          "reference_sd": 0.37697203974580007,
+          "wasserstein": 0.003936917045248454
+        }
+      }
+    }
+  },
+  "outputs": {
+    "figure": "/Users/ioannism/repos/npe/runs/00_shared_assets/readme_banana_posteriors/banana_population_prior_signal_corner.png",
+    "summary": "/Users/ioannism/repos/npe/runs/00_shared_assets/readme_banana_posteriors/banana_population_prior_signal_summary.json"
+  },
+  "signal": {
+    "context": [
+      1.3665213947952952,
+      -0.04730125523615614,
+      -0.8060987248177875,
+      1.167380722433279
+    ],
+    "draw_index": 1,
+    "seed": 20260707,
+    "theta": [
+      1.419305581818135,
+      -1.1749083786281884
+    ],
+    "x": [
+      1.3665213947952952,
+      -0.04730125523615614
+    ]
+  }
+}

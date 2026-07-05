@@ -31,7 +31,7 @@ and the entropy-floor estimate.
 | --- | --- | --- |
 | Single-exponential decay | `near_floor` full-prior z-NLL result | Not a strict floor hit; keep as the reference recipe and plotting/evaluation template while tracking the remaining resolved gap. |
 | Sign symmetry | `near_floor` full-prior folded NLL result | Not globally faithful yet; close the remaining NLL-floor gap or reduce uncertainty until the floor hit is statistically clean. |
-| Banana | `legacy_pairwise_pass` | Estimate the full-prior floor, then train/evaluate a population NPE in raw coordinates. |
+| Banana | `floor_pass` full-prior raw-coordinate NLL result | Second completed transfer after Linear6; gap is within the entropy-floor uncertainty under the common criterion. |
 | Label-switching mixture | `legacy_pairwise_pass` | Estimate the sorted-coordinate floor, then train/evaluate a population NPE in symmetry-aware coordinates. |
 | Linear6 | `near_floor` full-prior z-NLL result | First completed transfer after sign; remaining gap is real but at the same practical near-floor level as single decay and sign. |
 | Ordered two-exponential decay | `fail` | First build a reliable full-prior floor/evidence pipeline; only then claim or tune global NLL. |
@@ -210,8 +210,9 @@ globally faithful.
 
 ### 2. Banana
 
-This should be the second target because it is two-dimensional and exact-grid
-reference calculations are practical.
+Done as the second remaining-model transfer. It is two-dimensional, exact-grid
+reference calculations are practical, and the full-prior NLL is within the
+entropy-floor uncertainty under the common criterion.
 
 Target coordinates:
 
@@ -219,27 +220,49 @@ Target coordinates:
 g(theta) = (theta_1, theta_2)
 ```
 
-Floor plan:
+Completed result:
 
-- For each validation pair, compute
-  `log p(theta | x) = log p(theta) + log p(x | theta) - log p(x)`.
-- Estimate `log p(x)` using a 2D adaptive grid or quadrature over the prior
-  support.
-- Cross-check the evidence on a subset with dense grids and sampler-based
-  bridge/importance estimates.
+```text
+ensemble NLL   -0.52753 +/- 0.00100
+entropy floor  -0.52826 +/- 0.00100
+gap             0.00073 in raw theta units
+combined z      0.52
+paired gap SE   0.000035
+```
 
-Training plan:
+Completed artifacts:
 
-- Context: raw `x` plus a dewarped approximate inverse summary, for example
-  `(x_1, x_2 - b(x_1^2 - c))`, and standardized variants.
+- `runs/03_stress_banana/03_population_npe/00_entropy_floor_full_prior/`
+- `runs/03_stress_banana/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/`
+- `runs/00_shared_assets/readme_banana_posteriors/`
+- root README Banana section and run-status indexes.
+
+Floor method:
+
+- Integrate `theta2` analytically conditional on `theta1`.
+- Use posterior-centered one-dimensional Gauss-Hermite evidence integration
+  over `theta1`.
+- Report NLL in raw `theta=(theta1, theta2)` coordinates.
+
+Training recipe:
+
+- Context: raw `x`, dewarped summary `x2 - b*(x1^2-c)`, and curvature
+  `x1^2-c`.
 - Target: raw coordinates, matching the floor.
-- Start with the 4-member Flow2 recipe at `512k` per member.
+- 4-member Flow2 recipe at `512k` per member.
 
 Diagnostics:
 
-- Exact grid vs NPE vs MCMC on at least one fresh prior-predictive signal.
-- A small prior-predictive panel if the NLL gap is small but shape errors are
-  visible.
+- Exact grid vs NPE vs MCMC on one fresh prior-predictive signal.
+- NPE-to-exact mean normalized marginal Wasserstein: `0.01022`.
+- MCMC-to-exact mean normalized marginal Wasserstein: `0.01072`.
+
+Follow-up if we want to close even the paired residual:
+
+- The paired gap is small but statistically resolved because the same 1M cache
+  is used for NPE and exact NLL. A larger ensemble or longer/data-scaled run
+  can test whether the residual `0.00073` gap closes, but it is already below
+  the common full-prior floor-pass threshold.
 
 ### 3. Label-Switching Mixture
 
@@ -365,11 +388,12 @@ Use the same stop/go logic for every model.
 
 ## Immediate Next Work
 
-1. Commit and push the completed Linear6 near-floor model slice.
-2. Build and sanity-check the Banana full-prior entropy-floor estimator before
-   launching any heavy Banana training.
-3. If Banana floor estimation is stable, run the same 4-member Flow2 `512k`
-   population proof on the Mac mini.
+1. Commit and push the completed Banana floor-pass model slice.
+2. Build and sanity-check the Label Switching sorted-coordinate entropy-floor
+   estimator before launching any heavy Label Switching training.
+3. If Label Switching floor estimation is stable, run the same 4-member Flow2
+   `512k` population proof on the Mac mini.
 4. Extend the existing loss/posterior rendering scripts with a
-   `banana_population` mode rather than adding separate plotting scripts.
-5. Repeat the same floor-first workflow for Label Switching.
+   `label_switch_population` mode rather than adding separate plotting scripts.
+5. Repeat the same floor-first workflow for Ordered Two-Exponential Decay only
+   after its full-prior evidence method is credible.

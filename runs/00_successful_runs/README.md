@@ -12,6 +12,7 @@ Runs that only passed the inherited `0.034` pairwise agreement threshold for a d
 | `01_exponential_decay` | [05_abc_faithfulness / 02_abc_faithfulness_scaled2m_snpe_diag_refined](../01_exponential_decay/05_abc_faithfulness/02_abc_faithfulness_scaled2m_snpe_diag_refined) | best mean normalized Wasserstein: 0.03204 / target 0.03348 | ABC best-result faithfulness flag |
 | `01_exponential_decay` | [05_abc_faithfulness / 07_abc_faithfulness_validation_snpe_diag_refined](../01_exponential_decay/05_abc_faithfulness/07_abc_faithfulness_validation_snpe_diag_refined) | best mean normalized Wasserstein: 0.03129 / target 0.03348 | ABC best-result faithfulness flag |
 | `02_stress_sign` | [01_npe_flow / 21_npe_flow_stress_tests_sign_absfold_q008_linear](../02_stress_sign/01_npe_flow/21_npe_flow_stress_tests_sign_absfold_q008_linear) | NPE-to-grid diagnostic W: 0.02326 / calibrated target 0.02331 | exact-grid calibrated MCMC/HMC faithfulness target |
+| `03_stress_banana` | [03_population_npe / 01_flow2_residual_full_prior_512k_ensemble4](../03_stress_banana/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4) | full-prior raw NLL: -0.52753 / entropy floor: -0.52826 / gap 0.00073 | full-prior population NLL floor pass |
 
 ## Reference Or Diagnostic-Passing Runs
 
@@ -49,6 +50,5 @@ reference target.
 | --- | --- | --- | --- |
 | `02_stress_sign` | [01_npe_flow / 01_npe_flow_stress_tests_sign](../02_stress_sign/01_npe_flow/01_npe_flow_stress_tests_sign) | pairwise max diagnostic Wasserstein: 0.02691 / inherited target 0.034 | superseded by grid-faithful run 21 |
 | `02_stress_sign` | [01_npe_flow / 15_npe_flow_stress_tests_sign_nolinear](../02_stress_sign/01_npe_flow/15_npe_flow_stress_tests_sign_nolinear) | pairwise max diagnostic Wasserstein: 0.02691 / inherited target 0.034 | superseded by grid-faithful run 21 |
-| `03_stress_banana` | [01_npe_flow / 03_npe_flow_stress_tests_banana_q008](../03_stress_banana/01_npe_flow/03_npe_flow_stress_tests_banana_q008) | pairwise max diagnostic Wasserstein: 0.01844 / inherited target 0.034 | model-specific calibration pending |
 | `04_stress_label_switch` | [01_npe_flow / 05_npe_flow_stress_tests_label_em](../04_stress_label_switch/01_npe_flow/05_npe_flow_stress_tests_label_em) | pairwise max diagnostic Wasserstein: 0.02868 / inherited target 0.034 | model-specific calibration pending |
 | `05_stress_linear6` | [01_npe_flow / 13_npe_flow_stress_tests_linear6_q008](../05_stress_linear6/01_npe_flow/13_npe_flow_stress_tests_linear6_q008) | pairwise max diagnostic Wasserstein: 0.03301 / inherited target 0.034 | model-specific calibration pending |

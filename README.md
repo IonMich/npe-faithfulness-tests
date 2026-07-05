@@ -133,6 +133,7 @@ floor for the same density target parameterization.
 | Single-exponential decay | $`z=(\log A,\log k,\log\sigma)`$ | `-3.63865 +/- 0.00253` |
 | Sign-symmetry stress | $`\theta=(\theta_1,\theta_2)`$ | `-0.73379 +/- 0.00115` |
 | Sign-symmetry stress, folded target | $`(\lvert\theta_1\rvert,\theta_2)`$ | `-1.42694 +/- 0.00115` |
+| Banana stress | $`\theta=(\theta_1,\theta_2)`$ | `-0.52826 +/- 0.00100` |
 | Linear6 stress | $`z=(w_1,\ldots,w_6,\log\sigma)`$ | `-10.78631 +/- 0.00353` |
 
 The single-decay estimate is the adaptive posterior-centered Gauss-Hermite
@@ -150,6 +151,8 @@ also stored in
 The Linear6 floor is computed by the population NPE evaluator using the
 linear-Gaussian conditional posterior and one-dimensional Gauss-Hermite
 evidence integration over $`\log\sigma`$.
+The Banana floor integrates $`\theta_2`$ analytically and then uses
+one-dimensional Gauss-Hermite evidence integration over $`\theta_1`$.
 
 Finite validation-cache NLLs have their own Monte Carlo uncertainty. For the
 two single-decay NPEs listed below, the full 1M-example cache standard errors
@@ -683,21 +686,41 @@ The benchmark observation is generated from:
 \theta_0=(0.90,-0.25).
 ```
 
-The diagnostic coordinates are the raw coordinates:
+The diagnostic and full-prior NLL target coordinates are the raw coordinates:
 
 ```math
 g(\theta)=(\theta_1,\theta_2).
 ```
 
-Progress: the best run has MCMC, HMC, and NPE in close pairwise agreement and
-uses a tighter proposal/training region with linear target adjustment. It is currently
-a legacy pairwise pass. The remaining work is model-specific calibration
-against a truth/reference target.
+The population-trained Banana estimator applies the same Flow2 residual NSF
+recipe used for sign and Linear6. The context includes raw $`x`$, the dewarped
+summary $`x_2-b(x_1^2-c)`$, and the curvature term $`x_1^2-c`$; the density
+target remains raw $`\theta`$.
 
-Best posterior:
-[banana_q008 run](runs/03_stress_banana/01_npe_flow/03_npe_flow_stress_tests_banana_q008/README.md).
+| Model | Training data | Full-prior validation NLL |
+| --- | ---: | ---: |
+| 4-member Flow2 residual NSF ensemble | `512k` prior-predictive pairs per member | `-0.52753 +/- 0.00100` |
 
-![Banana best posterior overlay](runs/00_shared_assets/readme_model_overlays/banana_best_posterior_overlay.png)
+The Banana full-prior entropy floor in the same raw coordinates is
+`-0.52826 +/- 0.00100`, computed by integrating $`\theta_2`$ analytically and
+using one-dimensional Gauss-Hermite evidence integration over $`\theta_1`$.
+The measured gap is `0.00073`, only `0.52` combined standard errors, so this is
+a full-prior floor pass under the common criterion. The paired 1M-example cache
+still resolves the tiny residual gap (`0.00073 +/- 0.00004`), so the result is
+not literally zero-bias, but the absolute gap is much smaller than the
+single-decay, sign, and Linear6 population gaps.
+
+![Banana population NPE training loss](runs/00_shared_assets/readme_banana_posteriors/banana_population_training_loss.png)
+
+The posterior-shape check below uses a fresh full-prior signal and overlays
+exact grid, MCMC, and the population-trained NPE in the same raw coordinates.
+Against exact posterior samples, the NPE mean normalized marginal Wasserstein
+distance is `0.01022`; the MCMC reference is `0.01072`.
+
+![Banana exact grid, MCMC, and NPE posterior overlay](runs/00_shared_assets/readme_banana_posteriors/banana_population_prior_signal_corner.png)
+
+The run is documented at
+[01_flow2_residual_full_prior_512k_ensemble4](runs/03_stress_banana/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/README.md).
 
 ### Label-Switching Mixture
 

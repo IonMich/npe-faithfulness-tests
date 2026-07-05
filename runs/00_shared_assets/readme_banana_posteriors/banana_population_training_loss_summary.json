@@ -1,0 +1,49 @@
+{
+  "epochs": 15,
+  "figure": "/Users/ioannism/repos/npe/runs/00_shared_assets/readme_banana_posteriors/banana_population_training_loss.png",
+  "final_full_prior_validation_nll": {
+    "mean": -0.5275281520603539,
+    "standard_error": 0.0010009409814320856
+  },
+  "floor": {
+    "estimate": -0.5282618872901833,
+    "standard_error": 0.0009994588666007852
+  },
+  "mean_train_nll_target_units": {
+    "final_epoch": -0.5270030692513636,
+    "first_epoch": 0.012366185909549299
+  },
+  "members": [
+    {
+      "final_train_nll_target_units": -0.5244809769689502,
+      "member_index": 1,
+      "seed": 20261001,
+      "training_seconds": 125.31115904200124
+    },
+    {
+      "final_train_nll_target_units": -0.5285965642812693,
+      "member_index": 2,
+      "seed": 20261002,
+      "training_seconds": 124.73179091699421
+    },
+    {
+      "final_train_nll_target_units": -0.5279294962659145,
+      "member_index": 3,
+      "seed": 20261003,
+      "training_seconds": 124.78738979200716
+    },
+    {
+      "final_train_nll_target_units": -0.5270052394893203,
+      "member_index": 4,
+      "seed": 20261004,
+      "training_seconds": 124.73048650001874
+    }
+  ],
+  "note": "The source run skipped per-epoch validation. Curves are training NLL per member in target units against total training wall time; the marker is the final 1M-example full-prior validation NLL.",
+  "source": "Full-prior Banana population NPE using the single-decay Flow2 residual NSF/randperm training recipe, with raw target (theta1, theta2).",
+  "training_wall_seconds": 503.5641673330101,
+  "wall_time_axis_seconds": {
+    "final_epoch": 503.56416733301006,
+    "first_epoch": 33.383462640584995
+  }
+}
