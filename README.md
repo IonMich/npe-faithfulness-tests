@@ -931,29 +931,33 @@ The diagnostic coordinates are the displayed physical parameters:
 g(z)=(A_1,k_1,A_2,k_2,\sigma).
 ```
 
-Full-prior population NPE is still unresolved. The current floor probe in the
-ridge target coordinates is about `-3.28149 +/- 0.02423` NLL on a 10k
+Full-prior population NPE is still unresolved. The current reference floor probe
+in the ridge target coordinates is `-3.28149 +/- 0.02423` NLL on the shared 10k
 validation cache. The best completed population probe is the 4-member Flow2
-ridge-target ensemble at 30 epochs, but it remains `0.08257` NLL above the floor.
+ridge-target ensemble at 30 epochs, but it remains `0.08257` NLL above this
+common floor. The table below normalizes every completed probe to that same
+reference floor; per-run floor estimates in some artifacts differ only by
+finite Monte Carlo noise and are not used for this comparison.
 
-| Population NPE probe | Validation NLL | Floor | Gap |
-| --- | ---: | ---: | ---: |
-| Flow2 residual target, 512k x4, 15 epochs | `-3.19227` | `-3.28149` | `0.08923` |
-| Flow2 ridge target, 512k x4, 15 epochs | `-3.19327` | `-3.28149` | `0.08823` |
-| Flow2 ridge target, 512k x4, 30 epochs | `-3.19892` | `-3.28149` | `0.08257` |
-| Flow2 ridge target, 1.024M x1, 30 epochs | `-3.19045` | `-3.28149` | `0.09104` |
-| Flow4 h128 ridge target, 512k x1, 30 epochs | `-3.17108` | `-3.28149` | `0.11041` |
-| MAF4 ridge target, 512k x1, 30 epochs | `-3.17836` | `-3.28149` | `0.10314` |
-| MDN8 ridge target, 128k x1, 20 epochs | `-3.01387` | `-3.28149` | `0.26762` |
-| Flow2 augmented context, 512k x1, 30 epochs | `-3.17555` | `-3.28149` | `0.10595` |
-| 2-component Flow2 mixture, 512k x1, 30 epochs | `-3.17577` | `-3.27982` | `0.10404` |
-| Flow2 rate-sum target, 512k x1, 30 epochs | `-3.17315` | `-3.27982` | `0.10667` |
+| Population NPE probe | Validation NLL | Gap to common floor |
+| --- | ---: | ---: |
+| Flow2 residual target, 512k x4, 15 epochs | `-3.19227` | `0.08923` |
+| Flow2 ridge target, 512k x4, 15 epochs | `-3.19327` | `0.08823` |
+| Flow2 ridge target, 512k x4, 30 epochs | `-3.19892` | `0.08257` |
+| Flow2 ridge target, 1.024M x1, 30 epochs | `-3.19045` | `0.09104` |
+| Flow4 h128 ridge target, 512k x1, 30 epochs | `-3.17108` | `0.11041` |
+| MAF4 ridge target, 512k x1, 30 epochs | `-3.17836` | `0.10314` |
+| MDN8 ridge target, 128k x1, 20 epochs | `-3.01387` | `0.26762` |
+| Flow2 augmented context, 512k x1, 30 epochs | `-3.17555` | `0.10595` |
+| 2-component Flow2 mixture, 512k x1, 30 epochs | `-3.17577` | `0.10572` |
+| Flow2 rate-sum target, 512k x1, 30 epochs | `-3.17315` | `0.10834` |
+| Flow2 high-SNR weighted ridge target, 512k x1, 30 epochs | `-3.16299` | `0.11851` |
 
 The miss is therefore not explained by one short run or by the first floor
 estimate. Scaling the same Flow2 recipe to 1.024M simulations, increasing flow
 depth, trying MAF, adding a simple two-component flow mixture, adding the tested
-augmented context, and switching to the tested rate-sum target have all stayed
-well above the full-prior floor.
+augmented context, switching to the tested rate-sum target, and upweighting the
+high-SNR prior tail have all stayed well above the full-prior floor.
 
 Best posterior:
 [two_exp_ordered_residual run](runs/06_two_exponential/01_npe_flow/12_npe_flow_stress_tests_two_exp_ordered_residual/README.md).

@@ -357,9 +357,15 @@ Training probes tried:
 512k x 1 MAF4, 30 epochs        NLL -3.17836, gap 0.10314
 512k x 1 augmented context      NLL -3.17555, gap 0.10595
 128k x 1 CPU MDN8 smoke         NLL -3.01387, gap 0.26762
-512k x 1 Flow2 mixture, 30 ep   NLL -3.17577, gap 0.10404
-512k x 1 rate-sum target, 30 ep NLL -3.17315, gap 0.10667
+512k x 1 Flow2 mixture, 30 ep   NLL -3.17577, gap 0.10572
+512k x 1 rate-sum target, 30 ep NLL -3.17315, gap 0.10834
+512k x 1 high-SNR weighted, 30 ep NLL -3.16299, gap 0.11851
 ```
+
+These gaps are normalized to the shared 10k validation reference floor
+`-3.28149`. Some run summaries carry their own paired floor estimate from a
+later evaluator invocation; those estimates differ by Monte Carlo noise and
+should not be mixed inside the architecture table.
 
 The best plain NPE result is the 4-member Flow2 30-epoch ensemble, and it is
 still about `0.083` NLL units above the floor. A diverse ensemble over the
@@ -379,6 +385,12 @@ It is an invertible unit-Jacobian transform like the default target, but its
 single-member held-out NLL was worse than the best default-target individual
 members.
 
+The first diagnostic-driven loss weighting probe upweighted the top 20% of
+training draws by log-SNR with a 4x tail weight. It drove the weighted training
+loss much lower (`-4.16513` target units) but worsened unweighted full-prior
+validation NLL to `-3.16299`, so plain tail reweighting is not the right repair
+for the global objective.
+
 Useful infrastructure completed:
 
 - `train_sign_population_npe.py` can now sample, train, evaluate, and floor-probe
@@ -396,6 +408,9 @@ Useful infrastructure completed:
 - `train_sign_population_npe.py` can select between the default
   two-exponential target and the rate-sum/log-ratio target via
   `--two-exp-target`.
+- `train_sign_population_npe.py` can evaluate existing two-exponential ensemble
+  summaries with paired-gap diagnostics and can run targeted two-exponential
+  loss weighting probes.
 
 Next viable experiments:
 
@@ -410,6 +425,11 @@ Next viable experiments:
 - Use exact-posterior or high-quality importance samples for a subset of signals
   to diagnose where the amortized posterior misses mass before launching another
   Mac mini training run.
+- Do not spend another run on simple high-SNR tail weighting; the first probe
+  over-optimized the weighted objective and degraded the unweighted full-prior
+  NLL.
+- If a later two-exponential run reaches an acceptable floor-level NLL, remove
+  the README failure table and replace it with the successful final result.
 
 Diagnostics still required before any eventual pass:
 
