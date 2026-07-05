@@ -492,8 +492,8 @@ def make_config(args: argparse.Namespace, *, seed: int, train_simulations: int) 
         max_optimizer_steps=int(args.max_optimizer_steps),
         loss_weight_mode=str(args.loss_weight_mode),
         loss_tail_weight=float(args.loss_tail_weight),
-        target_transform="none",
-        target_ridge=1e-3,
+        target_transform=str(args.target_transform),
+        target_ridge=float(args.target_ridge),
         flow_activation=str(args.flow_activation),
         flow_residual=bool(args.flow_residual),
         flow_randperm=bool(args.flow_randperm),
@@ -2115,6 +2115,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--loss-weight-mode", choices=POPULATION_LOSS_WEIGHT_MODES, default="none")
     parser.add_argument("--loss-tail-weight", type=float, default=3.0)
     parser.add_argument("--loss-tail-quantile", type=float, default=0.8)
+    parser.add_argument(
+        "--target-transform",
+        choices=("none", "linear_residual", "fit_summary_residual"),
+        default="none",
+    )
+    parser.add_argument("--target-ridge", type=float, default=1e-3)
     parser.add_argument("--device", choices=("auto", "cpu", "mps", "cuda"), default="auto")
     parser.add_argument("--eval-batch-size", type=int, default=65_536)
     parser.add_argument("--floor-only", action="store_true")
@@ -2350,6 +2356,8 @@ def main() -> None:
             "loss_weight_mode": str(args.loss_weight_mode),
             "loss_tail_weight": float(args.loss_tail_weight),
             "loss_tail_quantile": float(args.loss_tail_quantile),
+            "target_transform": str(args.target_transform),
+            "target_ridge": float(args.target_ridge),
             "banana_quadrature_order": int(args.banana_quadrature_order),
             "linear6_quadrature_order": int(args.linear6_quadrature_order),
             "two_exp_target": str(args.two_exp_target),
