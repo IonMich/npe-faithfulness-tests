@@ -42,7 +42,7 @@ Per-dimension diagnostic NPE-to-grid distances:
 
 | Dimension | Normalized W |
 | --- | ---: |
-| \(|\theta_1|\) | `0.020312` |
+| \(\lvert\theta_1\rvert\) | `0.020312` |
 | \(\theta_2\) | `0.026199` |
 
 The run passes the calibrated NPE-to-grid target by a narrow margin. The

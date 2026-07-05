@@ -1,0 +1,44 @@
+{
+  "epochs": 15,
+  "figure": "/Users/ioannism/repos/npe/runs/00_shared_assets/readme_sign_posteriors/sign_population_training_loss.png",
+  "final_full_prior_validation_nll": {
+    "mean": -1.422612950153621,
+    "standard_error": 0.0011687392391493943
+  },
+  "floor": {
+    "estimate": -1.426941782495585,
+    "standard_error": 0.0011526154301947824
+  },
+  "mean_train_nll_folded_units": {
+    "final_epoch": -1.4220455506620062,
+    "first_epoch": -0.8990996766503966
+  },
+  "members": [
+    {
+      "final_train_nll_folded_units": -1.4219224863564448,
+      "member_index": 1,
+      "seed": 20260901,
+      "training_seconds": 164.1317919169087
+    },
+    {
+      "final_train_nll_folded_units": -1.4240902930300328,
+      "member_index": 2,
+      "seed": 20260902,
+      "training_seconds": 163.8055385829648
+    },
+    {
+      "final_train_nll_folded_units": -1.4195260515811499,
+      "member_index": 3,
+      "seed": 20260903,
+      "training_seconds": 163.25921387504786
+    },
+    {
+      "final_train_nll_folded_units": -1.4226433716803975,
+      "member_index": 4,
+      "seed": 20260904,
+      "training_seconds": 167.85289399989415
+    }
+  ],
+  "note": "The source run skipped per-epoch validation. Curves are training NLL per member in folded target units; the marker is the final 1M-example full-prior validation NLL.",
+  "source": "Full-prior sign-symmetry population NPE using the single-decay Flow2 residual NSF/randperm training recipe, with folded target (abs(theta1), theta2)."
+}

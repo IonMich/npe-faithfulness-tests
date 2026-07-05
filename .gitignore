@@ -39,6 +39,8 @@ runs/**
 !runs/**/
 !runs/**/README.md
 !runs/00_shared_assets/readme_entropy/*.json
+!runs/00_shared_assets/readme_sign_posteriors/*.json
+!runs/00_shared_assets/readme_sign_posteriors/*.png
 sbi-logs/
 
 # Large generated numerical/model artifacts

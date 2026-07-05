@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -16,6 +17,17 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = (
     ROOT
     / "runs/00_shared_assets/readme_scaling/decay_population_npe_training_efficiency_curves.png"
+)
+DEFAULT_SIGN_OUTPUT = (
+    ROOT / "runs/00_shared_assets/readme_sign_posteriors/sign_population_training_loss.png"
+)
+DEFAULT_SIGN_SUMMARY = (
+    ROOT / "runs/00_shared_assets/readme_sign_posteriors/sign_population_training_loss_summary.json"
+)
+DEFAULT_SIGN_ENSEMBLE_SUMMARY = (
+    ROOT
+    / "runs/02_stress_sign/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/"
+    "results/sign_population_ensemble_summary.json"
 )
 POPULATION_ENTROPY_NLL = -3.6386545787958
 
@@ -92,6 +104,20 @@ RUNS = [
 
 def load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def json_ready(value: object) -> object:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {str(key): json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_ready(item) for item in value]
+    return value
 
 
 def epoch_records(path: Path) -> list[dict]:
@@ -347,8 +373,157 @@ def plot(output_path: Path = DEFAULT_OUTPUT) -> Path:
     return output_path
 
 
+def sign_population_rows(summary: dict) -> list[dict[str, object]]:
+    rows = []
+    for member in summary["members"]:
+        item = member["member_summary"]
+        history = item["history"]
+        z_log_det = float(item["z_log_det"])
+        train_nll = np.asarray(history["train_nll"], dtype=np.float64) + z_log_det
+        rows.append(
+            {
+                "member_index": int(item["member_index"]),
+                "seed": int(item["seed"]),
+                "epochs": np.arange(1, train_nll.size + 1, dtype=np.int64),
+                "train_nll_folded_units": train_nll,
+                "training_seconds": float(item["training_seconds"]),
+                "final_train_nll_folded_units": float(item["final_train_nll_folded_units"]),
+            }
+        )
+    return rows
+
+
+def write_sign_training_summary(
+    *,
+    path: Path,
+    source_summary: dict,
+    rows: list[dict[str, object]],
+    figure_path: Path,
+    mean_curve: np.ndarray,
+) -> None:
+    evaluation = source_summary["evaluation"]
+    output = {
+        "source": source_summary["description"],
+        "figure": figure_path,
+        "epochs": int(mean_curve.size),
+        "members": [
+            {
+                "member_index": row["member_index"],
+                "seed": row["seed"],
+                "final_train_nll_folded_units": row["final_train_nll_folded_units"],
+                "training_seconds": row["training_seconds"],
+            }
+            for row in rows
+        ],
+        "mean_train_nll_folded_units": {
+            "first_epoch": float(mean_curve[0]),
+            "final_epoch": float(mean_curve[-1]),
+        },
+        "final_full_prior_validation_nll": {
+            "mean": float(evaluation["ensemble_nll"]["mean"]),
+            "standard_error": float(evaluation["ensemble_nll"]["std_error"]),
+        },
+        "floor": {
+            "estimate": float(evaluation["floor"]["estimate"]),
+            "standard_error": float(evaluation["floor"]["standard_error"]),
+        },
+        "note": (
+            "The source run skipped per-epoch validation. Curves are training "
+            "NLL per member in folded target units; the marker is the final "
+            "1M-example full-prior validation NLL."
+        ),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(json_ready(output), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def plot_sign_population(
+    *,
+    ensemble_summary: Path = DEFAULT_SIGN_ENSEMBLE_SUMMARY,
+    output_path: Path = DEFAULT_SIGN_OUTPUT,
+    summary_output: Path = DEFAULT_SIGN_SUMMARY,
+) -> Path:
+    source_summary = load_json(ensemble_summary)
+    rows = sign_population_rows(source_summary)
+    matrix = np.vstack([row["train_nll_folded_units"] for row in rows])
+    epochs = np.asarray(rows[0]["epochs"], dtype=np.int64)
+    mean_curve = matrix.mean(axis=0)
+    min_curve = matrix.min(axis=0)
+    max_curve = matrix.max(axis=0)
+    evaluation = source_summary["evaluation"]
+    ensemble_nll = float(evaluation["ensemble_nll"]["mean"])
+    ensemble_se = float(evaluation["ensemble_nll"]["std_error"])
+    floor = float(evaluation["floor"]["estimate"])
+    floor_se = float(evaluation["floor"]["standard_error"])
+
+    fig, ax = plt.subplots(figsize=(8.6, 5.1))
+    colors = ["#6b7280", "#9ca3af", "#4b5563", "#737373"]
+    for row, color in zip(rows, colors, strict=False):
+        ax.plot(
+            row["epochs"],
+            row["train_nll_folded_units"],
+            color=color,
+            lw=1.15,
+            alpha=0.72,
+            label=f"member {row['member_index']} train",
+        )
+    ax.fill_between(epochs, min_curve, max_curve, color="#0f766e", alpha=0.10, linewidth=0)
+    ax.plot(epochs, mean_curve, color="#0f766e", lw=2.6, label="member mean train")
+    ax.axhspan(floor - floor_se, floor + floor_se, color="#172033", alpha=0.12, label="entropy floor +/- 1 SE")
+    ax.axhline(floor, color="#172033", lw=1.8)
+    ax.errorbar(
+        [int(epochs[-1]) + 0.35],
+        [ensemble_nll],
+        yerr=[ensemble_se],
+        fmt="o",
+        color="#b85c38",
+        markersize=6,
+        capsize=4,
+        label="final full-prior validation",
+    )
+    ax.set_xlabel("epoch")
+    ax.set_ylabel("NLL in folded target units")
+    ax.set_title("Sign population NPE training loss")
+    ax.grid(alpha=0.22)
+    ax.legend(frameon=False, fontsize=9)
+    ax.set_xlim(1, int(epochs[-1]) + 0.8)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    write_sign_training_summary(
+        path=summary_output,
+        source_summary=source_summary,
+        rows=rows,
+        figure_path=output_path,
+        mean_curve=mean_curve,
+    )
+    return output_path
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Plot population NPE training-loss curves.")
+    parser.add_argument(
+        "--mode",
+        choices=("single_decay", "sign_population"),
+        default="single_decay",
+    )
+    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--summary-output", type=Path, default=DEFAULT_SIGN_SUMMARY)
+    parser.add_argument("--sign-ensemble-summary", type=Path, default=DEFAULT_SIGN_ENSEMBLE_SUMMARY)
+    return parser.parse_args()
+
+
 def main() -> None:
-    output_path = plot()
+    args = parse_args()
+    if args.mode == "single_decay":
+        output_path = plot(args.output or DEFAULT_OUTPUT)
+    else:
+        output_path = plot_sign_population(
+            ensemble_summary=args.sign_ensemble_summary,
+            output_path=args.output or DEFAULT_SIGN_OUTPUT,
+            summary_output=args.summary_output,
+        )
     print(output_path)
 
 

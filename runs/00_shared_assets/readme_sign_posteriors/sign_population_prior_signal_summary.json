@@ -1,0 +1,112 @@
+{
+  "description": "Fresh full-prior sign posterior check for the population-trained folded-target NPE ensemble. This is not the old fixed-x0 sign run.",
+  "grid": {
+    "edge_mass": {
+      "$\\theta_1$": {
+        "lower_grid_edge": 0.0,
+        "upper_grid_edge": 0.0
+      },
+      "$\\theta_2$": {
+        "lower_grid_edge": 2.806645090499876e-83,
+        "upper_grid_edge": 9.009603780950016e-210
+      }
+    },
+    "grid_limit": 4.0,
+    "grid_size": 1001
+  },
+  "mcmc": {
+    "acceptance_rate": 0.42115625,
+    "burn_in": 3000,
+    "chains": 8,
+    "mode_mass": {
+      "negative_theta1": 0.5,
+      "positive_mass_error_vs_half": 0.0,
+      "positive_theta1": 0.5
+    },
+    "posterior_samples": 72000,
+    "seconds": 0.5364960830193013,
+    "steps": 12000,
+    "to_grid_diagnostic": {
+      "max_normalized_wasserstein": 0.0273087675455215,
+      "mean_normalized_wasserstein": 0.021117300271470636,
+      "per_dim": {
+        "$\\theta_2$": {
+          "normalized_wasserstein": 0.01492583299741977,
+          "wasserstein": 0.002378754222124472
+        },
+        "$|\\theta_1|$": {
+          "normalized_wasserstein": 0.0273087675455215,
+          "wasserstein": 0.002178961799779222
+        }
+      }
+    },
+    "to_grid_raw": {
+      "max_normalized_wasserstein": 0.01492583299741977,
+      "mean_normalized_wasserstein": 0.008281350511942403,
+      "per_dim": {
+        "$\\theta_1$": {
+          "normalized_wasserstein": 0.001636868026465036,
+          "wasserstein": 0.0022776762997025126
+        },
+        "$\\theta_2$": {
+          "normalized_wasserstein": 0.01492583299741977,
+          "wasserstein": 0.002378754222124472
+        }
+      }
+    }
+  },
+  "npe": {
+    "ensemble_summary": "/Users/ioannism/repos/npe/runs/02_stress_sign/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/results/sign_population_ensemble_summary.json",
+    "members": 4,
+    "mode_mass": {
+      "negative_theta1": 0.49682499999999996,
+      "positive_mass_error_vs_half": 0.003175000000000039,
+      "positive_theta1": 0.503175
+    },
+    "posterior_samples": 80000,
+    "to_grid_diagnostic": {
+      "max_normalized_wasserstein": 0.027918309980613745,
+      "mean_normalized_wasserstein": 0.02085830226556685,
+      "per_dim": {
+        "$\\theta_2$": {
+          "normalized_wasserstein": 0.013798294550519948,
+          "wasserstein": 0.002199056590398706
+        },
+        "$|\\theta_1|$": {
+          "normalized_wasserstein": 0.027918309980613745,
+          "wasserstein": 0.002227597084370387
+        }
+      }
+    },
+    "to_grid_raw": {
+      "max_normalized_wasserstein": 0.013798294550519948,
+      "mean_normalized_wasserstein": 0.010521688146426877,
+      "per_dim": {
+        "$\\theta_1$": {
+          "normalized_wasserstein": 0.007245081742333807,
+          "wasserstein": 0.010081418115031882
+        },
+        "$\\theta_2$": {
+          "normalized_wasserstein": 0.013798294550519948,
+          "wasserstein": 0.002199056590398706
+        }
+      }
+    }
+  },
+  "outputs": {
+    "figure": "/Users/ioannism/repos/npe/runs/00_shared_assets/readme_sign_posteriors/sign_population_prior_signal_corner.png",
+    "summary": "/Users/ioannism/repos/npe/runs/00_shared_assets/readme_sign_posteriors/sign_population_prior_signal_summary.json"
+  },
+  "signal": {
+    "draw_index": 1,
+    "seed": 20260707,
+    "theta": [
+      1.419305581818135,
+      -1.1749083786281884
+    ],
+    "x": [
+      1.956365728854991,
+      -0.9320384178148928
+    ]
+  }
+}

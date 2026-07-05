@@ -23,7 +23,6 @@ from scipy.stats import wasserstein_distance
 
 from abc_faithfulness_decay import make_k_grid
 from compare_decay_samplers import compare_to_reference, summarize_samples, weighted_quantile
-from corner_truth import true_theta_legend_handle
 from evaluate_decay_amortization_panel import (
     build_adaptive_grid_reference,
     initial_z_ranges,
@@ -139,12 +138,270 @@ def simulate_x_from_z(z: np.ndarray, t: np.ndarray, rng: np.random.Generator) ->
     return mean + rng.normal(0.0, theta[:, 2:3], size=mean.shape)
 
 
+@dataclass(frozen=True)
+class WeightedCornerLayer:
+    label: str
+    color: str
+    values: np.ndarray
+    weights: np.ndarray
+    grid_shape: tuple[int, ...]
+    axes: tuple[np.ndarray, ...]
+    widths: tuple[np.ndarray, ...]
+    hist_lw: float = 1.9
+    contour_lw: float = 1.55
+
+
+@dataclass(frozen=True)
+class SampleCornerLayer:
+    label: str
+    color: str
+    samples: np.ndarray
+    hist_lw: float = 1.5
+    contour_lw: float = 1.35
+
+
 def figure_to_data_uri(figure: plt.Figure, *, dpi: int = 150) -> str:
     buffer = io.BytesIO()
     figure.savefig(buffer, format="png", dpi=dpi, bbox_inches="tight")
     plt.close(figure)
     encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
     return f"data:image/png;base64,{encoded}"
+
+
+def contour_thresholds_by_mass(
+    density: np.ndarray,
+    mass: np.ndarray,
+    masses: tuple[float, ...],
+) -> list[float]:
+    density_flat = np.asarray(density, dtype=np.float64).ravel()
+    mass_flat = np.asarray(mass, dtype=np.float64).ravel()
+    mask = (density_flat > 0.0) & (mass_flat > 0.0) & np.isfinite(density_flat)
+    if not np.any(mask):
+        return []
+    density_positive = density_flat[mask]
+    mass_positive = mass_flat[mask]
+    order = np.argsort(density_positive)[::-1]
+    density_sorted = density_positive[order]
+    mass_sorted = mass_positive[order]
+    cumulative = np.cumsum(mass_sorted)
+    cumulative /= cumulative[-1]
+    thresholds = []
+    for mass_value in sorted(masses, reverse=True):
+        index = int(np.searchsorted(cumulative, mass_value, side="left"))
+        index = min(index, density_sorted.size - 1)
+        thresholds.append(float(density_sorted[index]))
+    return sorted(set(thresholds))
+
+
+def apply_corner_axis_labels(axes: np.ndarray, labels: list[str]) -> None:
+    dimensions = len(labels)
+    for row in range(dimensions):
+        for col in range(dimensions):
+            ax = axes[row, col]
+            if row < col:
+                ax.axis("off")
+                continue
+            if row == dimensions - 1:
+                ax.set_xlabel(labels[col])
+            else:
+                ax.set_xticklabels([])
+            if col == 0 and row > 0:
+                ax.set_ylabel(labels[row])
+            else:
+                ax.set_yticklabels([])
+            ax.grid(alpha=0.14)
+
+
+def weighted_corner_quantile(
+    values: np.ndarray,
+    weights: np.ndarray,
+    quantiles: tuple[float, ...],
+) -> np.ndarray:
+    order = np.argsort(values)
+    sorted_values = values[order]
+    sorted_weights = weights[order]
+    cumulative = np.cumsum(sorted_weights)
+    cumulative /= cumulative[-1]
+    return np.interp(quantiles, cumulative, sorted_values)
+
+
+def corner_layer_ranges(
+    *,
+    labels: list[str],
+    true_values: np.ndarray,
+    weighted_layers: list[WeightedCornerLayer],
+    sample_layers: list[SampleCornerLayer],
+) -> list[tuple[float, float]]:
+    ranges = []
+    for index in range(len(labels)):
+        bounds = [float(true_values[index])]
+        for layer in weighted_layers:
+            bounds.extend(
+                weighted_corner_quantile(
+                    np.asarray(layer.values, dtype=np.float64)[:, index],
+                    np.asarray(layer.weights, dtype=np.float64),
+                    (0.002, 0.998),
+                ).tolist()
+            )
+        for layer in sample_layers:
+            bounds.extend(np.quantile(np.asarray(layer.samples)[:, index], [0.002, 0.998]).tolist())
+        low = min(bounds)
+        high = max(bounds)
+        width = max(high - low, 1e-9)
+        ranges.append((low - 0.08 * width, high + 0.08 * width))
+    return ranges
+
+
+def true_value_handle(color: str) -> plt.Line2D:
+    return plt.Line2D([0], [0], color=color, lw=1.4, linestyle="--", label="True theta")
+
+
+def render_corner_layers(
+    *,
+    labels: list[str],
+    true_values: np.ndarray,
+    weighted_layers: list[WeightedCornerLayer],
+    sample_layers: list[SampleCornerLayer],
+    true_color: str = GRID_COLOR,
+    title: str | None = None,
+    max_sample_plot: int = 12_000,
+    rng: np.random.Generator | None = None,
+) -> plt.Figure:
+    dimensions = len(labels)
+    if dimensions < 1:
+        raise ValueError("At least one label is required.")
+    rng = np.random.default_rng(0) if rng is None else rng
+
+    prepared_sample_layers = []
+    for layer in sample_layers:
+        samples = np.asarray(layer.samples, dtype=np.float64)
+        if samples.shape[0] > max_sample_plot:
+            indices = rng.choice(samples.shape[0], size=max_sample_plot, replace=False)
+            samples = samples[indices]
+        prepared_sample_layers.append(
+            SampleCornerLayer(
+                label=layer.label,
+                color=layer.color,
+                samples=samples,
+                hist_lw=layer.hist_lw,
+                contour_lw=layer.contour_lw,
+            )
+        )
+
+    if not weighted_layers and not prepared_sample_layers:
+        figure, axes = plt.subplots(dimensions, dimensions, figsize=(2.45 * dimensions, 2.45 * dimensions))
+        axes = np.asarray(axes).reshape(dimensions, dimensions)
+        apply_corner_axis_labels(axes, labels)
+        for row in range(dimensions):
+            for col in range(row + 1):
+                ax = axes[row, col]
+                if row == col:
+                    ax.axvline(true_values[col], color=true_color, linestyle="--", lw=1.6)
+                else:
+                    ax.axvline(true_values[col], color=true_color, linestyle="--", lw=1.3)
+                    ax.axhline(true_values[row], color=true_color, linestyle="--", lw=1.3)
+        figure.legend(handles=[true_value_handle(true_color)], loc="upper right", bbox_to_anchor=(0.97, 0.96))
+        figure.suptitle(title or "True theta only", y=0.985, fontsize=15)
+        figure.tight_layout()
+        return figure
+
+    ranges = corner_layer_ranges(
+        labels=labels,
+        true_values=true_values,
+        weighted_layers=weighted_layers,
+        sample_layers=prepared_sample_layers,
+    )
+    figure, axes = plt.subplots(dimensions, dimensions, figsize=(2.50 * dimensions, 2.50 * dimensions))
+    axes = np.asarray(axes).reshape(dimensions, dimensions)
+    apply_corner_axis_labels(axes, labels)
+    handles: list[plt.Line2D] = []
+
+    for layer in weighted_layers:
+        weights = np.asarray(layer.weights, dtype=np.float64)
+        weight_cube = weights.reshape(layer.grid_shape)
+        for col in range(dimensions):
+            ax = axes[col, col]
+            sum_axes = tuple(axis for axis in range(dimensions) if axis != col)
+            marginal_mass = weight_cube.sum(axis=sum_axes)
+            density = marginal_mass / np.asarray(layer.widths[col], dtype=np.float64)
+            ax.plot(layer.axes[col], density, color=layer.color, linewidth=layer.hist_lw)
+        for row in range(1, dimensions):
+            for col in range(row):
+                ax = axes[row, col]
+                sum_axes = tuple(axis for axis in range(dimensions) if axis not in {col, row})
+                marginal_mass_2d = weight_cube.sum(axis=sum_axes) if sum_axes else weight_cube
+                density = marginal_mass_2d / (
+                    np.asarray(layer.widths[col], dtype=np.float64)[:, None]
+                    * np.asarray(layer.widths[row], dtype=np.float64)[None, :]
+                )
+                levels = contour_thresholds_by_mass(density, marginal_mass_2d, (0.50, 0.90))
+                if levels:
+                    ax.contour(
+                        layer.axes[col],
+                        layer.axes[row],
+                        density.T,
+                        levels=levels,
+                        colors=[layer.color],
+                        linewidths=layer.contour_lw,
+                    )
+        handles.append(plt.Line2D([0], [0], color=layer.color, lw=2, label=layer.label))
+
+    for layer in prepared_sample_layers:
+        samples = np.asarray(layer.samples, dtype=np.float64)
+        for col in range(dimensions):
+            ax = axes[col, col]
+            hist, edges = np.histogram(samples[:, col], bins=70, range=ranges[col], density=True)
+            centers = 0.5 * (edges[:-1] + edges[1:])
+            ax.step(centers, hist, where="mid", color=layer.color, linewidth=layer.hist_lw)
+        for row in range(1, dimensions):
+            for col in range(row):
+                ax = axes[row, col]
+                counts, x_edges, y_edges = np.histogram2d(
+                    samples[:, col],
+                    samples[:, row],
+                    bins=48,
+                    range=[ranges[col], ranges[row]],
+                )
+                x_widths = np.diff(x_edges)
+                y_widths = np.diff(y_edges)
+                total = max(float(counts.sum()), 1.0)
+                mass = counts / total
+                density = mass / (x_widths[:, None] * y_widths[None, :])
+                levels = contour_thresholds_by_mass(density, mass, (0.50, 0.90))
+                if levels:
+                    x_centers = 0.5 * (x_edges[:-1] + x_edges[1:])
+                    y_centers = 0.5 * (y_edges[:-1] + y_edges[1:])
+                    ax.contour(
+                        x_centers,
+                        y_centers,
+                        density.T,
+                        levels=levels,
+                        colors=[layer.color],
+                        linewidths=layer.contour_lw,
+                    )
+        handles.append(plt.Line2D([0], [0], color=layer.color, lw=2, label=layer.label))
+
+    for row in range(dimensions):
+        for col in range(row + 1):
+            ax = axes[row, col]
+            if row == col:
+                ax.set_xlim(*ranges[col])
+                ax.axvline(true_values[col], color=true_color, linestyle="--", lw=1.2, alpha=0.8)
+            else:
+                ax.set_xlim(*ranges[col])
+                ax.set_ylim(*ranges[row])
+                ax.axvline(true_values[col], color=true_color, linestyle="--", lw=1.0, alpha=0.75)
+                ax.axhline(true_values[row], color=true_color, linestyle="--", lw=1.0, alpha=0.75)
+
+    handles.append(true_value_handle(true_color))
+    figure.legend(handles=handles, loc="upper right", bbox_to_anchor=(0.97, 0.96))
+    figure.subplots_adjust(top=0.88, hspace=0.08, wspace=0.08)
+    if title is None:
+        title_parts = [layer.label for layer in weighted_layers]
+        title_parts.extend(layer.label for layer in prepared_sample_layers)
+        title = " vs ".join(title_parts)
+    figure.suptitle(title, y=0.985, fontsize=15)
+    return figure
 
 
 def sample_summary_rows(samples: np.ndarray) -> list[dict[str, str]]:
@@ -304,49 +561,6 @@ def grid_theta_axes_and_widths(reference: dict[str, object]) -> tuple[list[np.nd
         axes.append(theta_axis)
         widths.append(np.maximum(np.diff(theta_edges), 1e-12))
     return axes, widths
-
-
-def contour_thresholds_by_mass(
-    density: np.ndarray,
-    mass: np.ndarray,
-    masses: tuple[float, ...],
-) -> list[float]:
-    density_flat = np.asarray(density, dtype=np.float64).ravel()
-    mass_flat = np.asarray(mass, dtype=np.float64).ravel()
-    mask = (density_flat > 0.0) & (mass_flat > 0.0) & np.isfinite(density_flat)
-    if not np.any(mask):
-        return []
-    density_positive = density_flat[mask]
-    mass_positive = mass_flat[mask]
-    order = np.argsort(density_positive)[::-1]
-    density_sorted = density_positive[order]
-    mass_sorted = mass_positive[order]
-    cumulative = np.cumsum(mass_sorted)
-    cumulative /= cumulative[-1]
-    thresholds = []
-    for mass in sorted(masses, reverse=True):
-        index = int(np.searchsorted(cumulative, mass, side="left"))
-        index = min(index, density_sorted.size - 1)
-        thresholds.append(float(density_sorted[index]))
-    return sorted(set(thresholds))
-
-
-def apply_corner_axis_labels(axes: np.ndarray, labels: list[str]) -> None:
-    for row in range(3):
-        for col in range(3):
-            ax = axes[row, col]
-            if row < col:
-                ax.axis("off")
-                continue
-            if row == 2:
-                ax.set_xlabel(labels[col])
-            else:
-                ax.set_xticklabels([])
-            if col == 0 and row > 0:
-                ax.set_ylabel(labels[row])
-            else:
-                ax.set_yticklabels([])
-            ax.grid(alpha=0.14)
 
 
 def stage1_config_from_dict(config: dict[str, object]) -> Stage1Config:
@@ -1301,160 +1515,71 @@ class NPEPosteriorViewer:
         mcmc_samples: np.ndarray | None,
     ) -> str:
         labels = [r"$A$", r"$k$", r"$\sigma$"]
-
-        weighted_layers = []
+        weighted_layers: list[WeightedCornerLayer] = []
         if grid_reference is not None:
-            weighted_layers.append(("Grid reference", GRID_COLOR, grid_reference, 1.9, 1.55))
-        sample_layers = []
+            grid_axes, grid_widths = grid_theta_axes_and_widths(grid_reference)
+            grid_size = int(grid_reference["grid_size"])
+            weighted_layers.append(
+                WeightedCornerLayer(
+                    label="Grid reference",
+                    color=GRID_COLOR,
+                    values=np.asarray(grid_reference["theta_grid"], dtype=np.float64),
+                    weights=np.asarray(grid_reference["weights"], dtype=np.float64),
+                    grid_shape=(grid_size, grid_size, grid_size),
+                    axes=tuple(grid_axes),
+                    widths=tuple(grid_widths),
+                    hist_lw=1.9,
+                    contour_lw=1.55,
+                )
+            )
+        sample_layers: list[SampleCornerLayer] = []
         for npe_layer in npe_layers:
             if "reference" in npe_layer:
+                reference = npe_layer["reference"]
+                grid_axes, grid_widths = grid_theta_axes_and_widths(reference)
+                grid_size = int(reference["grid_size"])
                 weighted_layers.append(
-                    (
-                        str(npe_layer["label"]),
-                        str(npe_layer["color"]),
-                        npe_layer["reference"],
-                        1.7,
-                        1.4,
+                    WeightedCornerLayer(
+                        label=str(npe_layer["label"]),
+                        color=str(npe_layer["color"]),
+                        values=np.asarray(reference["theta_grid"], dtype=np.float64),
+                        weights=np.asarray(reference["weights"], dtype=np.float64),
+                        grid_shape=(grid_size, grid_size, grid_size),
+                        axes=tuple(grid_axes),
+                        widths=tuple(grid_widths),
+                        hist_lw=1.7,
+                        contour_lw=1.4,
                     )
                 )
             else:
-                plot_samples = np.asarray(npe_layer["samples"], dtype=np.float64)
-                if plot_samples.shape[0] > 12_000:
-                    indices = self.rng.choice(plot_samples.shape[0], size=12_000, replace=False)
-                    plot_samples = plot_samples[indices]
-                sample_layers.append((str(npe_layer["label"]), str(npe_layer["color"]), plot_samples, 1.5, 1.35))
-        if mcmc_samples is not None:
-            mcmc_plot = mcmc_samples
-            if mcmc_plot.shape[0] > 12_000:
-                indices = self.rng.choice(mcmc_plot.shape[0], size=12_000, replace=False)
-                mcmc_plot = mcmc_plot[indices]
-            sample_layers.append(("MCMC posterior", MCMC_COLOR, mcmc_plot, 1.5, 1.35))
-
-        if not weighted_layers and not sample_layers:
-            figure, axes = plt.subplots(3, 3, figsize=(7.2, 7.2))
-            for row in range(3):
-                for col in range(3):
-                    ax = axes[row, col]
-                    if row < col:
-                        ax.axis("off")
-                        continue
-                    if row == col:
-                        ax.axvline(true_theta[col], color=GRID_COLOR, linestyle="--", lw=1.6)
-                    else:
-                        ax.axvline(true_theta[col], color=GRID_COLOR, linestyle="--", lw=1.3)
-                        ax.axhline(true_theta[row], color=GRID_COLOR, linestyle="--", lw=1.3)
-                    ax.grid(alpha=0.16)
-                    ax.set_xticks([])
-                    ax.set_yticks([])
-                    if row == 2:
-                        ax.set_xlabel(labels[col])
-                    if col == 0 and row > 0:
-                        ax.set_ylabel(labels[row])
-            figure.legend(handles=[true_theta_legend_handle()], loc="upper right", bbox_to_anchor=(0.97, 0.96))
-            figure.suptitle("True theta only", y=0.985, fontsize=15)
-            figure.tight_layout()
-            return figure_to_data_uri(figure, dpi=145)
-
-        ranges = []
-        for index in range(3):
-            bounds = [float(true_theta[index])]
-            for _, _, reference, _, _ in weighted_layers:
-                grid_values = np.asarray(reference["theta_grid"], dtype=np.float64)[:, index]
-                grid_weights = np.asarray(reference["weights"], dtype=np.float64)
-                bounds.extend(weighted_quantile(grid_values, grid_weights, [0.002, 0.998]).tolist())
-            for _, _, samples, _, _ in sample_layers:
-                bounds.extend(np.quantile(samples[:, index], [0.002, 0.998]).tolist())
-            low = min(bounds)
-            high = max(bounds)
-            width = max(high - low, 1e-9)
-            ranges.append((low - 0.08 * width, high + 0.08 * width))
-
-        figure, axes = plt.subplots(3, 3, figsize=(7.4, 7.4))
-        apply_corner_axis_labels(axes, labels)
-        handles = []
-
-        for label, color, reference, hist_lw, contour_lw in weighted_layers:
-            weights = np.asarray(reference["weights"], dtype=np.float64)
-            grid_size = int(reference["grid_size"])
-            weight_cube = weights.reshape(grid_size, grid_size, grid_size)
-            theta_axes, theta_widths = grid_theta_axes_and_widths(reference)
-            for col in range(3):
-                ax = axes[col, col]
-                sum_axes = tuple(axis for axis in range(3) if axis != col)
-                marginal_mass = weight_cube.sum(axis=sum_axes)
-                density = marginal_mass / theta_widths[col]
-                ax.plot(theta_axes[col], density, color=color, linewidth=hist_lw)
-            for row in range(1, 3):
-                for col in range(row):
-                    ax = axes[row, col]
-                    sum_axes = tuple(axis for axis in range(3) if axis not in {col, row})
-                    marginal_mass_2d = weight_cube.sum(axis=sum_axes)
-                    density = marginal_mass_2d / (theta_widths[col][:, None] * theta_widths[row][None, :])
-                    levels = contour_thresholds_by_mass(density, marginal_mass_2d, (0.50, 0.90))
-                    if levels:
-                        ax.contour(
-                            theta_axes[col],
-                            theta_axes[row],
-                            density.T,
-                            levels=levels,
-                            colors=[color],
-                            linewidths=contour_lw,
-                        )
-            handles.append(plt.Line2D([0], [0], color=color, lw=2, label=label))
-
-        for label, color, samples, hist_lw, contour_lw in sample_layers:
-            for col in range(3):
-                ax = axes[col, col]
-                hist, edges = np.histogram(samples[:, col], bins=70, range=ranges[col], density=True)
-                centers = 0.5 * (edges[:-1] + edges[1:])
-                ax.step(centers, hist, where="mid", color=color, linewidth=hist_lw)
-            for row in range(1, 3):
-                for col in range(row):
-                    ax = axes[row, col]
-                    counts, x_edges, y_edges = np.histogram2d(
-                        samples[:, col],
-                        samples[:, row],
-                        bins=48,
-                        range=[ranges[col], ranges[row]],
+                sample_layers.append(
+                    SampleCornerLayer(
+                        label=str(npe_layer["label"]),
+                        color=str(npe_layer["color"]),
+                        samples=np.asarray(npe_layer["samples"], dtype=np.float64),
+                        hist_lw=1.5,
+                        contour_lw=1.35,
                     )
-                    x_widths = np.diff(x_edges)
-                    y_widths = np.diff(y_edges)
-                    total = max(float(counts.sum()), 1.0)
-                    mass = counts / total
-                    density = mass / (x_widths[:, None] * y_widths[None, :])
-                    levels = contour_thresholds_by_mass(density, mass, (0.50, 0.90))
-                    if levels:
-                        x_centers = 0.5 * (x_edges[:-1] + x_edges[1:])
-                        y_centers = 0.5 * (y_edges[:-1] + y_edges[1:])
-                        ax.contour(
-                            x_centers,
-                            y_centers,
-                            density.T,
-                            levels=levels,
-                            colors=[color],
-                            linewidths=contour_lw,
-                        )
-            handles.append(plt.Line2D([0], [0], color=color, lw=2, label=label))
+                )
+        if mcmc_samples is not None:
+            sample_layers.append(
+                SampleCornerLayer(
+                    label="MCMC posterior",
+                    color=MCMC_COLOR,
+                    samples=np.asarray(mcmc_samples, dtype=np.float64),
+                    hist_lw=1.5,
+                    contour_lw=1.35,
+                )
+            )
 
-        for row in range(3):
-            for col in range(row + 1):
-                ax = axes[row, col]
-                if row == col:
-                    ax.set_xlim(*ranges[col])
-                    ax.axvline(true_theta[col], color=GRID_COLOR, linestyle="--", lw=1.2, alpha=0.8)
-                else:
-                    ax.set_xlim(*ranges[col])
-                    ax.set_ylim(*ranges[row])
-                    ax.axvline(true_theta[col], color=GRID_COLOR, linestyle="--", lw=1.0, alpha=0.75)
-                    ax.axhline(true_theta[row], color=GRID_COLOR, linestyle="--", lw=1.0, alpha=0.75)
-
-        handles.append(true_theta_legend_handle())
-        figure.legend(handles=handles, loc="upper right", bbox_to_anchor=(0.97, 0.96))
-        figure.subplots_adjust(top=0.88, hspace=0.08, wspace=0.08)
-        title_parts = [label for label, _, _, _, _ in weighted_layers]
-        title_parts.extend(label for label, _, _, _, _ in sample_layers)
-        title = " vs ".join(title_parts)
-        figure.suptitle(title, y=0.985, fontsize=15)
+        figure = render_corner_layers(
+            labels=labels,
+            true_values=np.asarray(true_theta, dtype=np.float64),
+            weighted_layers=weighted_layers,
+            sample_layers=sample_layers,
+            true_color=GRID_COLOR,
+            rng=self.rng,
+        )
         return figure_to_data_uri(figure, dpi=145)
 
     def render(

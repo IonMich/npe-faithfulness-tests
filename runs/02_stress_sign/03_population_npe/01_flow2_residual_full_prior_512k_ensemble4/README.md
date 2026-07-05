@@ -88,6 +88,21 @@ Conclusion: this is a decent full-prior sign result and is close to the folded
 NLL floor, but it has not cleanly reached the floor. The measured gap is still
 about `2.64` combined standard errors above the entropy-floor estimate.
 
+![Sign population NPE training loss](../../../00_shared_assets/readme_sign_posteriors/sign_population_training_loss.png)
+
+The source run skipped per-epoch validation. The curves are member training NLLs
+in folded target units; the marker is the final 1M-example full-prior validation
+NLL.
+
+## Posterior-Shape Check
+
+A fresh full-prior signal was drawn with seed `20260707`, draw index `1`, giving
+\(\theta=(1.419,-1.175)\) and \(x=(1.956,-0.932)\). Against a dense exact grid,
+mean normalized Wasserstein in folded diagnostic coordinates is `0.02112` for
+MCMC and `0.02163` for this population NPE ensemble.
+
+![Sign population exact grid, MCMC, and NPE posterior overlay](../../../00_shared_assets/readme_sign_posteriors/sign_population_prior_signal_corner.png)
+
 ## Artifacts
 
 - Ensemble summary: `results/sign_population_ensemble_summary.json`
