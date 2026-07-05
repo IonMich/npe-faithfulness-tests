@@ -256,6 +256,12 @@ def true_value_handle(color: str) -> plt.Line2D:
     return plt.Line2D([0], [0], color=color, lw=1.4, linestyle="--", label="True theta")
 
 
+def format_corner_title(title: str, *, max_line_chars: int = 72) -> tuple[str, int, float]:
+    if "\n" in title or len(title) <= max_line_chars:
+        return title, 15, 0.88
+    return title, 12, 0.88
+
+
 def render_corner_layers(
     *,
     labels: list[str],
@@ -300,8 +306,9 @@ def render_corner_layers(
                 else:
                     ax.axvline(true_values[col], color=true_color, linestyle="--", lw=1.3)
                     ax.axhline(true_values[row], color=true_color, linestyle="--", lw=1.3)
+        formatted_title, title_fontsize, _ = format_corner_title(title or "True theta only")
         figure.legend(handles=[true_value_handle(true_color)], loc="upper right", bbox_to_anchor=(0.97, 0.96))
-        figure.suptitle(title or "True theta only", y=0.985, fontsize=15)
+        figure.suptitle(formatted_title, y=0.985, fontsize=title_fontsize)
         figure.tight_layout()
         return figure
 
@@ -395,12 +402,13 @@ def render_corner_layers(
 
     handles.append(true_value_handle(true_color))
     figure.legend(handles=handles, loc="upper right", bbox_to_anchor=(0.97, 0.96))
-    figure.subplots_adjust(top=0.88, hspace=0.08, wspace=0.08)
     if title is None:
         title_parts = [layer.label for layer in weighted_layers]
         title_parts.extend(layer.label for layer in prepared_sample_layers)
         title = " vs ".join(title_parts)
-    figure.suptitle(title, y=0.985, fontsize=15)
+    formatted_title, title_fontsize, top = format_corner_title(title)
+    figure.subplots_adjust(top=top, hspace=0.08, wspace=0.08)
+    figure.suptitle(formatted_title, y=0.985, fontsize=title_fontsize)
     return figure
 
 
@@ -1572,12 +1580,21 @@ class NPEPosteriorViewer:
                 )
             )
 
+        title_parts = []
+        if grid_reference is not None:
+            title_parts.append("grid")
+        if npe_layers:
+            title_parts.append("NPE")
+        if mcmc_samples is not None:
+            title_parts.append("MCMC")
+        title = f"Posterior comparison: {', '.join(title_parts)}" if title_parts else None
         figure = render_corner_layers(
             labels=labels,
             true_values=np.asarray(true_theta, dtype=np.float64),
             weighted_layers=weighted_layers,
             sample_layers=sample_layers,
             true_color=GRID_COLOR,
+            title=title,
             rng=self.rng,
         )
         return figure_to_data_uri(figure, dpi=145)

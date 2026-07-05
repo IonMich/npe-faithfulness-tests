@@ -39,6 +39,11 @@
       "training_seconds": 167.85289399989415
     }
   ],
-  "note": "The source run skipped per-epoch validation. Curves are training NLL per member in folded target units; the marker is the final 1M-example full-prior validation NLL.",
-  "source": "Full-prior sign-symmetry population NPE using the single-decay Flow2 residual NSF/randperm training recipe, with folded target (abs(theta1), theta2)."
+  "note": "The source run skipped per-epoch validation. Curves are training NLL per member in folded target units against total training wall time; the marker is the final 1M-example full-prior validation NLL.",
+  "source": "Full-prior sign-symmetry population NPE using the single-decay Flow2 residual NSF/randperm training recipe, with folded target (abs(theta1), theta2).",
+  "training_wall_seconds": 663.8326961250277,
+  "wall_time_axis_seconds": {
+    "final_epoch": 663.8326961250277,
+    "first_epoch": 44.10600219420676
+  }
 }

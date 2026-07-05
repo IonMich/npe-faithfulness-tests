@@ -65,13 +65,13 @@
     "grid": {
       "grid_points": 216000,
       "grid_size": 60,
-      "max_edge_mass": 7.654602927749656e-07
+      "max_edge_mass": 1.2119164053693465e-06
     },
     "mcmc": {
       "acceptance_rate": 0.8617239583333334,
       "convergence_ok": false,
       "max_rhat": 1.0717409322409388,
-      "mean_normalized_wasserstein": 0.07500189407655371,
+      "mean_normalized_wasserstein": 0.07530586845801968,
       "min_bulk_ess": 81.88147413432914,
       "min_tail_ess": 110.15849603237865
     },
@@ -80,8 +80,8 @@
       "mode": "prior_predictive"
     },
     "npe_mean_normalized_wasserstein": {
-      "convex_weighted_checkpoint_ensemble": 0.06147230031621643,
-      "flow2_residual_nsf_ensemble4": 0.06440091663907004
+      "convex_weighted_checkpoint_ensemble": 0.06575895734083496,
+      "flow2_residual_nsf_ensemble4": 0.06291773329473764
     },
     "posterior_samples": 7000,
     "selected_models": [

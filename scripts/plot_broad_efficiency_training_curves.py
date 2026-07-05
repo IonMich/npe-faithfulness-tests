@@ -380,17 +380,40 @@ def sign_population_rows(summary: dict) -> list[dict[str, object]]:
         history = item["history"]
         z_log_det = float(item["z_log_det"])
         train_nll = np.asarray(history["train_nll"], dtype=np.float64) + z_log_det
+        if isinstance(history.get("train_seconds"), list):
+            seconds = np.cumsum(np.asarray(history["train_seconds"], dtype=np.float64))
+        elif isinstance(history.get("epoch_seconds"), list):
+            seconds = np.cumsum(np.asarray(history["epoch_seconds"], dtype=np.float64))
+        else:
+            seconds = np.linspace(
+                float(item["training_seconds"]) / float(train_nll.size),
+                float(item["training_seconds"]),
+                train_nll.size,
+            )
+        if seconds.size != train_nll.size:
+            seconds = np.linspace(
+                float(item["training_seconds"]) / float(train_nll.size),
+                float(item["training_seconds"]),
+                train_nll.size,
+            )
         rows.append(
             {
                 "member_index": int(item["member_index"]),
                 "seed": int(item["seed"]),
-                "epochs": np.arange(1, train_nll.size + 1, dtype=np.int64),
+                "seconds": seconds,
                 "train_nll_folded_units": train_nll,
                 "training_seconds": float(item["training_seconds"]),
                 "final_train_nll_folded_units": float(item["final_train_nll_folded_units"]),
             }
         )
     return rows
+
+
+def sign_population_wall_seconds(summary: dict, rows: list[dict[str, object]]) -> float:
+    value = summary.get("wall_seconds")
+    if value is not None:
+        return float(value)
+    return float(sum(float(row["training_seconds"]) for row in rows))
 
 
 def write_sign_training_summary(
@@ -400,12 +423,19 @@ def write_sign_training_summary(
     rows: list[dict[str, object]],
     figure_path: Path,
     mean_curve: np.ndarray,
+    wall_axis: np.ndarray,
+    wall_seconds: float,
 ) -> None:
     evaluation = source_summary["evaluation"]
     output = {
         "source": source_summary["description"],
         "figure": figure_path,
         "epochs": int(mean_curve.size),
+        "training_wall_seconds": float(wall_seconds),
+        "wall_time_axis_seconds": {
+            "first_epoch": float(wall_axis[0]),
+            "final_epoch": float(wall_axis[-1]),
+        },
         "members": [
             {
                 "member_index": row["member_index"],
@@ -429,8 +459,8 @@ def write_sign_training_summary(
         },
         "note": (
             "The source run skipped per-epoch validation. Curves are training "
-            "NLL per member in folded target units; the marker is the final "
-            "1M-example full-prior validation NLL."
+            "NLL per member in folded target units against total training wall "
+            "time; the marker is the final 1M-example full-prior validation NLL."
         ),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -446,7 +476,17 @@ def plot_sign_population(
     source_summary = load_json(ensemble_summary)
     rows = sign_population_rows(source_summary)
     matrix = np.vstack([row["train_nll_folded_units"] for row in rows])
-    epochs = np.asarray(rows[0]["epochs"], dtype=np.int64)
+    seconds_stack = np.vstack([row["seconds"] for row in rows])
+    wall_seconds = sign_population_wall_seconds(source_summary, rows)
+    wall_axis = seconds_stack.mean(axis=0)
+    if wall_axis[-1] > 0.0:
+        wall_axis = wall_axis * (wall_seconds / wall_axis[-1])
+    for row in rows:
+        seconds = np.asarray(row["seconds"], dtype=np.float64)
+        if seconds[-1] > 0.0:
+            row["wall_axis"] = seconds * (wall_seconds / seconds[-1])
+        else:
+            row["wall_axis"] = wall_axis
     mean_curve = matrix.mean(axis=0)
     min_curve = matrix.min(axis=0)
     max_curve = matrix.max(axis=0)
@@ -460,19 +500,19 @@ def plot_sign_population(
     colors = ["#6b7280", "#9ca3af", "#4b5563", "#737373"]
     for row, color in zip(rows, colors, strict=False):
         ax.plot(
-            row["epochs"],
+            row["wall_axis"],
             row["train_nll_folded_units"],
             color=color,
             lw=1.15,
             alpha=0.72,
             label=f"member {row['member_index']} train",
         )
-    ax.fill_between(epochs, min_curve, max_curve, color="#0f766e", alpha=0.10, linewidth=0)
-    ax.plot(epochs, mean_curve, color="#0f766e", lw=2.6, label="member mean train")
+    ax.fill_between(wall_axis, min_curve, max_curve, color="#0f766e", alpha=0.10, linewidth=0)
+    ax.plot(wall_axis, mean_curve, color="#0f766e", lw=2.6, label="member mean train")
     ax.axhspan(floor - floor_se, floor + floor_se, color="#172033", alpha=0.12, label="entropy floor +/- 1 SE")
     ax.axhline(floor, color="#172033", lw=1.8)
     ax.errorbar(
-        [int(epochs[-1]) + 0.35],
+        [wall_seconds],
         [ensemble_nll],
         yerr=[ensemble_se],
         fmt="o",
@@ -481,12 +521,16 @@ def plot_sign_population(
         capsize=4,
         label="final full-prior validation",
     )
-    ax.set_xlabel("epoch")
+    ax.set_xlabel("training wall seconds")
     ax.set_ylabel("NLL in folded target units")
-    ax.set_title("Sign population NPE training loss")
+    ax.set_title("Sign population NPE loss by wall time")
     ax.grid(alpha=0.22)
+    ax.set_xscale("log")
+    ax.set_xticks([40, 80, 160, 320, 640])
+    ax.xaxis.set_major_formatter(mticker.ScalarFormatter())
+    ax.xaxis.set_minor_formatter(mticker.NullFormatter())
     ax.legend(frameon=False, fontsize=9)
-    ax.set_xlim(1, int(epochs[-1]) + 0.8)
+    ax.set_xlim(left=max(25.0, float(wall_axis[0]) * 0.75), right=float(wall_seconds) * 1.10)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
@@ -497,6 +541,8 @@ def plot_sign_population(
         rows=rows,
         figure_path=output_path,
         mean_curve=mean_curve,
+        wall_axis=wall_axis,
+        wall_seconds=wall_seconds,
     )
     return output_path
 
