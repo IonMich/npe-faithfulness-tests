@@ -961,10 +961,21 @@ depth, trying MAF, adding a simple two-component flow mixture, adding the tested
 augmented context, switching to the tested rate-sum target, and upweighting the
 high-SNR prior tail have all stayed well above the full-prior floor.
 
-Best posterior:
-[two_exp_ordered_residual run](runs/06_two_exponential/01_npe_flow/12_npe_flow_stress_tests_two_exp_ordered_residual/README.md).
+Posterior-shape diagnostics below use the current best-NLL equal-5 mixture,
+not the old fixed-signal artifact. The easy case is an ordinary full-prior
+prior-predictive draw. The difficult case follows the single-decay convention:
+a low-prior-density stress draw, here `4.27` prior standard deviations from the
+raw prior mean with log prior density `9.125` below the prior mean. Because this
+posterior is five-dimensional, the visual reference is long MCMC rather than a
+grid. The NPE mean normalized marginal Wasserstein distance to MCMC is `0.0417`
+on the easy case and `0.0599` on the difficult case.
 
-![Ordered two-exponential best posterior overlay](runs/00_shared_assets/readme_model_overlays/two_exp_ordered_best_posterior_overlay.png)
+![Two-exponential easy full-prior posterior overlay](runs/00_shared_assets/readme_two_exp_posteriors/two_exp_best_nll_easy_posterior_corner.png)
+
+![Two-exponential low-prior-density posterior overlay](runs/00_shared_assets/readme_two_exp_posteriors/two_exp_best_nll_difficult_posterior_corner.png)
+
+The generated metadata for these two diagnostic views is stored in
+[two_exp_best_nll_posterior_summary.json](runs/00_shared_assets/readme_two_exp_posteriors/two_exp_best_nll_posterior_summary.json).
 
 ## Main Reports
 

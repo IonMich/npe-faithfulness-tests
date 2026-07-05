@@ -307,7 +307,7 @@ def strip_math_delimiters(label: str) -> str:
 
 def stacked_interval_title(row: dict[str, str]) -> str:
     parameter = strip_math_delimiters(row["parameter"])
-    return rf"${parameter} = {row['median']}^{{+{row['plus']}}}_{{-{row['minus']}}}$"
+    return rf"${parameter}$" + "\n" + rf"${row['median']}^{{+{row['plus']}}}_{{-{row['minus']}}}$"
 
 
 def add_diagonal_interval_titles(
@@ -320,18 +320,20 @@ def add_diagonal_interval_titles(
     if summary_layer is None:
         return
     rows = sample_interval_rows(labels=labels, layer=summary_layer)
-    fontsize = 7.1 if len(labels) >= 6 else 8.3
+    fontsize = 6.5 if len(labels) >= 5 else 7.8
     for index, row in enumerate(rows):
         ax = axes[index, index]
         ax.text(
             0.5,
-            1.01,
+            0.98,
             stacked_interval_title(row),
             transform=ax.transAxes,
             ha="center",
-            va="bottom",
+            va="top",
             fontsize=fontsize,
             color="#111827",
+            linespacing=0.95,
+            bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.76, "pad": 1.0},
             clip_on=False,
         )
 

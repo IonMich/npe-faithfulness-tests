@@ -13,7 +13,15 @@ from scipy.special import logsumexp
 
 import npe_stage1_decay as stage1
 from calibrate_sign_target import build_grid_reference, compare_samples_to_reference, mode_summary
-from npe_flow_stress_tests import make_banana_case, make_label_switch_case, make_linear6_case, make_sign_case, run_random_walk_mcmc
+from npe_flow_stress_tests import (
+    arviz_diagnostics as stress_arviz_diagnostics,
+    make_banana_case,
+    make_label_switch_case,
+    make_linear6_case,
+    make_sign_case,
+    make_two_exp_case,
+    run_random_walk_mcmc,
+)
 from npe_posterior_viewer import (
     DEFAULT_BEST_BROAD_ENSEMBLE_SUMMARY,
     DEFAULT_BEST_BROAD_EFFICIENCY_MODEL,
@@ -35,11 +43,21 @@ from train_sign_population_npe import (
     banana_context,
     banana_log_evidence,
     banana_log_likelihood,
+    evaluate_model_log_prob,
     label_log_likelihood_np,
     label_raw_prior_logpdf,
     linear6_log_py_given_log_sigma,
     linear6_sufficient_stats,
+    sample_two_exp_population_raw,
     sort_label_target,
+    TWO_EXP_PRIOR_MEAN,
+    TWO_EXP_PRIOR_STD,
+    two_exp_exact_posterior_nll,
+    two_exp_log_likelihood_batched,
+    two_exp_log_proposal_density,
+    two_exp_raw_prior_logpdf_batched,
+    two_exp_sample_proposal,
+    two_exp_target_transform,
 )
 
 
@@ -50,6 +68,7 @@ SIGN_OUTPUT_DIR = ROOT / "runs/00_shared_assets/readme_sign_posteriors"
 BANANA_OUTPUT_DIR = ROOT / "runs/00_shared_assets/readme_banana_posteriors"
 LABEL_SWITCH_OUTPUT_DIR = ROOT / "runs/00_shared_assets/readme_label_switch_posteriors"
 LINEAR6_OUTPUT_DIR = ROOT / "runs/00_shared_assets/readme_linear6_posteriors"
+TWO_EXP_OUTPUT_DIR = ROOT / "runs/00_shared_assets/readme_two_exp_posteriors"
 SIGN_ENSEMBLE_SUMMARY = (
     ROOT
     / "runs/02_stress_sign/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/"
@@ -70,6 +89,26 @@ LINEAR6_ENSEMBLE_SUMMARY = (
     / "runs/05_stress_linear6/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/"
     "results/linear6_population_ensemble_summary.json"
 )
+TWO_EXP_ENSEMBLE_SUMMARY = (
+    ROOT
+    / "runs/06_two_exponential/03_population_npe/21_flow2_e30_plus_high_snr_weighted_equal5_eval/"
+    "results/two_exp_population_ensemble_summary.json"
+)
+TWO_EXP_TARGET_LABELS = [
+    r"$\log(A_1+A_2)$",
+    r"$\log(A_1/A_2)$",
+    r"$\log k_1$",
+    r"$\log\Delta k$",
+    r"$\log\sigma$",
+]
+TWO_EXP_TARGET_NAMES = [
+    "log_amplitude_sum",
+    "log_amplitude_ratio",
+    "log_k1",
+    "log_delta_k",
+    "log_sigma",
+]
+TWO_EXP_LOW_PRIOR_OFFSET = np.array([2.0, -2.0, 2.0, -2.0, 1.5], dtype=np.float64)
 LOG_2PI = np.log(2.0 * np.pi)
 
 MODEL_ID_MAP = {
@@ -112,6 +151,13 @@ def json_ready(value: object) -> object:
     if isinstance(value, (list, tuple)):
         return [json_ready(item) for item in value]
     return value
+
+
+def repo_relative(path: Path) -> str:
+    try:
+        return str(Path(path).relative_to(ROOT))
+    except ValueError:
+        return str(path)
 
 
 def metric_value(metrics: dict[str, object] | None) -> float | None:
@@ -1050,11 +1096,373 @@ def render_linear6_population_case(args: argparse.Namespace) -> None:
     print(summary_path)
 
 
+@torch.no_grad()
+def evaluate_stage1_ensemble_log_prob(
+    *,
+    members: list[dict[str, Any]],
+    x_context: np.ndarray,
+    z_target: np.ndarray,
+    device: torch.device,
+    batch_size: int,
+) -> np.ndarray:
+    if not members:
+        raise ValueError("Cannot evaluate an empty ensemble.")
+    member_log_probs = []
+    for member in members:
+        chunks = []
+        for start in range(0, x_context.shape[0], batch_size):
+            stop = min(start + batch_size, x_context.shape[0])
+            log_prob = evaluate_model_log_prob(
+                model=member["model"],
+                x_raw=x_context[start:stop],
+                z_raw=z_target[start:stop],
+                x_mean=np.asarray(member["x_mean"], dtype=np.float64),
+                x_std=np.asarray(member["x_std"], dtype=np.float64),
+                z_mean=np.asarray(member["z_mean"], dtype=np.float64),
+                z_std=np.asarray(member["z_std"], dtype=np.float64),
+                device=device,
+            )
+            chunks.append(log_prob.detach().cpu().numpy().astype(np.float64))
+        member_log_probs.append(np.concatenate(chunks, axis=0))
+    return logsumexp(np.stack(member_log_probs, axis=0), axis=0) - np.log(len(members))
+
+
+def build_two_exp_readme_cases(
+    *,
+    args: argparse.Namespace,
+    members: list[dict[str, Any]],
+    device: torch.device,
+) -> dict[str, object]:
+    print("Building two-exp posterior cases: one prior-predictive, one low-prior stress draw...")
+    draw_index = int(args.draw_index)
+    if draw_index < 0:
+        raise ValueError("--draw-index must be nonnegative.")
+
+    x_prior_all, x_context_prior_all, z_prior_all = sample_two_exp_population_raw(
+        n=draw_index + 1,
+        seed=int(args.signal_seed),
+    )
+    case = make_two_exp_case(ordered=True)
+    low_prior_offset = np.asarray(args.two_exp_low_prior_offset, dtype=np.float64)
+    low_prior_z = TWO_EXP_PRIOR_MEAN + TWO_EXP_PRIOR_STD * low_prior_offset
+    low_prior_rng = np.random.default_rng(int(args.two_exp_low_prior_noise_seed))
+    low_prior_x = case.simulate_x(low_prior_z[None, :], low_prior_rng)[0].astype(np.float32)
+    low_prior_context = case.context(low_prior_x[None, :])[0].astype(np.float32)
+    prior_mahalanobis = float(np.linalg.norm(low_prior_offset))
+
+    raw_cases = {
+        "easy": {
+            "mode": "prior_predictive",
+            "source": {
+                "signal_seed": int(args.signal_seed),
+                "draw_index": draw_index,
+            },
+            "z_raw": z_prior_all[draw_index],
+            "x_raw": x_prior_all[draw_index],
+            "x_context": x_context_prior_all[draw_index],
+        },
+        "difficult": {
+            "mode": "low_prior_stress",
+            "source": {
+                "standardized_prior_offset": low_prior_offset,
+                "prior_mahalanobis": prior_mahalanobis,
+                "log_prior_density_delta_vs_mean": float(-0.5 * prior_mahalanobis * prior_mahalanobis),
+                "noise_seed": int(args.two_exp_low_prior_noise_seed),
+            },
+            "z_raw": low_prior_z.astype(np.float32),
+            "x_raw": low_prior_x,
+            "x_context": low_prior_context,
+        },
+    }
+
+    case_names = list(raw_cases)
+    x_raw = np.stack([np.asarray(raw_cases[name]["x_raw"], dtype=np.float32) for name in case_names], axis=0)
+    x_context = np.stack([np.asarray(raw_cases[name]["x_context"], dtype=np.float32) for name in case_names], axis=0)
+    z_raw = np.stack([np.asarray(raw_cases[name]["z_raw"], dtype=np.float32) for name in case_names], axis=0)
+    z_target = two_exp_target_transform(z_raw, target=str(args.two_exp_target))
+    ensemble_log_prob = evaluate_stage1_ensemble_log_prob(
+        members=members,
+        x_context=x_context,
+        z_target=z_target,
+        device=device,
+        batch_size=int(args.eval_batch_size),
+    )
+    ensemble_nll = -ensemble_log_prob
+    exact_nll, diagnostics = two_exp_exact_posterior_nll(
+        x_raw=x_raw,
+        x_context=x_context,
+        z_raw=z_raw,
+        floor_method="importance",
+        importance_samples=int(args.two_exp_selection_importance_samples),
+        importance_seed=int(args.two_exp_importance_seed),
+        importance_batch_size=int(args.two_exp_importance_batch_size),
+        prior_mixture=float(args.two_exp_prior_mixture),
+        proposal_inflation=float(args.two_exp_proposal_inflation),
+        smc_particles=int(args.two_exp_smc_particles),
+        smc_beta_steps=int(args.two_exp_smc_beta_steps),
+        smc_mh_steps=int(args.two_exp_smc_mh_steps),
+        smc_seed=int(args.two_exp_smc_seed),
+        smc_batch_size=int(args.two_exp_smc_batch_size),
+        smc_step_scale=float(args.two_exp_smc_step_scale),
+    )
+    gap = ensemble_nll - exact_nll
+
+    cases = {}
+    for index, name in enumerate(case_names):
+        raw_case = raw_cases[name]
+        cases[name] = {
+            "mode": raw_case["mode"],
+            "source": raw_case["source"],
+            "npe_nll": float(ensemble_nll[index]),
+            "reference_nll": float(exact_nll[index]),
+            "paired_gap": float(gap[index]),
+            "z_raw": z_raw[index],
+            "z_target": z_target[index],
+            "x_raw": x_raw[index],
+            "x_context": x_context[index],
+        }
+        print(
+            f"Built {name} case mode={raw_case['mode']} "
+            f"NPE={ensemble_nll[index]:.5f} reference={exact_nll[index]:.5f} gap={gap[index]:.5f}"
+        )
+
+    return {
+        "case_definition": (
+            "The easy case is an ordinary prior-predictive draw. The difficult case "
+            "matches the single-decay convention: a deterministic low-prior-density "
+            "draw in raw prior coordinates, not the largest held-out NLL miss."
+        ),
+        "case_importance_samples": int(args.two_exp_selection_importance_samples),
+        "importance_diagnostics": diagnostics,
+        "gap_summary": {
+            "mean": float(np.mean(gap)),
+            "median": float(np.median(gap)),
+            "min": float(np.min(gap)),
+            "max": float(np.max(gap)),
+            "mean_abs": float(np.mean(np.abs(gap))),
+        },
+        "cases": cases,
+    }
+
+
+def sample_two_exp_importance_reference(
+    *,
+    x_raw: np.ndarray,
+    x_context: np.ndarray,
+    z_raw: np.ndarray,
+    target: str,
+    samples: int,
+    resamples: int,
+    seed: int,
+    prior_mixture: float,
+    proposal_inflation: float,
+) -> tuple[np.ndarray, dict[str, object]]:
+    proposal, component_weights = two_exp_sample_proposal(
+        np.asarray(x_context, dtype=np.float64)[None, :],
+        np.asarray(z_raw, dtype=np.float64)[None, :],
+        samples=int(samples),
+        seed=int(seed),
+        prior_mixture=float(prior_mixture),
+        inflation=float(proposal_inflation),
+    )
+    log_integrand = two_exp_raw_prior_logpdf_batched(proposal) + two_exp_log_likelihood_batched(
+        np.asarray(x_raw, dtype=np.float64)[None, :],
+        proposal,
+    )
+    log_q = two_exp_log_proposal_density(
+        proposal,
+        np.asarray(x_context, dtype=np.float64)[None, :],
+        np.asarray(z_raw, dtype=np.float64)[None, :],
+        weights=component_weights,
+        prior_mixture=float(prior_mixture),
+        inflation=float(proposal_inflation),
+    )
+    log_weights = log_integrand[0] - log_q[0]
+    log_norm = float(logsumexp(log_weights))
+    probabilities = np.exp(log_weights - log_norm)
+    rng = np.random.default_rng(seed + 17)
+    indices = rng.choice(int(samples), size=int(resamples), replace=True, p=probabilities)
+    target_samples = two_exp_target_transform(proposal[0, indices], target=target).astype(np.float64)
+    ess = float(1.0 / np.sum(probabilities * probabilities))
+    return target_samples, {
+        "proposal_samples": int(samples),
+        "resampled_posterior_samples": int(resamples),
+        "importance_seed": int(seed),
+        "log_evidence": float(log_norm - np.log(samples)),
+        "ess": ess,
+        "relative_ess": float(ess / samples),
+        "log_weight_std": float(np.std(log_weights)),
+        "prior_mixture": float(prior_mixture),
+        "proposal_inflation": float(proposal_inflation),
+    }
+
+
+def sample_two_exp_mcmc_reference(
+    *,
+    x_raw: np.ndarray,
+    z_raw: np.ndarray,
+    target: str,
+    chains: int,
+    steps: int,
+    burn_in: int,
+    seed: int,
+) -> tuple[np.ndarray, dict[str, object]]:
+    base_case = make_two_exp_case(ordered=True)
+    z_center = np.asarray(z_raw, dtype=np.float64)
+
+    def initial_z(chains_count: int, _x0: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        scale = np.asarray(base_case.mcmc_proposal_scale, dtype=np.float64) * 2.5
+        return rng.normal(z_center[None, :], scale[None, :], size=(chains_count, base_case.z_dim))
+
+    case = replace(base_case, true_z=z_center, initial_z=initial_z)
+    samples_raw, accept, seconds = run_random_walk_mcmc(
+        case,
+        np.asarray(x_raw, dtype=np.float64),
+        chains=int(chains),
+        steps=int(steps),
+        seed=int(seed),
+        device=torch.device("cpu"),
+        dtype=torch.float64,
+    )
+    if burn_in >= steps:
+        raise ValueError("--mcmc-burn-in must be smaller than --mcmc-steps.")
+    post_raw = samples_raw[:, int(burn_in) :, :].reshape(-1, base_case.z_dim)
+    post_target = two_exp_target_transform(post_raw, target=target).astype(np.float64)
+    diagnostics = stress_arviz_diagnostics(
+        samples_raw,
+        int(burn_in),
+        lambda z: two_exp_target_transform(z, target=target),
+        tuple(TWO_EXP_TARGET_NAMES),
+    )
+    return post_target, {
+        "kind": "mcmc",
+        "chains": int(chains),
+        "steps": int(steps),
+        "burn_in": int(burn_in),
+        "posterior_samples": int(post_target.shape[0]),
+        "acceptance_rate": float(np.mean(accept)),
+        "seconds": float(seconds),
+        "diagnostics": diagnostics,
+        **summarize_mcmc_diagnostics(diagnostics),
+    }
+
+
+def render_two_exp_population_cases(args: argparse.Namespace) -> None:
+    TWO_EXP_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    device = stage1.choose_training_device(args.device)
+    members = load_sign_ensemble(args.two_exp_ensemble_summary, device)
+    selection = build_two_exp_readme_cases(args=args, members=members, device=device)
+
+    outputs = {}
+    case_summaries = {}
+    for offset, (case_name, case_info) in enumerate(selection["cases"].items()):
+        if args.two_exp_posterior_reference == "importance":
+            reference_samples, reference_metadata = sample_two_exp_importance_reference(
+                x_raw=np.asarray(case_info["x_raw"], dtype=np.float64),
+                x_context=np.asarray(case_info["x_context"], dtype=np.float64),
+                z_raw=np.asarray(case_info["z_raw"], dtype=np.float64),
+                target=str(args.two_exp_target),
+                samples=int(args.two_exp_reference_samples),
+                resamples=int(args.exact_samples),
+                seed=int(args.seed) + 5000 + 101 * offset,
+                prior_mixture=float(args.two_exp_prior_mixture),
+                proposal_inflation=float(args.two_exp_proposal_inflation),
+            )
+            reference_label = "Importance reference"
+        else:
+            reference_samples, reference_metadata = sample_two_exp_mcmc_reference(
+                x_raw=np.asarray(case_info["x_raw"], dtype=np.float64),
+                z_raw=np.asarray(case_info["z_raw"], dtype=np.float64),
+                target=str(args.two_exp_target),
+                chains=int(args.mcmc_chains),
+                steps=int(args.mcmc_steps),
+                burn_in=int(args.mcmc_burn_in),
+                seed=int(args.seed) + 5000 + 101 * offset,
+            )
+            reference_label = "MCMC reference"
+        npe_samples = sample_stage1_ensemble(
+            members=members,
+            x_context=np.asarray(case_info["x_context"], dtype=np.float64),
+            samples=int(args.npe_samples),
+            seed=int(args.seed) + 1000 + 101 * offset,
+            device=device,
+        )
+        true_target = np.asarray(case_info["z_target"], dtype=np.float64)
+        figure = render_corner_layers(
+            labels=TWO_EXP_TARGET_LABELS,
+            true_values=true_target,
+            weighted_layers=[],
+            sample_layers=[
+                SampleCornerLayer(
+                    reference_label,
+                    "#172033",
+                    reference_samples,
+                    hist_lw=1.55,
+                    contour_lw=1.20,
+                ),
+                SampleCornerLayer("Best-NLL NPE", "#0f766e", npe_samples, hist_lw=1.45, contour_lw=1.15),
+            ],
+            true_color="#172033",
+            title=f"Two-exponential {case_name} full-prior posterior\n{reference_label} vs best-NLL NPE",
+            max_sample_plot=18_000,
+            rng=np.random.default_rng(int(args.seed) + 2000 + offset),
+        )
+        figure_path = TWO_EXP_OUTPUT_DIR / f"two_exp_best_nll_{case_name}_posterior_corner.png"
+        figure.savefig(figure_path, dpi=130, bbox_inches="tight")
+        outputs[case_name] = repo_relative(figure_path)
+        case_summaries[case_name] = {
+            **case_info,
+            "posterior_reference": reference_metadata,
+            "npe": {
+                "posterior_samples": int(npe_samples.shape[0]),
+                "to_posterior_reference": compare_sample_marginals_named(
+                    npe_samples,
+                    reference_samples,
+                    TWO_EXP_TARGET_NAMES,
+                ),
+            },
+            "outputs": {
+                "figure": repo_relative(figure_path),
+            },
+        }
+
+    summary_path = TWO_EXP_OUTPUT_DIR / "two_exp_best_nll_posterior_summary.json"
+    summary = {
+        "description": (
+            "Two representative full-prior posterior checks for the current "
+            "best-NLL two-exponential population NPE, the equal-5 mixture of "
+            "the Flow2 ridge ensemble and high-SNR weighted member."
+        ),
+        "ensemble_summary": repo_relative(args.two_exp_ensemble_summary),
+        "target": str(args.two_exp_target),
+        "labels": TWO_EXP_TARGET_LABELS,
+        "selection": {
+            key: value
+            for key, value in selection.items()
+            if key != "cases"
+        },
+        "cases": case_summaries,
+        "outputs": outputs | {"summary": repo_relative(summary_path)},
+    }
+    summary_path.write_text(
+        json.dumps(json_ready(summary), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(summary_path)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Render README posterior comparison figures.")
     parser.add_argument(
         "--mode",
-        choices=("single_decay", "sign_population", "banana_population", "label_switch_population", "linear6_population"),
+        choices=(
+            "single_decay",
+            "sign_population",
+            "banana_population",
+            "label_switch_population",
+            "linear6_population",
+            "two_exp_population",
+        ),
         default="single_decay",
     )
     parser.add_argument("--device", choices=("auto", "cpu", "mps", "cuda"), default="auto")
@@ -1062,9 +1470,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--banana-ensemble-summary", type=Path, default=BANANA_ENSEMBLE_SUMMARY)
     parser.add_argument("--label-switch-ensemble-summary", type=Path, default=LABEL_SWITCH_ENSEMBLE_SUMMARY)
     parser.add_argument("--linear6-ensemble-summary", type=Path, default=LINEAR6_ENSEMBLE_SUMMARY)
+    parser.add_argument("--two-exp-ensemble-summary", type=Path, default=TWO_EXP_ENSEMBLE_SUMMARY)
     parser.add_argument("--signal-seed", type=int, default=20260707)
     parser.add_argument("--draw-index", type=int, default=1)
     parser.add_argument("--seed", type=int, default=20260711)
+    parser.add_argument("--eval-batch-size", type=int, default=512)
     parser.add_argument("--grid-size", type=int, default=1001)
     parser.add_argument("--grid-limit", type=float, default=4.0)
     parser.add_argument("--npe-samples", type=int, default=80_000)
@@ -1072,6 +1482,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mcmc-chains", type=int, default=8)
     parser.add_argument("--mcmc-steps", type=int, default=12_000)
     parser.add_argument("--mcmc-burn-in", type=int, default=3_000)
+    parser.add_argument("--two-exp-target", choices=("amplitude_sum_delta", "amplitude_sum_rate"), default="amplitude_sum_delta")
+    parser.add_argument(
+        "--two-exp-case-importance-samples",
+        "--two-exp-selection-importance-samples",
+        dest="two_exp_selection_importance_samples",
+        type=int,
+        default=4096,
+    )
+    parser.add_argument("--two-exp-reference-samples", type=int, default=100_000)
+    parser.add_argument("--two-exp-posterior-reference", choices=("mcmc", "importance"), default="mcmc")
+    parser.add_argument("--two-exp-low-prior-offset", type=float, nargs=5, default=TWO_EXP_LOW_PRIOR_OFFSET.tolist())
+    parser.add_argument("--two-exp-low-prior-noise-seed", type=int, default=2026070203)
+    parser.add_argument("--two-exp-importance-seed", type=int, default=20260723)
+    parser.add_argument("--two-exp-importance-batch-size", type=int, default=16)
+    parser.add_argument("--two-exp-prior-mixture", type=float, default=0.02)
+    parser.add_argument("--two-exp-proposal-inflation", type=float, default=1.0)
+    parser.add_argument("--two-exp-smc-particles", type=int, default=4096)
+    parser.add_argument("--two-exp-smc-beta-steps", type=int, default=96)
+    parser.add_argument("--two-exp-smc-mh-steps", type=int, default=2)
+    parser.add_argument("--two-exp-smc-seed", type=int, default=20260723)
+    parser.add_argument("--two-exp-smc-batch-size", type=int, default=8)
+    parser.add_argument("--two-exp-smc-step-scale", type=float, default=0.85)
     return parser.parse_args()
 
 
@@ -1085,8 +1517,10 @@ def main() -> None:
         render_banana_population_case(args)
     elif args.mode == "label_switch_population":
         render_label_switch_population_case(args)
-    else:
+    elif args.mode == "linear6_population":
         render_linear6_population_case(args)
+    else:
+        render_two_exp_population_cases(args)
 
 
 if __name__ == "__main__":
