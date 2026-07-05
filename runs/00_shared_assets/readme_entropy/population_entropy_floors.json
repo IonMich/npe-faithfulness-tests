@@ -1,0 +1,32 @@
+{
+  "floors": [
+    {
+      "model": "single_exponential_decay",
+      "coordinate_target": "z=(log A, log k, log sigma)",
+      "estimate": -3.6386545787958,
+      "standard_error": 0.002533150310029534,
+      "examples": 1000000,
+      "method": "Posterior-centered adaptive Gauss-Hermite evidence integration, order 13.",
+      "source": "runs/00_shared_assets/readme_scaling/decay_bayes_entropy_adaptive_gh13_full1m.json"
+    },
+    {
+      "model": "sign_symmetry",
+      "coordinate_target": "theta=(theta1, theta2)",
+      "estimate": -0.7337946019356397,
+      "standard_error": 0.0011526154301947824,
+      "examples": 1000000,
+      "method": "Monte Carlo over p(theta)p(x|theta); closed-form theta1 evidence with tail quadrature and conjugate Gaussian theta2 posterior.",
+      "source": "runs/00_shared_assets/readme_entropy/sign_bayes_entropy_hybrid_1m.json"
+    },
+    {
+      "model": "sign_symmetry",
+      "coordinate_target": "(abs(theta1), theta2)",
+      "estimate": -1.426941782495585,
+      "standard_error": 0.0011526154301947824,
+      "examples": 1000000,
+      "method": "Raw sign-symmetry floor minus log(2), because the posterior sign is exactly symmetric.",
+      "source": "runs/00_shared_assets/readme_entropy/sign_bayes_entropy_hybrid_1m.json"
+    }
+  ],
+  "note": "Entropy floors are coordinate-specific density losses. Compare an NPE validation NLL only with the floor for the same density target parameterization."
+}

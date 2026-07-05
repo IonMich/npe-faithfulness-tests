@@ -1,0 +1,93 @@
+{
+  "case": "sign",
+  "chunk_size": 16384,
+  "elapsed_seconds": 1.8314504580339417,
+  "examples": 1000000,
+  "method": "Monte Carlo over p(theta)p(x|theta). The theta1 evidence p(x1) uses the closed-form parabolic-cylinder integral for non-tail x1 and standard-normal Gauss-Hermite expectation around y=x1 for the positive tail; theta2 uses the closed-form conjugate Gaussian posterior.",
+  "model": {
+    "folded_coordinate_target": "(abs(theta1), theta2)",
+    "raw_coordinate_target": "(theta1, theta2)",
+    "theta_prior": "N(0, diag(1.8^2, 1.8^2))",
+    "x1": "theta1^2 + Normal(0, 0.22^2)",
+    "x2": "theta2 + Normal(0, 0.16^2)"
+  },
+  "nll_components": {
+    "folded_minus_raw_shift": -0.6931471805599453,
+    "theta1_raw": {
+      "max": 12.097102770886327,
+      "mean": -0.31601605219309215,
+      "median": -0.32517978087374855,
+      "min": -2.697205373111183,
+      "n": 1000000,
+      "q01": -1.9747029327645946,
+      "q05": -1.645087271855309,
+      "q95": 1.1911689516474455,
+      "q99": 2.4629808441751084,
+      "std": 0.9110821010071318,
+      "std_error": 0.0009110821010071318
+    },
+    "theta2": {
+      "max": 12.11309801792144,
+      "mean": -0.4177785497425475,
+      "median": -0.690213825100807,
+      "min": -0.9175780221777712,
+      "n": 1000000,
+      "q01": -0.9175001630751562,
+      "q05": -0.9156142379801094,
+      "q95": 1.003740882410662,
+      "q99": 2.3977513792099634,
+      "std": 0.7062321387751693,
+      "std_error": 0.0007062321387751693
+    },
+    "theta2_analytic_entropy": -0.41757802217824
+  },
+  "nll_folded_abs_theta1_theta2": {
+    "max": 12.64335126792814,
+    "mean": -1.426941782495585,
+    "median": -1.513444845758107,
+    "min": -4.306111160852037,
+    "n": 1000000,
+    "q01": -3.409625270650585,
+    "q05": -3.022871702496412,
+    "q95": 0.6643844128125127,
+    "q99": 2.2207620079501558,
+    "std": 1.1526154301947824,
+    "std_error": 0.0011526154301947824
+  },
+  "nll_raw_theta": {
+    "max": 13.336498448488085,
+    "mean": -0.7337946019356397,
+    "median": -0.8202976651981616,
+    "min": -3.6129639802920916,
+    "n": 1000000,
+    "q01": -2.71647809009064,
+    "q05": -2.3297245219364666,
+    "q95": 1.357531593372458,
+    "q99": 2.913909188510101,
+    "std": 1.1526154301947824,
+    "std_error": 0.0011526154301947824
+  },
+  "quadrature_checks": {
+    "101": {
+      "examples": 50000,
+      "theta1_nll_delta_vs_main_tail_order": 6.288303211476887e-18,
+      "theta1_nll_max_abs_delta_vs_main_tail_order": 3.552713678800501e-15,
+      "theta1_nll_mean": -0.3197533661279329
+    },
+    "21": {
+      "examples": 50000,
+      "theta1_nll_delta_vs_main_tail_order": -2.822631017806998e-17,
+      "theta1_nll_max_abs_delta_vs_main_tail_order": 3.552713678800501e-15,
+      "theta1_nll_mean": -0.319753366127933
+    },
+    "61": {
+      "examples": 50000,
+      "theta1_nll_delta_vs_main_tail_order": -1.2949641359227825e-17,
+      "theta1_nll_max_abs_delta_vs_main_tail_order": 3.552713678800501e-15,
+      "theta1_nll_mean": -0.319753366127933
+    }
+  },
+  "seed": 20260705,
+  "tail_order": 41,
+  "tail_switch": 10.0
+}
