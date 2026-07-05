@@ -357,6 +357,7 @@ Training probes tried:
 512k x 1 MAF4, 30 epochs        NLL -3.17836, gap 0.10314
 512k x 1 augmented context      NLL -3.17555, gap 0.10595
 128k x 1 CPU MDN8 smoke         NLL -3.01387, gap 0.26762
+512k x 1 Flow2 mixture, 30 ep   NLL -3.17577, gap 0.10404
 ```
 
 The best plain NPE result is the 4-member Flow2 30-epoch ensemble, and it is
@@ -364,6 +365,12 @@ still about `0.083` NLL units above the floor. A diverse ensemble over the
 available probes improves only to about `-3.2036`, still roughly `0.078` above
 the floor. This is qualitatively different from Linear6/Banana/Label Switching
 and should be treated as a real miss, not an uncertainty issue.
+
+The first gated mixture-of-flows probe used two Flow2 residual NSF components
+and reached a competitive training loss (`-3.26366`) but not a better held-out
+NLL. Its validation result is effectively another single-member miss, so the
+next architecture change needs either a stronger mixture strategy or a better
+target/context, not just more of the same two-component probe.
 
 Useful infrastructure completed:
 
@@ -377,14 +384,17 @@ Useful infrastructure completed:
   dimension-generic Cholesky parameter counts, fixing the prior 5D MDN bug.
 - `plot_broad_efficiency_training_curves.py` has a reusable two-exponential
   population-loss mode ready once there is a result worth documenting.
+- `npe_stage1_decay.py` now has a reusable `spline_flow_mixture` family for
+  gated mixtures of conditional spline flows.
 
 Next viable experiments:
 
 - Stop scaling the same Flow2 recipe blindly; the 1M single-member probe did not
   improve fixed-cache NLL.
-- Try a genuinely richer conditional posterior family, such as a conditional
-  mixture of flows or mixture-of-experts, rather than another single normalizing
-  flow.
+- Try a genuinely different conditional posterior strategy, such as a stronger
+  mixture-of-experts objective, exact-posterior distillation on difficult
+  signals, or a sequential proposal, rather than another single normalizing flow
+  or the first two-component flow mixture.
 - Revisit target/context design with an invertible transform that separates the
   ridge more cleanly than the current log-sum/log-ratio coordinates.
 - Use exact-posterior or high-quality importance samples for a subset of signals

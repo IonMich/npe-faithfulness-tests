@@ -33,7 +33,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 
-FAMILIES = ("diag_gaussian", "full_gaussian", "mdn", "affine_flow", "spline_flow")
+FAMILIES = ("diag_gaussian", "full_gaussian", "mdn", "affine_flow", "spline_flow", "spline_flow_mixture")
 CONTEXT_FEATURE_MODES = (
     "raw",
     "decay_summary",
@@ -63,6 +63,7 @@ FAMILY_LABELS = {
     "mdn": "MDN",
     "affine_flow": "Affine flow",
     "spline_flow": "Spline flow",
+    "spline_flow_mixture": "Spline flow mixture",
 }
 FAMILY_COLORS = {
     "diag_gaussian": "#2f6fbb",
@@ -70,6 +71,7 @@ FAMILY_COLORS = {
     "mdn": "#c06f2d",
     "affine_flow": "#7a5cc2",
     "spline_flow": "#0f8b8d",
+    "spline_flow_mixture": "#8a3ffc",
     "grid_reference": "#172033",
 }
 LOG_2PI = math.log(2.0 * math.pi)
@@ -749,6 +751,65 @@ class SplineFlowPosterior(nn.Module):
         return torch.cat(samples, dim=0)
 
 
+class SplineFlowMixturePosterior(nn.Module):
+    def __init__(
+        self,
+        x_dim: int,
+        z_dim: int,
+        hidden_dim: int,
+        hidden_layers: int,
+        flow_layers: int,
+        bins: int,
+        activation: str,
+        residual: bool,
+        randperm: bool,
+        passes: int,
+        flow_kind: str,
+        components: int,
+    ) -> None:
+        super().__init__()
+        if components < 2:
+            raise ValueError("SplineFlowMixturePosterior needs at least two components.")
+        self.z_dim = z_dim
+        self.components = components
+        self.gate = make_mlp(x_dim, components, hidden_dim, hidden_layers)
+        self.flows = nn.ModuleList(
+            SplineFlowPosterior(
+                x_dim,
+                z_dim,
+                hidden_dim,
+                hidden_layers,
+                flow_layers,
+                bins,
+                activation,
+                residual,
+                randperm,
+                passes,
+                flow_kind,
+            )
+            for _ in range(components)
+        )
+
+    def log_prob(self, z: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        logits = self.gate(x)
+        component_log_probs = torch.stack([flow.log_prob(z, x) for flow in self.flows], dim=-1)
+        return torch.logsumexp(torch.log_softmax(logits, dim=-1) + component_log_probs, dim=-1)
+
+    @torch.no_grad()
+    def sample(self, n: int, x: torch.Tensor) -> torch.Tensor:
+        if x.shape[0] != 1:
+            raise ValueError("SplineFlowMixturePosterior.sample currently expects one conditioning row.")
+        logits = self.gate(x)[0]
+        component_ids = torch.multinomial(torch.softmax(logits, dim=-1), n, replacement=True)
+        output = torch.empty(n, self.z_dim, device=x.device, dtype=x.dtype)
+        for component_index, flow in enumerate(self.flows):
+            mask = component_ids == component_index
+            count = int(mask.sum().item())
+            if count:
+                output[mask] = flow.sample(count, x)
+        return output
+
+
 class LinearResidualTargetPosterior(nn.Module):
     def __init__(self, base: nn.Module, x_dim: int, z_dim: int) -> None:
         super().__init__()
@@ -903,6 +964,21 @@ def make_model(family: str, config: Stage1Config, x_dim: int, z_dim: int) -> nn.
             config.flow_randperm,
             config.flow_passes,
             config.flow_kind,
+        )
+    elif family == "spline_flow_mixture":
+        base = SplineFlowMixturePosterior(
+            x_dim,
+            z_dim,
+            config.hidden_dim,
+            config.hidden_layers,
+            config.flow_layers,
+            config.spline_bins,
+            config.flow_activation,
+            config.flow_residual,
+            config.flow_randperm,
+            config.flow_passes,
+            config.flow_kind,
+            config.mdn_components,
         )
     else:
         raise ValueError(f"Unknown family: {family}")
