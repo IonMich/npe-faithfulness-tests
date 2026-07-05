@@ -949,11 +949,11 @@ table below keeps only the top three completed probes by this common-floor
 comparison; per-run floor estimates in some artifacts differ and are not used
 for the ranking.
 
-| Population NPE probe | Validation NLL | Gap to common floor |
-| --- | ---: | ---: |
-| Learned x-dependent stack over 11 compatible frozen members | `-3.20511` | `0.07638` |
-| Equal-5 mixture: Flow2 ridge x4 + high-SNR weighted x1 | `-3.20086` | `0.08064` |
-| Flow2 ridge target, 512k x4, 30 epochs | `-3.19892` | `0.08257` |
+| Population NPE probe | Validation NLL | Population NLL floor | Gap to common floor |
+| --- | ---: | ---: | ---: |
+| Learned x-dependent stack over 11 compatible frozen members | `-3.20511` | `-3.28149 +/- 0.02423` | `0.07638` |
+| Equal-5 mixture: Flow2 ridge x4 + high-SNR weighted x1 | `-3.20086` | `-3.28149 +/- 0.02423` | `0.08064` |
+| Flow2 ridge target, 512k x4, 30 epochs | `-3.19892` | `-3.28149 +/- 0.02423` | `0.08257` |
 
 The miss is therefore not explained by one short run or by the first floor
 estimate. Scaling the same Flow2 recipe to 1.024M simulations, increasing flow
