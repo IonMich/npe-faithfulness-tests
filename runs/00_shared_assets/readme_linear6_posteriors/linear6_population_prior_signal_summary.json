@@ -8,42 +8,42 @@
     "members": 4,
     "posterior_samples": 50000,
     "to_exact": {
-      "mean_normalized_wasserstein": 0.01406743989554686,
+      "mean_normalized_wasserstein": 0.012793240312442802,
       "parameters": {
         "log_sigma": {
-          "normalized_wasserstein": 0.013332119575480287,
+          "normalized_wasserstein": 0.0070191580448920885,
           "reference_sd": 0.1324326923658656,
-          "wasserstein": 0.0017656084903245155
+          "wasserstein": 0.0009295659980265846
         },
         "w1": {
-          "normalized_wasserstein": 0.00716679633614952,
+          "normalized_wasserstein": 0.010808531220101975,
           "reference_sd": 0.06005175367603965,
-          "wasserstein": 0.0004303786882247944
+          "wasserstein": 0.000649071254429348
         },
         "w2": {
-          "normalized_wasserstein": 0.013205828533141185,
+          "normalized_wasserstein": 0.014560670007795616,
           "reference_sd": 0.05992952083805147,
-          "wasserstein": 0.0007914189762606193
+          "wasserstein": 0.0008726139766481784
         },
         "w3": {
-          "normalized_wasserstein": 0.02064351549804103,
+          "normalized_wasserstein": 0.02777179347506254,
           "reference_sd": 0.05996130694830638,
-          "wasserstein": 0.001237812169270158
+          "wasserstein": 0.0016652330330631973
         },
         "w4": {
-          "normalized_wasserstein": 0.015037619729289,
+          "normalized_wasserstein": 0.008303207529379249,
           "reference_sd": 0.05962600899928765,
-          "wasserstein": 0.0008966332493064513
+          "wasserstein": 0.00049508712686972
         },
         "w5": {
-          "normalized_wasserstein": 0.011007737741737637,
+          "normalized_wasserstein": 0.009683647438556911,
           "reference_sd": 0.060006232406661336,
-          "wasserstein": 0.000660532869202286
+          "wasserstein": 0.0005810791987422168
         },
         "w6": {
-          "normalized_wasserstein": 0.018078461854989354,
+          "normalized_wasserstein": 0.011405674471311227,
           "reference_sd": 0.05962867644076089,
-          "wasserstein": 0.001077994752497798
+          "wasserstein": 0.0006801052726384637
         }
       }
     }

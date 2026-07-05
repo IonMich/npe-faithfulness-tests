@@ -262,6 +262,68 @@ def format_corner_title(title: str, *, max_line_chars: int = 72) -> tuple[str, i
     return title, 12, 0.88
 
 
+def format_interval_value(value: float) -> str:
+    absolute = abs(float(value))
+    if absolute >= 100.0 or (0.0 < absolute < 0.01):
+        return f"{value:.2e}"
+    if absolute >= 10.0:
+        return f"{value:.2f}"
+    return f"{value:.3f}"
+
+
+def select_summary_sample_layer(sample_layers: list[SampleCornerLayer]) -> SampleCornerLayer | None:
+    for layer in sample_layers:
+        if "npe" in layer.label.lower():
+            return layer
+    return sample_layers[0] if sample_layers else None
+
+
+def sample_interval_rows(
+    *,
+    labels: list[str],
+    layer: SampleCornerLayer,
+) -> list[dict[str, str]]:
+    samples = np.asarray(layer.samples, dtype=np.float64)
+    rows = []
+    for index, label in enumerate(labels):
+        q05, median, q95 = np.quantile(samples[:, index], [0.05, 0.50, 0.95])
+        rows.append(
+            {
+                "parameter": label,
+                "median": format_interval_value(float(median)),
+                "plus": format_interval_value(float(q95 - median)),
+                "minus": format_interval_value(float(median - q05)),
+            }
+        )
+    return rows
+
+
+def add_diagonal_interval_titles(
+    *,
+    axes: np.ndarray,
+    labels: list[str],
+    sample_layers: list[SampleCornerLayer],
+) -> None:
+    summary_layer = select_summary_sample_layer(sample_layers)
+    if summary_layer is None:
+        return
+    rows = sample_interval_rows(labels=labels, layer=summary_layer)
+    fontsize = 7.3 if len(labels) >= 6 else 8.6
+    for index, row in enumerate(rows):
+        ax = axes[index, index]
+        ax.text(
+            0.02,
+            1.08,
+            f"{row['parameter']}  {row['median']}  +{row['plus']}  -{row['minus']}",
+            transform=ax.transAxes,
+            ha="left",
+            va="bottom",
+            fontsize=fontsize,
+            color="#111827",
+            clip_on=False,
+        )
+
+
 def render_corner_layers(
     *,
     labels: list[str],
@@ -271,6 +333,7 @@ def render_corner_layers(
     true_color: str = GRID_COLOR,
     title: str | None = None,
     max_sample_plot: int = 12_000,
+    show_parameter_summary: bool = True,
     rng: np.random.Generator | None = None,
 ) -> plt.Figure:
     dimensions = len(labels)
@@ -401,13 +464,22 @@ def render_corner_layers(
                 ax.axhline(true_values[row], color=true_color, linestyle="--", lw=1.0, alpha=0.75)
 
     handles.append(true_value_handle(true_color))
-    figure.legend(handles=handles, loc="upper right", bbox_to_anchor=(0.97, 0.96))
     if title is None:
         title_parts = [layer.label for layer in weighted_layers]
         title_parts.extend(layer.label for layer in prepared_sample_layers)
         title = " vs ".join(title_parts)
     formatted_title, title_fontsize, top = format_corner_title(title)
-    figure.subplots_adjust(top=top, hspace=0.08, wspace=0.08)
+    if show_parameter_summary and prepared_sample_layers:
+        add_diagonal_interval_titles(
+            axes=axes,
+            labels=labels,
+            sample_layers=prepared_sample_layers,
+        )
+        hspace = 0.18 if dimensions >= 4 else 0.14
+    else:
+        hspace = 0.08
+    figure.legend(handles=handles, loc="upper right", bbox_to_anchor=(0.97, 0.96))
+    figure.subplots_adjust(top=top, hspace=hspace, wspace=0.08)
     figure.suptitle(formatted_title, y=0.985, fontsize=title_fontsize)
     return figure
 

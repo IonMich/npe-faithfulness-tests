@@ -13,7 +13,7 @@
     "burn_in": 3000,
     "chains": 8,
     "posterior_samples": 72000,
-    "seconds": 0.5944675829960033,
+    "seconds": 0.5380016659619287,
     "steps": 12000,
     "to_exact": {
       "mean_normalized_wasserstein": 0.010720786842272345,
@@ -36,17 +36,17 @@
     "members": 4,
     "posterior_samples": 50000,
     "to_exact": {
-      "mean_normalized_wasserstein": 0.010220268729064307,
+      "mean_normalized_wasserstein": 0.007405689280287154,
       "parameters": {
         "theta1": {
-          "normalized_wasserstein": 0.0099970121295573,
+          "normalized_wasserstein": 0.007202237330516575,
           "reference_sd": 0.19349163019855917,
-          "wasserstein": 0.0019343381740628118
+          "wasserstein": 0.0013935726421585711
         },
         "theta2": {
-          "normalized_wasserstein": 0.010443525328571311,
+          "normalized_wasserstein": 0.007609141230057732,
           "reference_sd": 0.37697203974580007,
-          "wasserstein": 0.003936917045248454
+          "wasserstein": 0.0028684334902087296
         }
       }
     }
