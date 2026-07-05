@@ -10,4 +10,4 @@ Artifacts:
 - `figures/` - plots for this run, when available
 - script: `scripts/sbi_two_exp_ordered.py`
 - note: `notes/snpe-sequential-results.md`
-- note: `notes/npe-flow-stress-test-results.md`
+- note: `notes/npe-flow-model-results.md`

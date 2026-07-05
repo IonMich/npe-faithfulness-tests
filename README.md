@@ -38,6 +38,65 @@ permits it, exact-likelihood random-walk Metropolis Markov chain Monte Carlo
 (MCMC), and exact-likelihood Hamiltonian Monte Carlo (HMC). MCMC and HMC use
 the same prior and likelihood as the simulator under test.
 
+### Shared NPE Definitions
+
+Validation negative log likelihoods (NLLs) are reported in the density target
+coordinates specified for each model. A neural posterior estimator (NPE)
+receives a deterministic context vector $`c=f(x)`$, then standardizes each
+context coordinate using training-set mean and standard deviation before the
+neural density is evaluated.
+
+A mixture density network (MDN) models a finite Gaussian mixture with full
+covariances:
+
+```math
+q_\phi(z\mid c)
+=
+\sum_{j=1}^{M}
+\pi_j(c)\,
+\mathcal N\!\left(z;\mu_j(c),L_j(c)L_j(c)^\top\right).
+```
+
+A neural spline flow (NSF) represents $`z`$ by an invertible conditional
+transformation $`T_\phi(\cdot;c)`$ of a standard normal base variable:
+
+```math
+u=T_\phi^{-1}(z;c),
+\qquad
+q_\phi(z\mid c)
+=
+\mathcal N(u;0,I)
+\left|\det\frac{\partial T_\phi^{-1}(z;c)}{\partial z}\right|.
+```
+
+Each NSF transform is a monotonic rational-quadratic spline. In names such as
+Flow2, Flow3, and Flow4, the number is the number of stacked NSF transforms.
+The population runs here use fully autoregressive NSF transforms, not coupling
+layers. A residual NSF means the Zuko masked MLP conditioner inside each
+autoregressive spline uses residual hidden blocks; this is separate from any
+residual target transform. Random permutations mean the feature order is
+randomly permuted between successive NSF transforms.
+
+An ensemble is a density mixture over trained NPEs:
+
+```math
+q_{\mathrm{ens}}(z\mid x)
+=
+\sum_{m=1}^{M} w_m q_m(z\mid x),
+\qquad
+w_m\ge 0,\quad \sum_m w_m=1.
+```
+
+The ensemble log density is evaluated with `logsumexp` over member log
+densities plus $`\log w_m`$. Equal-weight ensembles use fixed weights; convex
+or learned stacks fit the weights on a separate calibration split and report a
+held-out validation NLL.
+
+Low-prior-density diagnostic signals are deliberately atypical prior draws used
+to probe posterior-shape failures that can be hidden by average validation NLL.
+
+### Posterior-Shape Distance
+
 For a diagnostic parameterization $`g(\theta)`$, the main scalar comparison is
 mean marginal normalized Wasserstein distance:
 
@@ -131,11 +190,12 @@ floor for the same density target parameterization.
 | Model | Density target coordinates | Population NLL floor |
 | --- | --- | ---: |
 | Single-exponential decay | $`z=(\log A,\log k,\log\sigma)`$ | `-3.63865 +/- 0.00253` |
-| Sign-symmetry stress | $`\theta=(\theta_1,\theta_2)`$ | `-0.73379 +/- 0.00115` |
-| Sign-symmetry stress, folded target | $`(\lvert\theta_1\rvert,\theta_2)`$ | `-1.42694 +/- 0.00115` |
-| Banana stress | $`\theta=(\theta_1,\theta_2)`$ | `-0.52826 +/- 0.00100` |
+| Sign-symmetry model | $`\theta=(\theta_1,\theta_2)`$ | `-0.73379 +/- 0.00115` |
+| Sign-symmetry model, folded target | $`(\lvert\theta_1\rvert,\theta_2)`$ | `-1.42694 +/- 0.00115` |
+| Banana model | $`\theta=(\theta_1,\theta_2)`$ | `-0.52826 +/- 0.00100` |
 | Label-switching mixture | $`z_{\mathrm{sorted}}=(\mu_{\mathrm{low}},\mu_{\mathrm{high}},\log\sigma)`$ | `-3.10112 +/- 0.00821` |
-| Linear6 stress | $`z=(w_1,\ldots,w_6,\log\sigma)`$ | `-10.78631 +/- 0.00353` |
+| Linear6 model | $`z=(w_1,\ldots,w_6,\log\sigma)`$ | `-10.78631 +/- 0.00353` |
+| Ordered two-exponential decay | $`z=(\log(A_1+A_2),\log(A_1/A_2),\log k_1,\log\Delta k,\log\sigma)`$ | `-3.27756 +/- 0.01072` |
 
 The single-decay estimate is the adaptive posterior-centered Gauss-Hermite
 oracle recorded in
@@ -160,6 +220,11 @@ proposal over the two label permutations, and the sorted density includes the
 $`\log 2`$ fold factor. This estimator is expensive enough that the committed
 floor uses the `50k` validation cache from the population run rather than the
 `1M` caches used for the analytic floors.
+The ordered two-exponential floor is evaluated in the ridge coordinates used for
+population NLL. It uses a posterior-centered Gaussian-mixture importance
+estimator with `50,000` validation signals and `32,768` proposal samples per
+signal. It is consistent with the shared 10k reference floor used for the
+two-exponential architecture-gap table.
 
 Finite validation-cache NLLs have their own Monte Carlo uncertainty. For the
 two single-decay NPEs listed below, the full 1M-example cache standard errors
@@ -173,9 +238,9 @@ validation estimate. The cache uncertainty calculation is stored in
 
 ## Starting A New Model
 
-Begin by writing down the statistical problem before changing code. A new test
-case should have a prior, simulator, observation rule, diagnostic coordinates,
-and reference plan:
+Begin by writing down the statistical problem before changing code. A new model
+should have a prior, simulator, observation rule, diagnostic coordinates, and
+reference plan:
 
 ```math
 \theta \sim p(\theta),
@@ -208,9 +273,9 @@ Then implement the smallest exact-likelihood test loop that can answer whether
 NPE is faithful:
 
 1. Add the simulator, prior sampler, likelihood, context summary, display
-   transform, and diagnostic transform. Simple stress tests usually belong in
-   `scripts/npe_flow_stress_tests.py`; decay-style models with specialized
-   references can use a dedicated script.
+   transform, and diagnostic transform. Simple generic models can share the
+   existing flow harness; decay-style models with specialized references can use
+   a dedicated script.
 2. Pick a truth $`\theta_\star`$ and generate one observed signal $`x_\star`$. Keep
    this signal fixed while comparing methods, otherwise the reference target is
    changing between runs.
@@ -234,7 +299,6 @@ NPE is faithful:
 Useful entry points are:
 
 ```sh
-uv run scripts/npe_flow_stress_tests.py --help
 uv run scripts/check_faithfulness_target.py
 uv run scripts/build_runs_view.py
 ```
@@ -283,13 +347,10 @@ with objective
 \right].
 ```
 
-#### Model Definitions
+#### Single-Decay Model Details
 
-All reported negative log likelihoods (NLLs) in this section are in the
-log-coordinate parameterization $z=(\log A,\log k,\log\sigma)$. Each neural
-posterior estimator (NPE) receives a deterministic context vector
-$c=f(x)$, then standardizes each context coordinate using training-set mean and
-standard deviation before the neural density is evaluated.
+All single-decay NLLs in this section are in the log-coordinate
+parameterization $`z=(\log A,\log k,\log\sigma)`$.
 
 The raw-curve context is the 40-dimensional signal itself:
 
@@ -332,57 +393,12 @@ is the normalized distance of $`k_\star`$ from the grid edge. Thus
 `raw_fit_summary` has 46 context features and `raw_decay_fit_summary` has
 58 context features.
 
-A mixture density network (MDN) models a finite Gaussian mixture with full
-covariances:
-
-```math
-q_\phi(z\mid c)
-=
-\sum_{j=1}^{M}
-\pi_j(c)\,
-\mathcal N\!\left(z;\mu_j(c),L_j(c)L_j(c)^\top\right).
-```
-
 One earlier MDN baseline has $`M=5`$ components, raw-curve context, a
 three-hidden-layer SiLU multilayer perceptron (MLP) with width 128, and 44,722
 trainable parameters.
 
-A neural spline flow (NSF) represents $`z`$ by an invertible conditional
-transformation $`T_\phi(\cdot;c)`$ of a standard normal base variable:
-
-```math
-u=T_\phi^{-1}(z;c),
-\qquad
-q_\phi(z\mid c)
-=
-\mathcal N(u;0,I)
-\left|\det\frac{\partial T_\phi^{-1}(z;c)}{\partial z}\right|.
-```
-
-Each NSF transform is a monotonic rational-quadratic spline with 8 bins. In the
-names Flow2, Flow3, and Flow4, the number is the number of stacked NSF
-transforms. These runs use fully autoregressive NSF transforms; they are not
-coupling layers. In this code, coupling-style NSF transforms would correspond
-to `flow_passes=2`, which is not used by the models listed here. A residual NSF
-means the Zuko masked MLP conditioner inside each autoregressive spline uses
-residual hidden blocks. This is separate from the repo's optional residual
-target transform, which is not used by the models listed in this section.
-Random permutations mean the feature order is randomly permuted between
-successive NSF transforms.
-
-An ensemble is a density mixture over trained NPEs:
-
-```math
-q_{\mathrm{ens}}(z\mid x)
-=
-\sum_{m=1}^{M} w_m q_m(z\mid x),
-\qquad
-w_m\ge 0,\quad \sum_m w_m=1.
-```
-
-The ensemble log density is evaluated with `logsumexp` over member log
-densities plus $`\log w_m`$. The equal-weight 4-member ensemble has
-$`w_m=1/4`$. The convex-weighted 16-member ensemble fits the weights by
+The equal-weight 4-member ensemble has $`w_m=1/4`$. The convex-weighted
+16-member ensemble fits the weights by
 minimizing validation NLL on 200,000 validation examples,
 
 ```math
@@ -443,7 +459,7 @@ convex-weighted density ensemble, and `0.0733` for MCMC.
 
 [Single decay population signal predictive overlay](runs/00_shared_assets/readme_decay_posteriors/decay_population_posterior_signal.png)
 
-The low-prior-density stress signal is harder. It was generated from a
+The low-prior-density diagnostic signal is harder. It was generated from a
 parameter vector 4.33 prior standard deviations from the prior mean in
 log-parameter space, with log prior density `9.375` below the prior mean. The
 4-member Flow2 residual NSF ensemble has mean normalized marginal Wasserstein
@@ -588,7 +604,7 @@ R-hat and effective-sample-size convergence flags. The remaining outliers show
 where posterior-shape diagnostics can catch issues not visible from validation
 NLL alone.
 
-### Sign-Symmetry Stress Test
+### Sign-Symmetry Model
 
 This model creates a two-mode posterior by observing a squared parameter:
 
@@ -658,7 +674,7 @@ MCMC and `0.02069` for the population NPE.
 The metadata for this view is stored in
 [sign_population_prior_signal_summary.json](runs/00_shared_assets/readme_sign_posteriors/sign_population_prior_signal_summary.json).
 
-### Banana Stress Test
+### Banana Model
 
 This model bends an otherwise simple two-dimensional posterior:
 
@@ -797,7 +813,7 @@ for MCMC; the NPE-to-MCMC diagnostic is `0.02365`.
 The run is documented at
 [02_flow2_residual_full_prior_512k_ensemble4_e30](runs/04_stress_label_switch/03_population_npe/02_flow2_residual_full_prior_512k_ensemble4_e30/README.md).
 
-### Linear6 Stress Test
+### Linear6 Model
 
 This model tests smooth higher-dimensional inference. The simulator is:
 
@@ -949,11 +965,11 @@ table below keeps only the top three completed probes by this common-floor
 comparison; per-run floor estimates in some artifacts differ and are not used
 for the ranking.
 
-| Population NPE probe | Validation NLL | Population NLL floor | Gap to common floor |
-| --- | ---: | ---: | ---: |
-| Learned x-dependent stack over 11 compatible frozen members | `-3.20511` | `-3.28149 +/- 0.02423` | `0.07638` |
-| Equal-5 mixture: Flow2 ridge x4 + high-SNR weighted x1 | `-3.20086` | `-3.28149 +/- 0.02423` | `0.08064` |
-| Flow2 ridge target, 512k x4, 30 epochs | `-3.19892` | `-3.28149 +/- 0.02423` | `0.08257` |
+| Population NPE probe | Validation NLL | Gap to common floor |
+| --- | ---: | ---: |
+| Learned x-dependent stack over 11 compatible frozen members | `-3.20511` | `0.07638` |
+| Equal-5 mixture: Flow2 ridge x4 + high-SNR weighted x1 | `-3.20086` | `0.08064` |
+| Flow2 ridge target, 512k x4, 30 epochs | `-3.19892` | `0.08257` |
 
 The miss is therefore not explained by one short run or by the first floor
 estimate. Scaling the same Flow2 recipe to 1.024M simulations, increasing flow
@@ -981,7 +997,7 @@ on the easy case and `0.1601` on the difficult case, versus `0.1488` and
 grid agreement on these README diagnostics (`0.1560` mean versus `0.2029`) and
 is the plotted posterior-shape model. The easy case is an ordinary full-prior
 prior-predictive draw. The difficult case follows the single-decay convention:
-a low-prior-density stress draw, here `4.27` prior standard deviations from the
+a low-prior-density diagnostic draw, here `4.27` prior standard deviations from the
 raw prior mean with log prior density `9.125` below the prior mean. Because this
 posterior is five-dimensional, the diagnostic overlay uses an exact local 5D
 grid as the primary visual reference and keeps the MCMC chain as a sampler
@@ -998,7 +1014,7 @@ The generated metadata for these two diagnostic views is stored in
 ## Main Reports
 
 - [NPE faithfulness investigation report](notes/npe-faithfulness-investigation-report.md)
-- [NPE flow stress-test results](notes/npe-flow-stress-test-results.md)
+- [NPE flow model results](notes/npe-flow-model-results.md)
 - [Sign target calibration](notes/sign-target-calibration.md)
 - [ABC faithfulness repair results](notes/abc-faithfulness-repair-results.md)
 - [Calibrated successful and reference runs](runs/00_successful_runs/README.md)
@@ -1011,7 +1027,6 @@ Run Python scripts with `uv run`:
 ```sh
 uv run scripts/check_faithfulness_target.py
 uv run scripts/calibrate_sign_target.py
-uv run scripts/npe_flow_stress_tests.py --help
 uv run scripts/build_runs_view.py
 ```
 
@@ -1020,7 +1035,7 @@ uv run scripts/build_runs_view.py
 The interactive posterior viewer supports the single-exponential decay
 diagnostics. It lets you draw signals, toggle the current population-trained NPE layers,
 compare against grid and MCMC references, and inspect corner plots, predictive
-plots, posterior quantiles, low-prior signal stress cases,
+plots, posterior quantiles, low-prior diagnostic cases,
 Wasserstein-to-grid distances, and runtime diagnostics.
 
 To run the built viewer:

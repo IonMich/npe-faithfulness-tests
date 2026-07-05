@@ -1,6 +1,10 @@
-# NPE Flow Stress-Test Results
+# NPE Flow Model Results
 
-Status after the original stress-test investigation: MCMC, HMC, and normalizing-flow NPE had pairwise agreement for four stress tests. Later calibration showed that the inherited `0.034` target is not universal across models, so these pairwise passes are not all categorized as calibrated successes.
+Status after the original generic-model investigation: MCMC, HMC, and
+normalizing-flow NPE had pairwise agreement for four diagnostic models. Later
+calibration showed that the inherited `0.034` target is not universal across
+models, so these pairwise passes are not all categorized as calibrated
+successes.
 
 Agreement metric is mean marginal normalized Wasserstein on the diagnostic parameterization. Historical pairwise target: `<= 0.034`.
 

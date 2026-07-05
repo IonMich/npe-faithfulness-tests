@@ -237,7 +237,7 @@ Each model folder keeps a consistent parameter vector in its corner plots.
 Create final report:
 
 ```text
-notes/npe-flow-stress-test-results.md
+notes/npe-flow-model-results.md
 ```
 
 ## Success Criteria

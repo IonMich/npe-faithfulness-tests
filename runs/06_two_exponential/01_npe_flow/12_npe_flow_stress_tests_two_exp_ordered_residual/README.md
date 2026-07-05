@@ -10,4 +10,4 @@ Artifacts:
 - `figures/` - plots for this run, when available
 - script: `scripts/npe_flow_stress_tests.py`
 - note: `notes/npe-flow-stress-test-two-exp-ordered-residual.md`
-- note: `notes/npe-flow-stress-test-results.md`
+- note: `notes/npe-flow-model-results.md`
