@@ -990,19 +990,23 @@ so it is not a floor-level result either.
 
 Posterior-shape diagnostics below use the equal-5 mixture, not the old
 fixed-signal artifact and not the learned stack. The learned stack has the best
-held-out NLL, but it produces a visibly worse easy-case posterior shape here:
-its NPE-to-grid mean normalized marginal Wasserstein distances are `0.2456`
-on the easy case and `0.1601` on the difficult case, versus `0.1488` and
-`0.1631` for equal-5. The equal-5 mixture therefore has the better aggregate
-grid agreement on these README diagnostics (`0.1560` mean versus `0.2029`) and
-is the plotted posterior-shape model. The easy case is an ordinary full-prior
-prior-predictive draw. The difficult case follows the single-decay convention:
-a low-prior-density diagnostic draw, here `4.27` prior standard deviations from the
-raw prior mean with log prior density `9.125` below the prior mean. Because this
-posterior is five-dimensional, the diagnostic overlay uses an exact local 5D
-grid as the primary visual reference and keeps the MCMC chain as a sampler
-sanity check. The grid edge mass is `0.0102` on the easy case and `0.0266` on
-the difficult case.
+held-out NLL, but earlier posterior-shape diagnostics favored equal-5, so the
+README plots use equal-5 as the displayed posterior-shape model. The easy case
+is an ordinary full-prior prior-predictive draw. The difficult case follows the
+single-decay convention: a low-prior-density diagnostic draw, here `4.27` prior
+standard deviations from the raw prior mean with log prior density `9.125`
+below the prior mean.
+
+The refreshed overlays use a denser exact-likelihood finite grid and a
+converged exact-likelihood HMC reference. The grid has `21^5 = 4,084,101`
+points, with edge mass `0.00457` on the easy case and `0.00402` on the
+difficult case. HMC uses eight chains, `8,000` steps, and `2,000` burn-in steps;
+maximum rank-normalized `Rhat` is `1.006` on the easy case and `1.004` on the
+difficult case, with minimum bulk ESS `1,285` and `1,001`, respectively. Mean
+normalized marginal Wasserstein distance from HMC to the finite grid is
+`0.08913` on the easy case and `0.09841` on the difficult case. For equal-5 NPE,
+the distance to the finite grid is `0.09195` on the easy case and `0.12057` on
+the difficult case; the distance to HMC is `0.02409` and `0.06640`.
 
 ![Two-exponential easy full-prior posterior overlay](runs/00_shared_assets/readme_two_exp_posteriors/two_exp_best_nll_easy_posterior_corner.png)
 

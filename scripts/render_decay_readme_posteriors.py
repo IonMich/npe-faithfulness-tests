@@ -20,6 +20,7 @@ from npe_flow_stress_tests import (
     make_linear6_case,
     make_sign_case,
     make_two_exp_case,
+    run_hmc,
     run_random_walk_mcmc,
 )
 from npe_posterior_viewer import (
@@ -1284,7 +1285,7 @@ def build_two_exp_readme_cases(
     stack_x_std: np.ndarray | None = None,
     device: torch.device,
 ) -> dict[str, object]:
-    print("Building two-exp posterior cases: one prior-predictive, one low-prior stress draw...")
+    print("Building two-exp posterior cases: one prior-predictive, one low-prior diagnostic draw...")
     draw_index = int(args.draw_index)
     if draw_index < 0:
         raise ValueError("--draw-index must be nonnegative.")
@@ -1313,7 +1314,7 @@ def build_two_exp_readme_cases(
             "x_context": x_context_prior_all[draw_index],
         },
         "difficult": {
-            "mode": "low_prior_stress",
+            "mode": "low_prior_diagnostic",
             "source": {
                 "standardized_prior_offset": low_prior_offset,
                 "prior_mahalanobis": prior_mahalanobis,
@@ -1595,6 +1596,61 @@ def sample_two_exp_mcmc_reference(
     }
 
 
+def sample_two_exp_hmc_reference(
+    *,
+    x_raw: np.ndarray,
+    z_raw: np.ndarray,
+    target: str,
+    chains: int,
+    steps: int,
+    burn_in: int,
+    seed: int,
+) -> tuple[np.ndarray, dict[str, object]]:
+    base_case = make_two_exp_case(ordered=True)
+    z_center = np.asarray(z_raw, dtype=np.float64)
+
+    def initial_z(chains_count: int, _x0: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        scale = np.asarray(base_case.mcmc_proposal_scale, dtype=np.float64) * 2.5
+        return rng.normal(z_center[None, :], scale[None, :], size=(chains_count, base_case.z_dim))
+
+    case = replace(base_case, true_z=z_center, initial_z=initial_z)
+    samples_raw, accept, energy_error, seconds = run_hmc(
+        case,
+        np.asarray(x_raw, dtype=np.float64),
+        chains=int(chains),
+        steps=int(steps),
+        seed=int(seed),
+        device=torch.device("cpu"),
+        dtype=torch.float64,
+    )
+    if burn_in >= steps:
+        raise ValueError("--two-exp-hmc-burn-in must be smaller than --two-exp-hmc-steps.")
+    post_raw = samples_raw[:, int(burn_in) :, :].reshape(-1, base_case.z_dim)
+    post_target = two_exp_target_transform(post_raw, target=target).astype(np.float64)
+    diagnostics = stress_arviz_diagnostics(
+        samples_raw,
+        int(burn_in),
+        lambda z: two_exp_target_transform(z, target=target),
+        tuple(TWO_EXP_TARGET_NAMES),
+    )
+    post_energy_error = energy_error[:, int(burn_in) :].reshape(-1)
+    return post_target, {
+        "kind": "hmc",
+        "chains": int(chains),
+        "steps": int(steps),
+        "burn_in": int(burn_in),
+        "posterior_samples": int(post_target.shape[0]),
+        "acceptance_rate": float(np.mean(accept)),
+        "seconds": float(seconds),
+        "hmc_step_size": float(case.hmc_step_size),
+        "hmc_leapfrog_steps": int(case.hmc_leapfrog_steps),
+        "energy_error_abs_q95": float(np.quantile(np.abs(post_energy_error), 0.95)),
+        "energy_error_abs_max": float(np.max(np.abs(post_energy_error))),
+        "diagnostics": diagnostics,
+        **summarize_mcmc_diagnostics(diagnostics),
+    }
+
+
 def render_two_exp_population_cases(args: argparse.Namespace) -> None:
     TWO_EXP_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     device = stage1.choose_training_device(args.device)
@@ -1646,6 +1702,18 @@ def render_two_exp_population_cases(args: argparse.Namespace) -> None:
             )
             reference_label = "Importance reference"
             reference_color = "#6d5bd0"
+        elif args.two_exp_posterior_reference == "hmc":
+            reference_samples, reference_metadata = sample_two_exp_hmc_reference(
+                x_raw=np.asarray(case_info["x_raw"], dtype=np.float64),
+                z_raw=np.asarray(case_info["z_raw"], dtype=np.float64),
+                target=str(args.two_exp_target),
+                chains=int(args.two_exp_hmc_chains),
+                steps=int(args.two_exp_hmc_steps),
+                burn_in=int(args.two_exp_hmc_burn_in),
+                seed=int(args.seed) + 5000 + 101 * offset,
+            )
+            reference_label = "HMC reference"
+            reference_color = "#b85c38"
         else:
             reference_samples, reference_metadata = sample_two_exp_mcmc_reference(
                 x_raw=np.asarray(case_info["x_raw"], dtype=np.float64),
@@ -1819,8 +1887,8 @@ def parse_args() -> argparse.Namespace:
         default=4096,
     )
     parser.add_argument("--two-exp-reference-samples", type=int, default=100_000)
-    parser.add_argument("--two-exp-posterior-reference", choices=("mcmc", "importance"), default="mcmc")
-    parser.add_argument("--two-exp-grid-size", type=int, default=13)
+    parser.add_argument("--two-exp-posterior-reference", choices=("mcmc", "hmc", "importance"), default="hmc")
+    parser.add_argument("--two-exp-grid-size", type=int, default=21)
     parser.add_argument("--two-exp-grid-quantile-low", type=float, default=0.002)
     parser.add_argument("--two-exp-grid-quantile-high", type=float, default=0.998)
     parser.add_argument("--two-exp-grid-padding-fraction", type=float, default=0.08)
@@ -1831,6 +1899,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--two-exp-importance-batch-size", type=int, default=16)
     parser.add_argument("--two-exp-prior-mixture", type=float, default=0.02)
     parser.add_argument("--two-exp-proposal-inflation", type=float, default=1.0)
+    parser.add_argument("--two-exp-hmc-chains", type=int, default=8)
+    parser.add_argument("--two-exp-hmc-steps", type=int, default=8_000)
+    parser.add_argument("--two-exp-hmc-burn-in", type=int, default=2_000)
     parser.add_argument("--two-exp-smc-particles", type=int, default=4096)
     parser.add_argument("--two-exp-smc-beta-steps", type=int, default=96)
     parser.add_argument("--two-exp-smc-mh-steps", type=int, default=2)
