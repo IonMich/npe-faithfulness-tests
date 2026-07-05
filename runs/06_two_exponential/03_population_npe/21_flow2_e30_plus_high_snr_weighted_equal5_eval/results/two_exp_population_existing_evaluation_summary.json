@@ -1,0 +1,160 @@
+{
+  "description": "Evaluation-only full-prior two_exp population NPE run.",
+  "device": "mps",
+  "evaluation": {
+    "best_individual_nll": -3.179252675962448,
+    "ensemble_gap_to_floor": 0.07896000416555506,
+    "ensemble_nll": {
+      "max": 9.64640875390923,
+      "mean": -3.2008551171703394,
+      "median": -3.2684049287764663,
+      "min": -11.25622477100009,
+      "n": 10000,
+      "q01": -8.616871224121576,
+      "q05": -7.061821698774645,
+      "q95": 0.7808167784109367,
+      "q99": 3.105932513169515,
+      "std": 2.40043444666824,
+      "std_error": 0.024004344466682398
+    },
+    "evaluation_seconds": 48.94396995898569,
+    "floor": {
+      "coordinate_target": "(log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)",
+      "diagnostics": {
+        "ess_mean": 88.45557202441753,
+        "ess_median": 48.467805095692576,
+        "ess_min": 1.2728671247120529,
+        "ess_q05": 4.698477764742155,
+        "floor_method": "importance",
+        "importance_batch_size": 16.0,
+        "importance_samples": 8192.0,
+        "log_weight_std_mean": 201367236626.91486,
+        "log_weight_std_q95": 555940.1455632324,
+        "prior_mixture": 0.020000000000000004,
+        "proposal_inflation": 1.0,
+        "relative_ess_mean": 0.010797799319386906,
+        "relative_ess_q05": 0.0005735446490163764
+      },
+      "estimate": -3.2798151213358944,
+      "method": "Ordered two-exponential ridge-coordinate posterior with raw-coordinate evidence estimated by Gaussian-mixture importance sampling around the profile fit and validation draw, 8192 samples per signal.",
+      "standard_error": 0.02424658850162358,
+      "summary": {
+        "max": 11.560284769099994,
+        "mean": -3.2798151213358944,
+        "median": -3.324660325915219,
+        "min": -12.066817514983097,
+        "n": 10000,
+        "q01": -8.856155845077557,
+        "q05": -7.224561142560585,
+        "q95": 0.7462419947873539,
+        "q99": 2.9661054712922335,
+        "std": 2.424658850162358,
+        "std_error": 0.02424658850162358
+      }
+    },
+    "gap_diagnostics_json": "runs/06_two_exponential/03_population_npe/21_flow2_e30_plus_high_snr_weighted_equal5_eval/results/two_exp_population_gap_diagnostics.json",
+    "gap_z_score": 19.117176697518598,
+    "individual_nll": [
+      {
+        "max": 16.135164260864258,
+        "mean": -3.179252675962448,
+        "median": -3.2528648376464844,
+        "min": -11.265483856201172,
+        "n": 10000,
+        "q01": -8.644261646270753,
+        "q05": -7.0438621044158936,
+        "q95": 0.8509218454360936,
+        "q99": 3.2770822238922155,
+        "std": 2.434324134607026,
+        "std_error": 0.02434324134607026
+      },
+      {
+        "max": 17.862855911254883,
+        "mean": -3.1777236767053605,
+        "median": -3.259467124938965,
+        "min": -11.258598327636719,
+        "n": 10000,
+        "q01": -8.557904405593872,
+        "q05": -7.048141431808472,
+        "q95": 0.8561134815216053,
+        "q99": 3.3841203117370653,
+        "std": 2.4317661576506033,
+        "std_error": 0.024317661576506035
+      },
+      {
+        "max": 14.717331886291504,
+        "mean": -3.1754900041103364,
+        "median": -3.261645793914795,
+        "min": -11.950322151184082,
+        "n": 10000,
+        "q01": -8.632918529510498,
+        "q05": -7.023129367828369,
+        "q95": 0.8854340791702229,
+        "q99": 3.3171270322799717,
+        "std": 2.43976211438459,
+        "std_error": 0.0243976211438459
+      },
+      {
+        "max": 16.843517303466797,
+        "mean": -3.174951054263115,
+        "median": -3.2726826667785645,
+        "min": -11.30081558227539,
+        "n": 10000,
+        "q01": -8.613533601760864,
+        "q05": -7.0440793275833125,
+        "q95": 0.8550406455993612,
+        "q99": 3.497002754211427,
+        "std": 2.4387843476460835,
+        "std_error": 0.024387843476460835
+      },
+      {
+        "max": 12.374370574951172,
+        "mean": -3.1629867383241654,
+        "median": -3.2256617546081543,
+        "min": -11.164631843566895,
+        "n": 10000,
+        "q01": -8.743650093078614,
+        "q05": -7.100941133499146,
+        "q95": 0.8912240028381317,
+        "q99": 3.2180233812332166,
+        "std": 2.4432954164757885,
+        "std_error": 0.024432954164757884
+      }
+    ],
+    "paired_gap_standard_error": 0.0041303172228252735,
+    "paired_gap_summary": {
+      "max": 7.63246792076922,
+      "mean": 0.07896000416555506,
+      "median": 0.046863517344233,
+      "min": -2.7415442402305956,
+      "n": 10000,
+      "q01": -0.9803745810454733,
+      "q05": -0.44514545584360715,
+      "q95": 0.6778832792593263,
+      "q99": 1.3845343597668798,
+      "std": 0.4130317222825273,
+      "std_error": 0.0041303172228252735
+    },
+    "validation_examples": 10000,
+    "validation_seed": 20260705
+  },
+  "kind": "two_exp_population_existing_evaluation",
+  "recipe": {
+    "eval_batch_size": 512,
+    "two_exp_floor_method": "importance",
+    "two_exp_importance_batch_size": 16,
+    "two_exp_importance_samples": 8192,
+    "two_exp_importance_seed": 20260723,
+    "two_exp_prior_mixture": 0.02,
+    "two_exp_proposal_inflation": 1.0,
+    "two_exp_target": "amplitude_sum_delta",
+    "validation_examples": 10000,
+    "validation_seed": 20260705
+  },
+  "runtime": {
+    "numpy_version": "2.5.0",
+    "torch_version": "2.12.1"
+  },
+  "source_summary": "runs/06_two_exponential/03_population_npe/21_flow2_e30_plus_high_snr_weighted_equal5_eval/results/two_exp_population_ensemble_summary.json",
+  "target": "(log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)"
+}

@@ -360,6 +360,7 @@ Training probes tried:
 512k x 1 Flow2 mixture, 30 ep   NLL -3.17577, gap 0.10572
 512k x 1 rate-sum target, 30 ep NLL -3.17315, gap 0.10834
 512k x 1 high-SNR weighted, 30 ep NLL -3.16299, gap 0.11851
+equal-5 best Flow2 + high-SNR    NLL -3.20086, gap 0.08064
 ```
 
 These gaps are normalized to the shared 10k validation reference floor
@@ -390,6 +391,12 @@ training draws by log-SNR with a 4x tail weight. It drove the weighted training
 loss much lower (`-4.16513` target units) but worsened unweighted full-prior
 validation NLL to `-3.16299`, so plain tail reweighting is not the right repair
 for the global objective.
+
+An equal-weight 5-member mixture of the previous best 4-member Flow2 e30
+ensemble plus the high-SNR weighted member improved only marginally to
+`-3.20086`, a common-floor gap of `0.08064` and a paired gap z-score of `19.12`.
+This is the best held-out NLL observed so far, but it is not a meaningful
+near-floor repair.
 
 Useful infrastructure completed:
 

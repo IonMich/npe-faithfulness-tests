@@ -933,11 +933,12 @@ g(z)=(A_1,k_1,A_2,k_2,\sigma).
 
 Full-prior population NPE is still unresolved. The current reference floor probe
 in the ridge target coordinates is `-3.28149 +/- 0.02423` NLL on the shared 10k
-validation cache. The best completed population probe is the 4-member Flow2
-ridge-target ensemble at 30 epochs, but it remains `0.08257` NLL above this
-common floor. The table below normalizes every completed probe to that same
-reference floor; per-run floor estimates in some artifacts differ only by
-finite Monte Carlo noise and are not used for this comparison.
+validation cache. The best trained architecture is still the 4-member Flow2
+ridge-target ensemble at 30 epochs, at `0.08257` NLL above this common floor. A
+post-hoc equal-weight mixture with the high-SNR weighted member improves only to
+`0.08064` above the same floor. The table below normalizes every completed probe
+to that common reference floor; per-run floor estimates in some artifacts differ
+only by finite Monte Carlo noise and are not used for this comparison.
 
 | Population NPE probe | Validation NLL | Gap to common floor |
 | --- | ---: | ---: |
@@ -952,6 +953,7 @@ finite Monte Carlo noise and are not used for this comparison.
 | 2-component Flow2 mixture, 512k x1, 30 epochs | `-3.17577` | `0.10572` |
 | Flow2 rate-sum target, 512k x1, 30 epochs | `-3.17315` | `0.10834` |
 | Flow2 high-SNR weighted ridge target, 512k x1, 30 epochs | `-3.16299` | `0.11851` |
+| Equal-5 mixture: Flow2 ridge x4 + high-SNR weighted x1 | `-3.20086` | `0.08064` |
 
 The miss is therefore not explained by one short run or by the first floor
 estimate. Scaling the same Flow2 recipe to 1.024M simulations, increasing flow
