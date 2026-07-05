@@ -48,6 +48,7 @@ from train_sign_population_npe import (
     label_raw_prior_logpdf,
     linear6_log_py_given_log_sigma,
     linear6_sufficient_stats,
+    load_population_members_from_summaries,
     sample_two_exp_population_raw,
     sort_label_target,
     TWO_EXP_PRIOR_MEAN,
@@ -96,6 +97,11 @@ TWO_EXP_ENSEMBLE_SUMMARY = (
     ROOT
     / "runs/06_two_exponential/03_population_npe/21_flow2_e30_plus_high_snr_weighted_equal5_eval/"
     "results/two_exp_population_ensemble_summary.json"
+)
+TWO_EXP_STACK_SUMMARY = (
+    ROOT
+    / "runs/06_two_exponential/03_population_npe/26_learned_stack_full_prior_candidates_noaug/"
+    "results/two_exp_population_stacked_evaluation_summary.json"
 )
 TWO_EXP_TARGET_LABELS = [
     r"$\log(A_1+A_2)$",
@@ -278,6 +284,93 @@ def sample_stage1_ensemble(
     result = np.concatenate(chunks, axis=0)
     rng.shuffle(result, axis=0)
     return result
+
+
+def resolve_repo_path(path: str | Path) -> Path:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return candidate
+    if candidate.exists():
+        return candidate
+    return ROOT / candidate
+
+
+def load_two_exp_stack_artifact(
+    summary_path: Path,
+    device: torch.device,
+) -> tuple[list[dict[str, Any]], torch.nn.Module, np.ndarray, np.ndarray, dict[str, Any]]:
+    summary_path = resolve_repo_path(summary_path)
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    members = load_population_members_from_summaries(
+        [resolve_repo_path(path) for path in summary["source_summaries"]],
+        device=device,
+    )
+    gate_path = resolve_repo_path(summary["gate_pt"])
+    checkpoint = torch.load(gate_path, map_location="cpu", weights_only=False)
+    x_mean = np.asarray(checkpoint["x_mean"], dtype=np.float64)
+    x_std = np.asarray(checkpoint["x_std"], dtype=np.float64)
+    member_count = int(checkpoint.get("member_count", len(members)))
+    if len(members) != member_count:
+        raise RuntimeError(
+            f"Stack gate expects {member_count} members, but {len(members)} were loaded from source summaries."
+        )
+    training = dict(checkpoint.get("training", {}))
+    recipe = dict(summary.get("recipe", {}))
+    hidden_dim = int(recipe.get("stack_hidden_dim", training.get("hidden_dim", 32)))
+    hidden_layers = int(recipe.get("stack_hidden_layers", training.get("hidden_layers", 1)))
+    gate = stage1.make_mlp(int(x_mean.shape[0]), member_count, hidden_dim, hidden_layers)
+    gate.load_state_dict(checkpoint["state_dict"])
+    gate = gate.to(device)
+    gate.eval()
+    metadata = {
+        "summary": repo_relative(summary_path),
+        "gate_pt": repo_relative(gate_path),
+        "source_summaries": [repo_relative(resolve_repo_path(path)) for path in summary["source_summaries"]],
+        "member_count": int(member_count),
+        "hidden_dim": int(hidden_dim),
+        "hidden_layers": int(hidden_layers),
+        "best_val_nll": summary.get("stack_training", {}).get("best_val_nll"),
+        "held_out_nll": summary.get("evaluation", {}).get("ensemble_nll", {}).get("mean"),
+        "held_out_gap_to_floor": summary.get("evaluation", {}).get("ensemble_gap_to_floor"),
+    }
+    return members, gate, x_mean, x_std, metadata
+
+
+@torch.no_grad()
+def sample_stage1_stacked_ensemble(
+    *,
+    members: list[dict[str, Any]],
+    gate: torch.nn.Module,
+    gate_x_mean: np.ndarray,
+    gate_x_std: np.ndarray,
+    x_context: np.ndarray,
+    samples: int,
+    seed: int,
+    device: torch.device,
+) -> tuple[np.ndarray, np.ndarray]:
+    x_standardized = standardize(x_context[None, :], gate_x_mean, gate_x_std)
+    logits = gate(torch.from_numpy(x_standardized.astype(np.float32)).to(device))
+    weights = torch.softmax(logits, dim=-1).detach().cpu().numpy()[0].astype(np.float64)
+    weights = weights / weights.sum()
+    rng = np.random.default_rng(seed)
+    counts = rng.multinomial(int(samples), weights)
+    chunks = []
+    for index, (member, count) in enumerate(zip(members, counts, strict=True)):
+        if count == 0:
+            continue
+        member_samples = sample_stage1_ensemble(
+            members=[member],
+            x_context=x_context,
+            samples=int(count),
+            seed=int(seed) + 101 * (index + 1),
+            device=device,
+        )
+        chunks.append(member_samples)
+    if not chunks:
+        raise RuntimeError("Stacked ensemble sampling produced no member samples.")
+    result = np.concatenate(chunks, axis=0)
+    rng.shuffle(result, axis=0)
+    return result, weights
 
 
 @torch.no_grad()
@@ -1100,7 +1193,7 @@ def render_linear6_population_case(args: argparse.Namespace) -> None:
 
 
 @torch.no_grad()
-def evaluate_stage1_ensemble_log_prob(
+def evaluate_stage1_member_log_probs(
     *,
     members: list[dict[str, Any]],
     x_context: np.ndarray,
@@ -1127,13 +1220,68 @@ def evaluate_stage1_ensemble_log_prob(
             )
             chunks.append(log_prob.detach().cpu().numpy().astype(np.float64))
         member_log_probs.append(np.concatenate(chunks, axis=0))
-    return logsumexp(np.stack(member_log_probs, axis=0), axis=0) - np.log(len(members))
+    return np.stack(member_log_probs, axis=1)
+
+
+@torch.no_grad()
+def evaluate_stage1_ensemble_log_prob(
+    *,
+    members: list[dict[str, Any]],
+    x_context: np.ndarray,
+    z_target: np.ndarray,
+    device: torch.device,
+    batch_size: int,
+) -> np.ndarray:
+    member_log_probs = evaluate_stage1_member_log_probs(
+        members=members,
+        x_context=x_context,
+        z_target=z_target,
+        device=device,
+        batch_size=batch_size,
+    )
+    return logsumexp(member_log_probs, axis=1) - np.log(len(members))
+
+
+@torch.no_grad()
+def evaluate_stage1_stacked_log_prob(
+    *,
+    members: list[dict[str, Any]],
+    gate: torch.nn.Module,
+    gate_x_mean: np.ndarray,
+    gate_x_std: np.ndarray,
+    x_context: np.ndarray,
+    z_target: np.ndarray,
+    device: torch.device,
+    batch_size: int,
+) -> np.ndarray:
+    member_log_probs = evaluate_stage1_member_log_probs(
+        members=members,
+        x_context=x_context,
+        z_target=z_target,
+        device=device,
+        batch_size=batch_size,
+    )
+    log_weight_chunks = []
+    for start in range(0, x_context.shape[0], batch_size):
+        stop = min(start + batch_size, x_context.shape[0])
+        x_standardized = standardize(
+            x_context[start:stop],
+            np.asarray(gate_x_mean, dtype=np.float64),
+            np.asarray(gate_x_std, dtype=np.float64),
+        )
+        logits = gate(torch.from_numpy(x_standardized.astype(np.float32)).to(device))
+        log_weight_chunks.append(torch.log_softmax(logits, dim=-1).detach().cpu().numpy().astype(np.float64))
+    log_weights = np.concatenate(log_weight_chunks, axis=0)
+    return logsumexp(member_log_probs + log_weights, axis=1)
 
 
 def build_two_exp_readme_cases(
     *,
     args: argparse.Namespace,
     members: list[dict[str, Any]],
+    stack_gate: torch.nn.Module | None = None,
+    stack_x_mean: np.ndarray | None = None,
+    stack_x_std: np.ndarray | None = None,
     device: torch.device,
 ) -> dict[str, object]:
     print("Building two-exp posterior cases: one prior-predictive, one low-prior stress draw...")
@@ -1183,13 +1331,27 @@ def build_two_exp_readme_cases(
     x_context = np.stack([np.asarray(raw_cases[name]["x_context"], dtype=np.float32) for name in case_names], axis=0)
     z_raw = np.stack([np.asarray(raw_cases[name]["z_raw"], dtype=np.float32) for name in case_names], axis=0)
     z_target = two_exp_target_transform(z_raw, target=str(args.two_exp_target))
-    ensemble_log_prob = evaluate_stage1_ensemble_log_prob(
-        members=members,
-        x_context=x_context,
-        z_target=z_target,
-        device=device,
-        batch_size=int(args.eval_batch_size),
-    )
+    if stack_gate is None:
+        ensemble_log_prob = evaluate_stage1_ensemble_log_prob(
+            members=members,
+            x_context=x_context,
+            z_target=z_target,
+            device=device,
+            batch_size=int(args.eval_batch_size),
+        )
+    else:
+        if stack_x_mean is None or stack_x_std is None:
+            raise ValueError("Stacked two-exp case evaluation needs stack_x_mean and stack_x_std.")
+        ensemble_log_prob = evaluate_stage1_stacked_log_prob(
+            members=members,
+            gate=stack_gate,
+            gate_x_mean=stack_x_mean,
+            gate_x_std=stack_x_std,
+            x_context=x_context,
+            z_target=z_target,
+            device=device,
+            batch_size=int(args.eval_batch_size),
+        )
     ensemble_nll = -ensemble_log_prob
     exact_nll, diagnostics = two_exp_exact_posterior_nll(
         x_raw=x_raw,
@@ -1436,8 +1598,36 @@ def sample_two_exp_mcmc_reference(
 def render_two_exp_population_cases(args: argparse.Namespace) -> None:
     TWO_EXP_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     device = stage1.choose_training_device(args.device)
-    members = load_sign_ensemble(args.two_exp_ensemble_summary, device)
-    selection = build_two_exp_readme_cases(args=args, members=members, device=device)
+    stack_gate = None
+    stack_x_mean = None
+    stack_x_std = None
+    stack_metadata = None
+    if args.two_exp_posterior_model == "learned_stack":
+        members, stack_gate, stack_x_mean, stack_x_std, stack_metadata = load_two_exp_stack_artifact(
+            args.two_exp_stack_summary,
+            device,
+        )
+        npe_label = "Learned-stack NPE"
+        model_summary_path = resolve_repo_path(args.two_exp_stack_summary)
+        model_description = (
+            "the learned x-dependent stack over compatible frozen two-exponential "
+            "population NPE members"
+        )
+    else:
+        members = load_sign_ensemble(args.two_exp_ensemble_summary, device)
+        npe_label = "Equal-5 NPE"
+        model_summary_path = resolve_repo_path(args.two_exp_ensemble_summary)
+        model_description = (
+            "the equal-5 mixture of the Flow2 ridge ensemble and high-SNR weighted member"
+        )
+    selection = build_two_exp_readme_cases(
+        args=args,
+        members=members,
+        stack_gate=stack_gate,
+        stack_x_mean=stack_x_mean,
+        stack_x_std=stack_x_std,
+        device=device,
+    )
 
     outputs = {}
     case_summaries = {}
@@ -1477,13 +1667,26 @@ def render_two_exp_population_cases(args: argparse.Namespace) -> None:
             padding_fraction=float(args.two_exp_grid_padding_fraction),
             chunk_size=int(args.two_exp_grid_chunk_size),
         )
-        npe_samples = sample_stage1_ensemble(
-            members=members,
-            x_context=np.asarray(case_info["x_context"], dtype=np.float64),
-            samples=int(args.npe_samples),
-            seed=int(args.seed) + 1000 + 101 * offset,
-            device=device,
-        )
+        if stack_gate is None:
+            npe_samples = sample_stage1_ensemble(
+                members=members,
+                x_context=np.asarray(case_info["x_context"], dtype=np.float64),
+                samples=int(args.npe_samples),
+                seed=int(args.seed) + 1000 + 101 * offset,
+                device=device,
+            )
+            stack_weights = None
+        else:
+            npe_samples, stack_weights = sample_stage1_stacked_ensemble(
+                members=members,
+                gate=stack_gate,
+                gate_x_mean=np.asarray(stack_x_mean, dtype=np.float64),
+                gate_x_std=np.asarray(stack_x_std, dtype=np.float64),
+                x_context=np.asarray(case_info["x_context"], dtype=np.float64),
+                samples=int(args.npe_samples),
+                seed=int(args.seed) + 1000 + 101 * offset,
+                device=device,
+            )
         true_target = np.asarray(case_info["z_target"], dtype=np.float64)
         figure = render_corner_layers(
             labels=TWO_EXP_TARGET_LABELS,
@@ -1497,12 +1700,12 @@ def render_two_exp_population_cases(args: argparse.Namespace) -> None:
                     hist_lw=1.55,
                     contour_lw=1.20,
                 ),
-                SampleCornerLayer("Best-NLL NPE", "#0f766e", npe_samples, hist_lw=1.45, contour_lw=1.15),
+                SampleCornerLayer(npe_label, "#0f766e", npe_samples, hist_lw=1.45, contour_lw=1.15),
             ],
             true_color="#172033",
             title=(
                 f"Two-exponential {case_name} full-prior posterior\n"
-                f"exact grid vs {reference_label} vs best sampleable NPE"
+                f"exact grid vs {reference_label} vs {npe_label}"
             ),
             max_sample_plot=18_000,
             rng=np.random.default_rng(int(args.seed) + 2000 + offset),
@@ -1522,7 +1725,10 @@ def render_two_exp_population_cases(args: argparse.Namespace) -> None:
                 ),
             },
             "npe": {
+                "model": str(args.two_exp_posterior_model),
+                "label": npe_label,
                 "posterior_samples": int(npe_samples.shape[0]),
+                "stack_weights": None if stack_weights is None else stack_weights,
                 "to_grid": compare_samples_to_weighted_grid_named(
                     npe_samples,
                     grid_layer,
@@ -1543,12 +1749,11 @@ def render_two_exp_population_cases(args: argparse.Namespace) -> None:
     summary = {
         "description": (
             "Two representative full-prior posterior checks for the current "
-            "best sampleable two-exponential population NPE, the equal-5 "
-            "mixture of the Flow2 ridge ensemble and high-SNR weighted member. "
-            "The learned stack has the best held-out NLL but is not promoted "
-            "as the plotted sampleable posterior artifact."
+            f"best held-out-NLL two-exponential population NPE, {model_description}."
         ),
-        "ensemble_summary": repo_relative(args.two_exp_ensemble_summary),
+        "ensemble_summary": repo_relative(model_summary_path),
+        "posterior_model": str(args.two_exp_posterior_model),
+        "stack": stack_metadata,
         "target": str(args.two_exp_target),
         "labels": TWO_EXP_TARGET_LABELS,
         "selection": {
@@ -1586,6 +1791,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--label-switch-ensemble-summary", type=Path, default=LABEL_SWITCH_ENSEMBLE_SUMMARY)
     parser.add_argument("--linear6-ensemble-summary", type=Path, default=LINEAR6_ENSEMBLE_SUMMARY)
     parser.add_argument("--two-exp-ensemble-summary", type=Path, default=TWO_EXP_ENSEMBLE_SUMMARY)
+    parser.add_argument("--two-exp-stack-summary", type=Path, default=TWO_EXP_STACK_SUMMARY)
+    parser.add_argument(
+        "--two-exp-posterior-model",
+        choices=("learned_stack", "equal5"),
+        default="learned_stack",
+    )
     parser.add_argument("--signal-seed", type=int, default=20260707)
     parser.add_argument("--draw-index", type=int, default=1)
     parser.add_argument("--seed", type=int, default=20260711)

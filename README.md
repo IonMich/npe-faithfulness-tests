@@ -972,18 +972,17 @@ The validation-selected 1.024M-per-member ensemble reached a paired gap of
 the current best held-out NLL, but its paired gap is still `0.07470 +/- 0.00394`,
 so it is not a floor-level result either.
 
-Posterior-shape diagnostics below use the equal-5 mixture, the best plotted
-sampleable artifact, not the old fixed-signal artifact. The learned stack has a
-slightly better held-out NLL, but it remains a resolved full-prior miss and is
-not yet promoted to the plotted reference. The easy case is an ordinary
-full-prior prior-predictive draw. The difficult case follows the single-decay
-convention: a low-prior-density stress draw, here `4.27` prior standard
-deviations from the raw prior mean with log prior density `9.125` below the
-prior mean. Because this posterior is five-dimensional, the diagnostic overlay
-uses an exact local 5D grid as the primary visual reference and keeps the MCMC
-chain as a sampler sanity check. The NPE mean normalized marginal Wasserstein
-distance to the exact grid is `0.1488` on the easy case and `0.1631` on the
-difficult case; the grid edge mass is `0.0102` and `0.0266`, respectively.
+Posterior-shape diagnostics below use the learned x-dependent stack, the current
+best held-out-NLL model, not the old fixed-signal artifact. The easy case is an
+ordinary full-prior prior-predictive draw. The difficult case follows the
+single-decay convention: a low-prior-density stress draw, here `4.27` prior
+standard deviations from the raw prior mean with log prior density `9.125` below
+the prior mean. Because this posterior is five-dimensional, the diagnostic
+overlay uses an exact local 5D grid as the primary visual reference and keeps
+the MCMC chain as a sampler sanity check. The learned-stack NPE mean normalized
+marginal Wasserstein distance to the exact grid is `0.2456` on the easy case and
+`0.1601` on the difficult case; the grid edge mass is `0.0102` and `0.0266`,
+respectively.
 
 ![Two-exponential easy full-prior posterior overlay](runs/00_shared_assets/readme_two_exp_posteriors/two_exp_best_nll_easy_posterior_corner.png)
 
