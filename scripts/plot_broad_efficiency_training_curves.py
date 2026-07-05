@@ -24,10 +24,21 @@ DEFAULT_SIGN_OUTPUT = (
 DEFAULT_SIGN_SUMMARY = (
     ROOT / "runs/00_shared_assets/readme_sign_posteriors/sign_population_training_loss_summary.json"
 )
+DEFAULT_LINEAR6_OUTPUT = (
+    ROOT / "runs/00_shared_assets/readme_linear6_posteriors/linear6_population_training_loss.png"
+)
+DEFAULT_LINEAR6_SUMMARY = (
+    ROOT / "runs/00_shared_assets/readme_linear6_posteriors/linear6_population_training_loss_summary.json"
+)
 DEFAULT_SIGN_ENSEMBLE_SUMMARY = (
     ROOT
     / "runs/02_stress_sign/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/"
     "results/sign_population_ensemble_summary.json"
+)
+DEFAULT_LINEAR6_ENSEMBLE_SUMMARY = (
+    ROOT
+    / "runs/05_stress_linear6/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/"
+    "results/linear6_population_ensemble_summary.json"
 )
 POPULATION_ENTROPY_NLL = -3.6386545787958
 
@@ -373,7 +384,7 @@ def plot(output_path: Path = DEFAULT_OUTPUT) -> Path:
     return output_path
 
 
-def sign_population_rows(summary: dict) -> list[dict[str, object]]:
+def population_training_rows(summary: dict) -> list[dict[str, object]]:
     rows = []
     for member in summary["members"]:
         item = member["member_summary"]
@@ -401,22 +412,24 @@ def sign_population_rows(summary: dict) -> list[dict[str, object]]:
                 "member_index": int(item["member_index"]),
                 "seed": int(item["seed"]),
                 "seconds": seconds,
-                "train_nll_folded_units": train_nll,
+                "train_nll_target_units": train_nll,
                 "training_seconds": float(item["training_seconds"]),
-                "final_train_nll_folded_units": float(item["final_train_nll_folded_units"]),
+                "final_train_nll_target_units": float(
+                    item.get("final_train_nll_target_units", item.get("final_train_nll_folded_units"))
+                ),
             }
         )
     return rows
 
 
-def sign_population_wall_seconds(summary: dict, rows: list[dict[str, object]]) -> float:
+def population_wall_seconds(summary: dict, rows: list[dict[str, object]]) -> float:
     value = summary.get("wall_seconds")
     if value is not None:
         return float(value)
     return float(sum(float(row["training_seconds"]) for row in rows))
 
 
-def write_sign_training_summary(
+def write_population_training_summary(
     *,
     path: Path,
     source_summary: dict,
@@ -440,12 +453,12 @@ def write_sign_training_summary(
             {
                 "member_index": row["member_index"],
                 "seed": row["seed"],
-                "final_train_nll_folded_units": row["final_train_nll_folded_units"],
+                "final_train_nll_target_units": row["final_train_nll_target_units"],
                 "training_seconds": row["training_seconds"],
             }
             for row in rows
         ],
-        "mean_train_nll_folded_units": {
+        "mean_train_nll_target_units": {
             "first_epoch": float(mean_curve[0]),
             "final_epoch": float(mean_curve[-1]),
         },
@@ -459,7 +472,7 @@ def write_sign_training_summary(
         },
         "note": (
             "The source run skipped per-epoch validation. Curves are training "
-            "NLL per member in folded target units against total training wall "
+            "NLL per member in target units against total training wall "
             "time; the marker is the final 1M-example full-prior validation NLL."
         ),
     }
@@ -467,17 +480,19 @@ def write_sign_training_summary(
     path.write_text(json.dumps(json_ready(output), indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def plot_sign_population(
+def plot_population_training(
     *,
-    ensemble_summary: Path = DEFAULT_SIGN_ENSEMBLE_SUMMARY,
-    output_path: Path = DEFAULT_SIGN_OUTPUT,
-    summary_output: Path = DEFAULT_SIGN_SUMMARY,
+    ensemble_summary: Path,
+    output_path: Path,
+    summary_output: Path,
+    title: str,
+    ylabel: str,
 ) -> Path:
     source_summary = load_json(ensemble_summary)
-    rows = sign_population_rows(source_summary)
-    matrix = np.vstack([row["train_nll_folded_units"] for row in rows])
+    rows = population_training_rows(source_summary)
+    matrix = np.vstack([row["train_nll_target_units"] for row in rows])
     seconds_stack = np.vstack([row["seconds"] for row in rows])
-    wall_seconds = sign_population_wall_seconds(source_summary, rows)
+    wall_seconds = population_wall_seconds(source_summary, rows)
     wall_axis = seconds_stack.mean(axis=0)
     if wall_axis[-1] > 0.0:
         wall_axis = wall_axis * (wall_seconds / wall_axis[-1])
@@ -501,7 +516,7 @@ def plot_sign_population(
     for row, color in zip(rows, colors, strict=False):
         ax.plot(
             row["wall_axis"],
-            row["train_nll_folded_units"],
+            row["train_nll_target_units"],
             color=color,
             lw=1.15,
             alpha=0.72,
@@ -522,11 +537,14 @@ def plot_sign_population(
         label="final full-prior validation",
     )
     ax.set_xlabel("training wall seconds")
-    ax.set_ylabel("NLL in folded target units")
-    ax.set_title("Sign population NPE loss by wall time")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
     ax.grid(alpha=0.22)
     ax.set_xscale("log")
-    ax.set_xticks([40, 80, 160, 320, 640])
+    tick_candidates = np.array([20, 40, 80, 160, 320, 640, 1280, 2560], dtype=float)
+    visible_ticks = tick_candidates[(tick_candidates >= float(wall_axis[0]) * 0.6) & (tick_candidates <= float(wall_seconds) * 1.2)]
+    if visible_ticks.size:
+        ax.set_xticks(visible_ticks)
     ax.xaxis.set_major_formatter(mticker.ScalarFormatter())
     ax.xaxis.set_minor_formatter(mticker.NullFormatter())
     ax.legend(frameon=False, fontsize=9)
@@ -535,7 +553,7 @@ def plot_sign_population(
     fig.tight_layout()
     fig.savefig(output_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
-    write_sign_training_summary(
+    write_population_training_summary(
         path=summary_output,
         source_summary=source_summary,
         rows=rows,
@@ -547,16 +565,47 @@ def plot_sign_population(
     return output_path
 
 
+def plot_sign_population(
+    *,
+    ensemble_summary: Path = DEFAULT_SIGN_ENSEMBLE_SUMMARY,
+    output_path: Path = DEFAULT_SIGN_OUTPUT,
+    summary_output: Path = DEFAULT_SIGN_SUMMARY,
+) -> Path:
+    return plot_population_training(
+        ensemble_summary=ensemble_summary,
+        output_path=output_path,
+        summary_output=summary_output,
+        title="Sign population NPE loss by wall time",
+        ylabel="NLL in folded target units",
+    )
+
+
+def plot_linear6_population(
+    *,
+    ensemble_summary: Path = DEFAULT_LINEAR6_ENSEMBLE_SUMMARY,
+    output_path: Path = DEFAULT_LINEAR6_OUTPUT,
+    summary_output: Path = DEFAULT_LINEAR6_SUMMARY,
+) -> Path:
+    return plot_population_training(
+        ensemble_summary=ensemble_summary,
+        output_path=output_path,
+        summary_output=summary_output,
+        title="Linear6 population NPE loss by wall time",
+        ylabel="NLL in target z units",
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot population NPE training-loss curves.")
     parser.add_argument(
         "--mode",
-        choices=("single_decay", "sign_population"),
+        choices=("single_decay", "sign_population", "linear6_population"),
         default="single_decay",
     )
     parser.add_argument("--output", type=Path, default=None)
-    parser.add_argument("--summary-output", type=Path, default=DEFAULT_SIGN_SUMMARY)
+    parser.add_argument("--summary-output", type=Path, default=None)
     parser.add_argument("--sign-ensemble-summary", type=Path, default=DEFAULT_SIGN_ENSEMBLE_SUMMARY)
+    parser.add_argument("--linear6-ensemble-summary", type=Path, default=DEFAULT_LINEAR6_ENSEMBLE_SUMMARY)
     return parser.parse_args()
 
 
@@ -564,11 +613,17 @@ def main() -> None:
     args = parse_args()
     if args.mode == "single_decay":
         output_path = plot(args.output or DEFAULT_OUTPUT)
-    else:
+    elif args.mode == "sign_population":
         output_path = plot_sign_population(
             ensemble_summary=args.sign_ensemble_summary,
             output_path=args.output or DEFAULT_SIGN_OUTPUT,
-            summary_output=args.summary_output,
+            summary_output=args.summary_output or DEFAULT_SIGN_SUMMARY,
+        )
+    else:
+        output_path = plot_linear6_population(
+            ensemble_summary=args.linear6_ensemble_summary,
+            output_path=args.output or DEFAULT_LINEAR6_OUTPUT,
+            summary_output=args.summary_output or DEFAULT_LINEAR6_SUMMARY,
         )
     print(output_path)
 

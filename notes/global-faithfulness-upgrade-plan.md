@@ -33,7 +33,7 @@ and the entropy-floor estimate.
 | Sign symmetry | `near_floor` full-prior folded NLL result | Not globally faithful yet; close the remaining NLL-floor gap or reduce uncertainty until the floor hit is statistically clean. |
 | Banana | `legacy_pairwise_pass` | Estimate the full-prior floor, then train/evaluate a population NPE in raw coordinates. |
 | Label-switching mixture | `legacy_pairwise_pass` | Estimate the sorted-coordinate floor, then train/evaluate a population NPE in symmetry-aware coordinates. |
-| Linear6 | `legacy_pairwise_pass` | Estimate the full-prior floor using the linear-Gaussian structure, then train/evaluate a population NPE. |
+| Linear6 | `near_floor` full-prior z-NLL result | First completed transfer after sign; remaining gap is real but at the same practical near-floor level as single decay and sign. |
 | Ordered two-exponential decay | `fail` | First build a reliable full-prior floor/evidence pipeline; only then claim or tune global NLL. |
 
 ## Reusable Workflow
@@ -118,6 +118,13 @@ one-off script for every model.
    runs/README.md best-status row
    ```
 
+7. Commit and push the finished model slice before starting the next model.
+
+   Each model-level checkpoint should include the training/evaluation code
+   needed to reproduce the result, the run summaries, README assets, status
+   indexes, and documentation changes. Do not carry completed model artifacts
+   as uncommitted local state while moving to another model.
+
 ## Model-Specific Plans
 
 ### 0. Near-Floor Baselines
@@ -153,32 +160,43 @@ prior.
 
 ### 1. Linear6
 
-Do this first. It is the best candidate for a clean global result because most
-of the floor can be computed with model structure instead of brute force.
+Done as the first remaining-model transfer. It is a near-floor global
+population result because most of the floor can be computed with model
+structure instead of brute force.
 
 Target coordinates:
 
 ```text
-g(z) = (w_1, ..., w_6, sigma)
+z = (w_1, ..., w_6, log_sigma)
 ```
 
-Floor plan:
+Completed result:
+
+```text
+ensemble NLL  -10.77984 +/- 0.00353
+entropy floor -10.78631 +/- 0.00353
+gap            0.00647 in z units
+paired gap SE  0.000120
+```
+
+Completed artifacts:
+
+- `runs/05_stress_linear6/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/`
+- `runs/00_shared_assets/readme_linear6_posteriors/`
+- root README Linear6 section and run-status indexes.
+
+Floor method:
 
 - Use the linear-Gaussian likelihood conditional on `sigma`.
-- Integrate over `log sigma` with one-dimensional adaptive quadrature.
+- Integrate over `log sigma` with one-dimensional Gauss-Hermite quadrature.
 - Conditional on each `sigma`, use the Gaussian posterior for the weights.
-- Include the `log sigma -> sigma` Jacobian if reporting density in `sigma`.
-- Validate the floor estimator against direct high-precision importance or HMC
-  checks on a small validation subset.
+- Report NLL in `log_sigma` coordinates to avoid unnecessary Jacobian
+  bookkeeping.
 
-Training plan:
+Follow-up if we want to close the resolved gap:
 
-- Context: raw 32-point signal plus cheap OLS summaries:
-  `(w_hat_1, ..., w_hat_6, log sigma_hat, residual norm, condition diagnostics)`.
-- Target: physical `sigma` only if the floor is also in physical `sigma`;
-  otherwise use `log sigma` consistently.
-- Start with the 4-member Flow2 recipe at `512k` per member.
-- Promote to `2.048M` per member if the gap is close but still resolved.
+- Promote to `2.048M` simulations per member using the same recipe, or add
+  another 4-member `512k` ensemble and test the 8-member equal-weight mixture.
 
 Promotion gate:
 
@@ -347,14 +365,11 @@ Use the same stop/go logic for every model.
 
 ## Immediate Next Work
 
-1. Extract the reusable parts of `train_sign_population_npe.py` into a generic
-   population-NPE training/evaluation harness with model hooks for sampler,
-   context, target transform, and floor metadata.
-2. Implement the Linear6 entropy-floor estimator using the linear-Gaussian
-   conditional structure.
-3. Run the Linear6 4-member Flow2 `512k` proof.
-4. Extend `plot_broad_efficiency_training_curves.py` and the README posterior
-   renderer with a `linear6_population` mode instead of adding separate plotting
-   scripts.
-5. Update the Linear6 README section with the full-prior NLL/floor result and
-   one fresh prior-predictive posterior diagnostic.
+1. Commit and push the completed Linear6 near-floor model slice.
+2. Build and sanity-check the Banana full-prior entropy-floor estimator before
+   launching any heavy Banana training.
+3. If Banana floor estimation is stable, run the same 4-member Flow2 `512k`
+   population proof on the Mac mini.
+4. Extend the existing loss/posterior rendering scripts with a
+   `banana_population` mode rather than adding separate plotting scripts.
+5. Repeat the same floor-first workflow for Label Switching.

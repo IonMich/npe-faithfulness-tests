@@ -9,10 +9,11 @@ from typing import Any
 
 import numpy as np
 import torch
+from scipy.special import logsumexp
 
 import npe_stage1_decay as stage1
 from calibrate_sign_target import build_grid_reference, compare_samples_to_reference, mode_summary
-from npe_flow_stress_tests import make_sign_case, run_random_walk_mcmc
+from npe_flow_stress_tests import make_linear6_case, make_sign_case, run_random_walk_mcmc
 from npe_posterior_viewer import (
     DEFAULT_BEST_BROAD_ENSEMBLE_SUMMARY,
     DEFAULT_BEST_BROAD_EFFICIENCY_MODEL,
@@ -26,17 +27,25 @@ from npe_posterior_viewer import (
     WeightedCornerLayer,
     render_corner_layers,
 )
+from train_sign_population_npe import linear6_log_py_given_log_sigma, linear6_sufficient_stats
 
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "runs/00_shared_assets/readme_decay_posteriors"
 SUMMARY_PATH = OUTPUT_DIR / "decay_population_readme_posteriors_summary.json"
 SIGN_OUTPUT_DIR = ROOT / "runs/00_shared_assets/readme_sign_posteriors"
+LINEAR6_OUTPUT_DIR = ROOT / "runs/00_shared_assets/readme_linear6_posteriors"
 SIGN_ENSEMBLE_SUMMARY = (
     ROOT
     / "runs/02_stress_sign/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/"
     "results/sign_population_ensemble_summary.json"
 )
+LINEAR6_ENSEMBLE_SUMMARY = (
+    ROOT
+    / "runs/05_stress_linear6/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/"
+    "results/linear6_population_ensemble_summary.json"
+)
+LOG_2PI = np.log(2.0 * np.pi)
 
 MODEL_ID_MAP = {
     "broad_fresh_e15_ensemble4": "flow2_residual_nsf_ensemble4",
@@ -165,10 +174,10 @@ def load_sign_ensemble(summary_path: Path, device: torch.device) -> list[dict[st
 
 
 @torch.no_grad()
-def sample_sign_population_npe(
+def sample_stage1_ensemble(
     *,
     members: list[dict[str, Any]],
-    x: np.ndarray,
+    x_context: np.ndarray,
     samples: int,
     seed: int,
     device: torch.device,
@@ -180,21 +189,112 @@ def sample_sign_population_npe(
     for index, member in enumerate(members):
         count = base_count + (1 if index < remainder else 0)
         x_standardized = standardize(
-            x[None, :],
+            x_context[None, :],
             np.asarray(member["x_mean"], dtype=np.float64),
             np.asarray(member["x_std"], dtype=np.float64),
         )
         x_tensor = torch.from_numpy(x_standardized).to(device)
-        folded_standardized = member["model"].sample(count, x_tensor).detach().cpu().numpy()
-        folded = (
-            folded_standardized * np.asarray(member["z_std"], dtype=np.float64)[None, :]
+        standardized_samples = member["model"].sample(count, x_tensor).detach().cpu().numpy()
+        samples_raw = (
+            standardized_samples * np.asarray(member["z_std"], dtype=np.float64)[None, :]
             + np.asarray(member["z_mean"], dtype=np.float64)[None, :]
         )
-        sign = np.where(rng.random(count) < 0.5, -1.0, 1.0)
-        chunks.append(np.column_stack([sign * np.maximum(folded[:, 0], 0.0), folded[:, 1]]))
-    samples_raw = np.concatenate(chunks, axis=0)
+        chunks.append(samples_raw)
+    result = np.concatenate(chunks, axis=0)
+    rng.shuffle(result, axis=0)
+    return result
+
+
+@torch.no_grad()
+def sample_sign_population_npe(
+    *,
+    members: list[dict[str, Any]],
+    x: np.ndarray,
+    samples: int,
+    seed: int,
+    device: torch.device,
+) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    folded = sample_stage1_ensemble(
+        members=members,
+        x_context=x,
+        samples=samples,
+        seed=seed,
+        device=device,
+    )
+    sign = np.where(rng.random(folded.shape[0]) < 0.5, -1.0, 1.0)
+    samples_raw = np.column_stack([sign * np.maximum(folded[:, 0], 0.0), folded[:, 1]])
     rng.shuffle(samples_raw, axis=0)
     return samples_raw
+
+
+def sample_linear6_prior_predictive_signal(*, seed: int, draw_index: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    case = make_linear6_case()
+    rng = np.random.default_rng(seed)
+    z = rng.normal(
+        case.prior_mean[None, :],
+        case.prior_std[None, :],
+        size=(draw_index + 1, case.z_dim),
+    )
+    x = case.simulate_x(z, rng)
+    return z[draw_index].astype(np.float64), x[draw_index].astype(np.float64), case.context(x)[draw_index].astype(np.float64)
+
+
+def normal_logpdf(value: np.ndarray, mean: float, std: float) -> np.ndarray:
+    standardized = (value - mean) / std
+    return -0.5 * standardized * standardized - np.log(std) - 0.5 * LOG_2PI
+
+
+def sample_linear6_exact_posterior(
+    *,
+    x_context: np.ndarray,
+    samples: int,
+    seed: int,
+    grid_size: int = 2400,
+) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    coef, projected_sq, residual_sq = linear6_sufficient_stats(x_context[None, :])
+    log_sigma_mean = np.log(0.25)
+    log_sigma_std = 0.50
+    grid = np.linspace(log_sigma_mean - 5.0 * log_sigma_std, log_sigma_mean + 5.0 * log_sigma_std, grid_size)
+    log_post = normal_logpdf(grid, log_sigma_mean, log_sigma_std) + linear6_log_py_given_log_sigma(
+        projected_sq=projected_sq[:, None],
+        residual_sq=residual_sq[:, None],
+        log_sigma=grid[None, :],
+    )[0]
+    probabilities = np.exp(log_post - logsumexp(log_post))
+    indices = rng.choice(grid_size, size=samples, replace=True, p=probabilities)
+    step = float(grid[1] - grid[0])
+    log_sigma = np.clip(grid[indices] + rng.uniform(-0.5 * step, 0.5 * step, size=samples), grid[0], grid[-1])
+    n_obs = 32
+    prior_std_w = 1.25
+    sigma2 = np.exp(2.0 * log_sigma)
+    posterior_var = 1.0 / (1.0 / (prior_std_w * prior_std_w) + n_obs / sigma2)
+    shrink = posterior_var * n_obs / sigma2
+    mean = shrink[:, None] * coef[0][None, :]
+    weights = rng.normal(mean, np.sqrt(posterior_var)[:, None])
+    return np.column_stack([weights, log_sigma])
+
+
+def compare_sample_marginals(estimate: np.ndarray, reference: np.ndarray) -> dict[str, object]:
+    from scipy.stats import wasserstein_distance
+
+    names = [f"w{i}" for i in range(1, 7)] + ["log_sigma"]
+    rows = {}
+    normalized = []
+    for index, name in enumerate(names):
+        scale = max(float(np.std(reference[:, index], ddof=1)), 1e-12)
+        distance = float(wasserstein_distance(reference[:, index], estimate[:, index]))
+        rows[name] = {
+            "wasserstein": distance,
+            "reference_sd": scale,
+            "normalized_wasserstein": distance / scale,
+        }
+        normalized.append(distance / scale)
+    return {
+        "mean_normalized_wasserstein": float(np.mean(normalized)),
+        "parameters": rows,
+    }
 
 
 def sign_reference_layer(reference: dict[str, object]) -> WeightedCornerLayer:
@@ -388,21 +488,103 @@ def render_sign_population_case(args: argparse.Namespace) -> None:
     print(summary_path)
 
 
+def render_linear6_population_case(args: argparse.Namespace) -> None:
+    LINEAR6_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    device = stage1.choose_training_device(args.device)
+    z_true, x_raw, x_context = sample_linear6_prior_predictive_signal(
+        seed=args.signal_seed,
+        draw_index=args.draw_index,
+    )
+    members = load_sign_ensemble(args.linear6_ensemble_summary, device)
+    exact_samples = sample_linear6_exact_posterior(
+        x_context=x_context,
+        samples=args.exact_samples,
+        seed=args.seed + 3000,
+    )
+    npe_samples = sample_stage1_ensemble(
+        members=members,
+        x_context=x_context,
+        samples=args.npe_samples,
+        seed=args.seed + 1000,
+        device=device,
+    )
+
+    figure = render_corner_layers(
+        labels=[
+            r"$w_1$",
+            r"$w_2$",
+            r"$w_3$",
+            r"$w_4$",
+            r"$w_5$",
+            r"$w_6$",
+            r"$\log\sigma$",
+        ],
+        true_values=z_true,
+        weighted_layers=[],
+        sample_layers=[
+            SampleCornerLayer("Exact posterior", "#172033", exact_samples, hist_lw=1.55, contour_lw=1.20),
+            SampleCornerLayer("Population NPE", "#0f766e", npe_samples, hist_lw=1.45, contour_lw=1.15),
+        ],
+        true_color="#172033",
+        title="Linear6 posterior: exact reference vs NPE",
+        max_sample_plot=18_000,
+        rng=np.random.default_rng(args.seed + 2000),
+    )
+    figure_path = LINEAR6_OUTPUT_DIR / "linear6_population_prior_signal_corner.png"
+    summary_path = LINEAR6_OUTPUT_DIR / "linear6_population_prior_signal_summary.json"
+    figure.savefig(figure_path, dpi=130, bbox_inches="tight")
+
+    summary = {
+        "description": (
+            "Fresh full-prior Linear6 posterior check for the population-trained "
+            "Flow2 residual NSF ensemble. The comparison is in the NLL target "
+            "coordinates, including log_sigma."
+        ),
+        "signal": {
+            "seed": int(args.signal_seed),
+            "draw_index": int(args.draw_index),
+            "z": z_true,
+            "x": x_raw,
+            "context": x_context,
+        },
+        "exact": {
+            "posterior_samples": int(exact_samples.shape[0]),
+        },
+        "npe": {
+            "ensemble_summary": args.linear6_ensemble_summary,
+            "members": int(len(members)),
+            "posterior_samples": int(npe_samples.shape[0]),
+            "to_exact": compare_sample_marginals(npe_samples, exact_samples),
+        },
+        "outputs": {
+            "figure": figure_path,
+            "summary": summary_path,
+        },
+    }
+    summary_path.write_text(
+        json.dumps(json_ready(summary), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(summary_path)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Render README posterior comparison figures.")
     parser.add_argument(
         "--mode",
-        choices=("single_decay", "sign_population"),
+        choices=("single_decay", "sign_population", "linear6_population"),
         default="single_decay",
     )
     parser.add_argument("--device", choices=("auto", "cpu", "mps", "cuda"), default="auto")
     parser.add_argument("--sign-ensemble-summary", type=Path, default=SIGN_ENSEMBLE_SUMMARY)
+    parser.add_argument("--linear6-ensemble-summary", type=Path, default=LINEAR6_ENSEMBLE_SUMMARY)
     parser.add_argument("--signal-seed", type=int, default=20260707)
     parser.add_argument("--draw-index", type=int, default=1)
     parser.add_argument("--seed", type=int, default=20260711)
     parser.add_argument("--grid-size", type=int, default=1001)
     parser.add_argument("--grid-limit", type=float, default=4.0)
     parser.add_argument("--npe-samples", type=int, default=80_000)
+    parser.add_argument("--exact-samples", type=int, default=80_000)
     parser.add_argument("--mcmc-chains", type=int, default=8)
     parser.add_argument("--mcmc-steps", type=int, default=12_000)
     parser.add_argument("--mcmc-burn-in", type=int, default=3_000)
@@ -413,8 +595,10 @@ def main() -> None:
     args = parse_args()
     if args.mode == "single_decay":
         render_decay_cases()
-    else:
+    elif args.mode == "sign_population":
         render_sign_population_case(args)
+    else:
+        render_linear6_population_case(args)
 
 
 if __name__ == "__main__":

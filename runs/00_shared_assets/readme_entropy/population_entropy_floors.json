@@ -26,6 +26,15 @@
       "examples": 1000000,
       "method": "Raw sign-symmetry floor minus log(2), because the posterior sign is exactly symmetric.",
       "source": "runs/00_shared_assets/readme_entropy/sign_bayes_entropy_hybrid_1m.json"
+    },
+    {
+      "model": "linear6",
+      "coordinate_target": "z=(w1, ..., w6, log sigma)",
+      "estimate": -10.786310881823061,
+      "standard_error": 0.0035296909220397434,
+      "examples": 1000000,
+      "method": "Linear-Gaussian conditional posterior with one-dimensional Gauss-Hermite evidence integration, order 64.",
+      "source": "runs/05_stress_linear6/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/results/linear6_population_ensemble_summary.json"
     }
   ],
   "note": "Entropy floors are coordinate-specific density losses. Compare an NPE validation NLL only with the floor for the same density target parameterization."

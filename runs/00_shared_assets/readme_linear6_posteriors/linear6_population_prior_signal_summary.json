@@ -1,0 +1,111 @@
+{
+  "description": "Fresh full-prior Linear6 posterior check for the population-trained Flow2 residual NSF ensemble. The comparison is in the NLL target coordinates, including log_sigma.",
+  "exact": {
+    "posterior_samples": 50000
+  },
+  "npe": {
+    "ensemble_summary": "/Users/ioannism/repos/npe/runs/05_stress_linear6/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/results/linear6_population_ensemble_summary.json",
+    "members": 4,
+    "posterior_samples": 50000,
+    "to_exact": {
+      "mean_normalized_wasserstein": 0.01406743989554686,
+      "parameters": {
+        "log_sigma": {
+          "normalized_wasserstein": 0.013332119575480287,
+          "reference_sd": 0.1324326923658656,
+          "wasserstein": 0.0017656084903245155
+        },
+        "w1": {
+          "normalized_wasserstein": 0.00716679633614952,
+          "reference_sd": 0.06005175367603965,
+          "wasserstein": 0.0004303786882247944
+        },
+        "w2": {
+          "normalized_wasserstein": 0.013205828533141185,
+          "reference_sd": 0.05992952083805147,
+          "wasserstein": 0.0007914189762606193
+        },
+        "w3": {
+          "normalized_wasserstein": 0.02064351549804103,
+          "reference_sd": 0.05996130694830638,
+          "wasserstein": 0.001237812169270158
+        },
+        "w4": {
+          "normalized_wasserstein": 0.015037619729289,
+          "reference_sd": 0.05962600899928765,
+          "wasserstein": 0.0008966332493064513
+        },
+        "w5": {
+          "normalized_wasserstein": 0.011007737741737637,
+          "reference_sd": 0.060006232406661336,
+          "wasserstein": 0.000660532869202286
+        },
+        "w6": {
+          "normalized_wasserstein": 0.018078461854989354,
+          "reference_sd": 0.05962867644076089,
+          "wasserstein": 0.001077994752497798
+        }
+      }
+    }
+  },
+  "outputs": {
+    "figure": "/Users/ioannism/repos/npe/runs/00_shared_assets/readme_linear6_posteriors/linear6_population_prior_signal_corner.png",
+    "summary": "/Users/ioannism/repos/npe/runs/00_shared_assets/readme_linear6_posteriors/linear6_population_prior_signal_summary.json"
+  },
+  "signal": {
+    "context": [
+      1.9175225890361667,
+      -0.2434831858207543,
+      -0.003617157983619175,
+      -0.48194023024221677,
+      -0.19198148107769875,
+      0.4995522510628636,
+      -1.196572085254449
+    ],
+    "draw_index": 1,
+    "seed": 20260707,
+    "x": [
+      0.0008562296377819245,
+      -0.7464335260325499,
+      -0.9803574665480791,
+      -0.8524240619895235,
+      -0.8101851154339752,
+      -1.441606441762761,
+      -1.687398148472376,
+      -2.0363597896900183,
+      -1.978840228771521,
+      -2.7336788841059176,
+      -2.9860159575049963,
+      -2.599740359890326,
+      -2.8929082603919,
+      -2.90085499841402,
+      -1.9403362939869935,
+      -1.6167615851555712,
+      -1.3093132702057142,
+      -1.9070080257629498,
+      -1.8833016787248007,
+      -2.1850500740527714,
+      -2.451923190118119,
+      -3.015237869303447,
+      -3.042348924295027,
+      -2.9598888938220203,
+      -2.4098714487654402,
+      -2.855639278758739,
+      -2.0956436044916216,
+      -2.453459971070229,
+      -1.3914420473671485,
+      -1.3650429021544324,
+      -1.2583795461455682,
+      -0.5741272356066021
+    ],
+    "z": [
+      1.8974215688538723,
+      -0.25246132827622403,
+      0.002479035417971716,
+      -0.4968282279581138,
+      -0.11558643641581381,
+      0.47488783938458157,
+      -1.228426634285451
+    ]
+  }
+}

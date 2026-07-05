@@ -133,6 +133,7 @@ floor for the same density target parameterization.
 | Single-exponential decay | $`z=(\log A,\log k,\log\sigma)`$ | `-3.63865 +/- 0.00253` |
 | Sign-symmetry stress | $`\theta=(\theta_1,\theta_2)`$ | `-0.73379 +/- 0.00115` |
 | Sign-symmetry stress, folded target | $`(\lvert\theta_1\rvert,\theta_2)`$ | `-1.42694 +/- 0.00115` |
+| Linear6 stress | $`z=(w_1,\ldots,w_6,\log\sigma)`$ | `-10.78631 +/- 0.00353` |
 
 The single-decay estimate is the adaptive posterior-centered Gauss-Hermite
 oracle recorded in
@@ -146,6 +147,9 @@ The folded sign floor is lower than the raw-coordinate sign floor by
 $`\log 2`$ because the posterior sign is exactly symmetric. A compact table is
 also stored in
 [population_entropy_floors.json](runs/00_shared_assets/readme_entropy/population_entropy_floors.json).
+The Linear6 floor is computed by the population NPE evaluator using the
+linear-Gaussian conditional posterior and one-dimensional Gauss-Hermite
+evidence integration over $`\log\sigma`$.
 
 Finite validation-cache NLLs have their own Monte Carlo uncertainty. For the
 two single-decay NPEs listed below, the full 1M-example cache standard errors
@@ -789,21 +793,48 @@ The benchmark observation is generated from:
 (0.70,-0.35,0.80,-0.20,0.35,0.12,0.20).
 ```
 
-The diagnostic coordinates are:
+The legacy local diagnostic coordinates are:
 
 ```math
 g(z)=(w_1,\ldots,w_6,\sigma).
 ```
 
-Progress: the best run has converged MCMC/HMC references and close NPE
-pairwise agreement after tuning the random-walk proposal and using a tighter
-proposal/training region. It is a legacy pairwise pass pending model-specific
-calibration.
+For the full-prior population NLL result, the density target is instead the
+training coordinate vector:
 
-Best posterior:
-[linear6_q008 run](runs/05_stress_linear6/01_npe_flow/13_npe_flow_stress_tests_linear6_q008/README.md).
+```math
+z=(w_1,\ldots,w_6,\log\sigma).
+```
 
-![Linear6 best posterior overlay](runs/00_shared_assets/readme_model_overlays/linear6_best_posterior_overlay.png)
+The population-trained Linear6 estimator applies the same Flow2 residual NSF
+recipe used for sign with minimal changes: two NSF transforms, residual
+width-80 conditioners, random inter-transform permutations, cosine-step
+learning-rate schedule, and 15 epochs.
+
+| Model | Training data | Full-prior validation NLL |
+| --- | ---: | ---: |
+| 4-member Flow2 residual NSF ensemble | `512k` prior-predictive pairs per member | `-10.77984 +/- 0.00353` |
+
+The Linear6 full-prior entropy floor in the same $`z`$ coordinates is
+`-10.78631 +/- 0.00353`, computed from the exact linear-Gaussian conditional
+posterior with one-dimensional Gauss-Hermite evidence integration over
+$`\log\sigma`$. The measured gap is `0.00647`, so this is a near-floor
+global result at the same practical level as the single-decay and sign
+population NPEs, but it is still not an exact floor hit. The paired gap on the
+same 1M validation examples is precisely resolved, so the remaining gap should
+be treated as real model bias unless a larger ensemble or data scale closes it.
+
+![Linear6 population NPE training loss](runs/00_shared_assets/readme_linear6_posteriors/linear6_population_training_loss.png)
+
+The posterior-shape check below uses the same population-trained ensemble on a
+fresh full-prior signal, in the NLL target coordinates including
+$`\log\sigma`$. Against exact posterior samples, the mean normalized marginal
+Wasserstein distance is `0.01407`.
+
+![Linear6 exact reference and NPE posterior overlay](runs/00_shared_assets/readme_linear6_posteriors/linear6_population_prior_signal_corner.png)
+
+The run is documented at
+[01_flow2_residual_full_prior_512k_ensemble4](runs/05_stress_linear6/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/README.md).
 
 ### Ordered Two-Exponential Decay
 
