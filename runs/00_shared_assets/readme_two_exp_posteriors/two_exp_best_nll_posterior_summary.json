@@ -1,85 +1,177 @@
 {
   "cases": {
     "difficult": {
+      "grid": {
+        "axis_ranges": [
+          [
+            2.5864907061195375,
+            2.69531456073761
+          ],
+          [
+            -0.2766678712576247,
+            3.715694699430231
+          ],
+          [
+            -2.316888484954834,
+            -1.6219323539733888
+          ],
+          [
+            -1.8098703002929688,
+            0.8474570488929749
+          ],
+          [
+            -1.1620071592998504,
+            -0.4867437530088437
+          ]
+        ],
+        "edge_mass": 0.0266187452834307,
+        "grid_points": 371293,
+        "grid_size": 13,
+        "log_norm_discrete": -26.878424002375823,
+        "padding_fraction": 0.08,
+        "quantile_high": 0.998,
+        "quantile_low": 0.002,
+        "target": "amplitude_sum_delta"
+      },
       "mode": "low_prior_stress",
       "npe": {
         "posterior_samples": 80000,
-        "to_posterior_reference": {
-          "mean_normalized_wasserstein": 0.05994996841024458,
+        "to_grid": {
+          "mean_normalized_wasserstein": 0.16305561957839956,
           "parameters": {
             "log_amplitude_ratio": {
-              "normalized_wasserstein": 0.09094595414052536,
-              "reference_sd": 0.650258672389726,
-              "wasserstein": 0.05913839539863493
+              "normalized_wasserstein": 0.17274187842969427,
+              "reference_sd": 0.6219353503067735,
+              "wasserstein": 0.10743428067382199
             },
             "log_amplitude_sum": {
-              "normalized_wasserstein": 0.044048366052730506,
-              "reference_sd": 0.016081805165046557,
-              "wasserstein": 0.0007083772406986629
+              "normalized_wasserstein": 0.16096267045416549,
+              "reference_sd": 0.0158375590642968,
+              "wasserstein": 0.0025492558004647876
             },
             "log_delta_k": {
-              "normalized_wasserstein": 0.04861920783424414,
-              "reference_sd": 0.5317060012025773,
-              "wasserstein": 0.02585112457918297
+              "normalized_wasserstein": 0.11473618734583403,
+              "reference_sd": 0.5004792837209183,
+              "wasserstein": 0.057423084859712106
             },
             "log_k1": {
-              "normalized_wasserstein": 0.09722588285609854,
-              "reference_sd": 0.0898830438928603,
-              "wasserstein": 0.008738958296276798
+              "normalized_wasserstein": 0.22617054151740834,
+              "reference_sd": 0.08439046719865655,
+              "wasserstein": 0.019086637665227238
             },
             "log_sigma": {
-              "normalized_wasserstein": 0.018910431167624354,
-              "reference_sd": 0.10329889711944759,
-              "wasserstein": 0.0019534266836688232
+              "normalized_wasserstein": 0.1406668201448956,
+              "reference_sd": 0.102990741121476,
+              "wasserstein": 0.014487380057924168
+            }
+          }
+        },
+        "to_posterior_reference": {
+          "mean_normalized_wasserstein": 0.11906638861230426,
+          "parameters": {
+            "log_amplitude_ratio": {
+              "normalized_wasserstein": 0.17212547904170947,
+              "reference_sd": 0.6229569255961289,
+              "wasserstein": 0.10722675924058425
+            },
+            "log_amplitude_sum": {
+              "normalized_wasserstein": 0.18511235173340979,
+              "reference_sd": 0.01627635034427011,
+              "wasserstein": 0.0030129534898647344
+            },
+            "log_delta_k": {
+              "normalized_wasserstein": 0.03740124639332534,
+              "reference_sd": 0.4871489385080243,
+              "wasserstein": 0.018219977479385512
+            },
+            "log_k1": {
+              "normalized_wasserstein": 0.1532469502342399,
+              "reference_sd": 0.10212806623550122,
+              "wasserstein": 0.01565081468391101
+            },
+            "log_sigma": {
+              "normalized_wasserstein": 0.047445915658836844,
+              "reference_sd": 0.1056513177488132,
+              "wasserstein": 0.0050127235111551635
             }
           }
         }
       },
-      "npe_nll": 0.19816395851287116,
+      "npe_nll": 0.19813420222309786,
       "outputs": {
         "figure": "runs/00_shared_assets/readme_two_exp_posteriors/two_exp_best_nll_difficult_posterior_corner.png"
       },
-      "paired_gap": 3.0031991205625905,
+      "paired_gap": 1.7360704802172324,
       "posterior_reference": {
-        "acceptance_rate": 0.17188359375,
-        "burn_in": 60000,
-        "chains": 16,
+        "acceptance_rate": 0.17748958333333334,
+        "burn_in": 3000,
+        "chains": 8,
         "diagnostics": {
           "log_amplitude_ratio": {
-            "ess_bulk": 593.9948924006145,
-            "ess_tail": 1203.4581383848974,
-            "rhat": 1.02914617106625
+            "ess_bulk": 19.90962754751662,
+            "ess_tail": 46.06451211544817,
+            "rhat": 1.3609901147810497
           },
           "log_amplitude_sum": {
-            "ess_bulk": 3650.0598043825203,
-            "ess_tail": 12942.50609786901,
-            "rhat": 1.0049454611720277
+            "ess_bulk": 148.23951144946236,
+            "ess_tail": 414.2075608931879,
+            "rhat": 1.0420215394295897
           },
           "log_delta_k": {
-            "ess_bulk": 364.58387588767005,
-            "ess_tail": 1501.4768613958345,
-            "rhat": 1.0400855497220722
+            "ess_bulk": 18.01652103902397,
+            "ess_tail": 72.88148975633098,
+            "rhat": 1.3800323287081047
           },
           "log_k1": {
-            "ess_bulk": 839.3106591965836,
-            "ess_tail": 1556.2196630590813,
-            "rhat": 1.0211205958329606
+            "ess_bulk": 25.04401460849361,
+            "ess_tail": 54.80070953619856,
+            "rhat": 1.2634174648581187
           },
           "log_sigma": {
-            "ess_bulk": 9960.940896100705,
-            "ess_tail": 21536.894809958147,
-            "rhat": 1.0017793743161099
+            "ess_bulk": 279.0499232026482,
+            "ess_tail": 559.6547417301276,
+            "rhat": 1.024260199127808
           }
         },
         "kind": "mcmc",
-        "max_rhat": 1.0400855497220722,
-        "min_bulk_ess": 364.58387588767005,
-        "min_tail_ess": 1203.4581383848974,
-        "posterior_samples": 2880000,
-        "seconds": 9.483703709003748,
-        "steps": 240000
+        "max_rhat": 1.3800323287081047,
+        "min_bulk_ess": 18.01652103902397,
+        "min_tail_ess": 46.06451211544817,
+        "posterior_samples": 72000,
+        "seconds": 0.4037108750198968,
+        "steps": 12000,
+        "to_grid": {
+          "mean_normalized_wasserstein": 0.21862034982060216,
+          "parameters": {
+            "log_amplitude_ratio": {
+              "normalized_wasserstein": 0.29440222122565757,
+              "reference_sd": 0.6219353503067735,
+              "wasserstein": 0.18309914858907156
+            },
+            "log_amplitude_sum": {
+              "normalized_wasserstein": 0.22288010273637177,
+              "reference_sd": 0.0158375590642968,
+              "wasserstein": 0.003529876791343827
+            },
+            "log_delta_k": {
+              "normalized_wasserstein": 0.11837708158007626,
+              "reference_sd": 0.5004792837209183,
+              "wasserstein": 0.05924527699816928
+            },
+            "log_k1": {
+              "normalized_wasserstein": 0.31599211063183774,
+              "reference_sd": 0.08439046719865655,
+              "wasserstein": 0.026666721847310355
+            },
+            "log_sigma": {
+              "normalized_wasserstein": 0.1414502329290675,
+              "reference_sd": 0.102990741121476,
+              "wasserstein": 0.014568064321170072
+            }
+          }
+        }
       },
-      "reference_nll": -2.8050351620497196,
+      "reference_nll": -1.5379362779941346,
       "source": {
         "log_prior_density_delta_vs_mean": -9.124999999999998,
         "noise_seed": 2026070203,
@@ -207,85 +299,177 @@
       ]
     },
     "easy": {
+      "grid": {
+        "axis_ranges": [
+          [
+            1.4398309075546265,
+            1.6755892298507684
+          ],
+          [
+            -2.2122909999465943,
+            3.0920321851348875
+          ],
+          [
+            -1.9030941700935364,
+            -0.3654606068134308
+          ],
+          [
+            -1.5544780048561093,
+            1.0594901738595928
+          ],
+          [
+            -1.7479293536090847,
+            -1.0434073575592113
+          ]
+        ],
+        "edge_mass": 0.010172452353775417,
+        "grid_points": 371293,
+        "grid_size": 13,
+        "log_norm_discrete": 5.705813437175477,
+        "padding_fraction": 0.08,
+        "quantile_high": 0.998,
+        "quantile_low": 0.002,
+        "target": "amplitude_sum_delta"
+      },
       "mode": "prior_predictive",
       "npe": {
         "posterior_samples": 80000,
-        "to_posterior_reference": {
-          "mean_normalized_wasserstein": 0.0416710190925089,
+        "to_grid": {
+          "mean_normalized_wasserstein": 0.1488364392432731,
           "parameters": {
             "log_amplitude_ratio": {
-              "normalized_wasserstein": 0.047456282605006166,
-              "reference_sd": 0.792266214790268,
-              "wasserstein": 0.037598009387485476
+              "normalized_wasserstein": 0.14339392060847575,
+              "reference_sd": 0.7833293517424487,
+              "wasserstein": 0.11232466687404545
             },
             "log_amplitude_sum": {
-              "normalized_wasserstein": 0.027726209366388064,
-              "reference_sd": 0.03413656840285425,
-              "wasserstein": 0.0009464776425875644
+              "normalized_wasserstein": 0.1467994346134406,
+              "reference_sd": 0.034045954984543096,
+              "wasserstein": 0.004997926942605577
             },
             "log_delta_k": {
-              "normalized_wasserstein": 0.07518192066118723,
-              "reference_sd": 0.38183355299923355,
-              "wasserstein": 0.028706979887367604
+              "normalized_wasserstein": 0.15308471204760454,
+              "reference_sd": 0.3833998022935049,
+              "wasserstein": 0.05869264833320971
             },
             "log_k1": {
-              "normalized_wasserstein": 0.048618617514157,
-              "reference_sd": 0.20998784873933385,
-              "wasserstein": 0.010209318900478328
+              "normalized_wasserstein": 0.16231091131626643,
+              "reference_sd": 0.20099946787915565,
+              "wasserstein": 0.03262440680555038
             },
             "log_sigma": {
-              "normalized_wasserstein": 0.00937206531580603,
-              "reference_sd": 0.10693476604295452,
-              "wasserstein": 0.0010021996118850065
+              "normalized_wasserstein": 0.1385932176305782,
+              "reference_sd": 0.10663398462597835,
+              "wasserstein": 0.014778747038083948
+            }
+          }
+        },
+        "to_posterior_reference": {
+          "mean_normalized_wasserstein": 0.0911686657713843,
+          "parameters": {
+            "log_amplitude_ratio": {
+              "normalized_wasserstein": 0.1567662482728606,
+              "reference_sd": 0.8243153514793555,
+              "wasserstein": 0.129224825045143
+            },
+            "log_amplitude_sum": {
+              "normalized_wasserstein": 0.009219286064070112,
+              "reference_sd": 0.034092032614155526,
+              "wasserstein": 0.0003143042011755078
+            },
+            "log_delta_k": {
+              "normalized_wasserstein": 0.1661182930102836,
+              "reference_sd": 0.35811986470055995,
+              "wasserstein": 0.05949026061713074
+            },
+            "log_k1": {
+              "normalized_wasserstein": 0.09461654438528433,
+              "reference_sd": 0.21640407039212925,
+              "wasserstein": 0.02047540533141309
+            },
+            "log_sigma": {
+              "normalized_wasserstein": 0.029122957124422855,
+              "reference_sd": 0.10471439360795924,
+              "wasserstein": 0.0030495927953545355
             }
           }
         }
       },
-      "npe_nll": -2.625817544484126,
+      "npe_nll": -2.6258200879397124,
       "outputs": {
         "figure": "runs/00_shared_assets/readme_two_exp_posteriors/two_exp_best_nll_easy_posterior_corner.png"
       },
-      "paired_gap": -0.44953979625948115,
+      "paired_gap": 0.0957969746594145,
       "posterior_reference": {
-        "acceptance_rate": 0.4617760416666667,
-        "burn_in": 60000,
-        "chains": 16,
+        "acceptance_rate": 0.46067708333333335,
+        "burn_in": 3000,
+        "chains": 8,
         "diagnostics": {
           "log_amplitude_ratio": {
-            "ess_bulk": 1424.7353508905635,
-            "ess_tail": 2494.188282905488,
-            "rhat": 1.0172352380977836
+            "ess_bulk": 17.25889151158519,
+            "ess_tail": 81.71346374185222,
+            "rhat": 1.4026025820307233
           },
           "log_amplitude_sum": {
-            "ess_bulk": 14800.807922888562,
-            "ess_tail": 48336.80985988594,
-            "rhat": 1.0010715058076811
+            "ess_bulk": 431.4451060333656,
+            "ess_tail": 1450.3523306599088,
+            "rhat": 1.02686447461127
           },
           "log_delta_k": {
-            "ess_bulk": 2418.8994081485207,
-            "ess_tail": 3488.386188115547,
-            "rhat": 1.010690694438279
+            "ess_bulk": 35.492854753185384,
+            "ess_tail": 106.05724632675229,
+            "rhat": 1.1751799675060994
           },
           "log_k1": {
-            "ess_bulk": 1688.8298035581406,
-            "ess_tail": 2698.7669779231896,
-            "rhat": 1.0130015647364512
+            "ess_bulk": 20.024091266006184,
+            "ess_tail": 65.3562242758498,
+            "rhat": 1.3199373584597927
           },
           "log_sigma": {
-            "ess_bulk": 23310.7024015447,
-            "ess_tail": 47539.00168069144,
-            "rhat": 1.0007509507867665
+            "ess_bulk": 603.7980365224081,
+            "ess_tail": 1319.2374044989153,
+            "rhat": 1.0117948814778344
           }
         },
         "kind": "mcmc",
-        "max_rhat": 1.0172352380977836,
-        "min_bulk_ess": 1424.7353508905635,
-        "min_tail_ess": 2494.188282905488,
-        "posterior_samples": 2880000,
-        "seconds": 9.567122167005436,
-        "steps": 240000
+        "max_rhat": 1.4026025820307233,
+        "min_bulk_ess": 17.25889151158519,
+        "min_tail_ess": 65.3562242758498,
+        "posterior_samples": 72000,
+        "seconds": 0.38499712498742156,
+        "steps": 12000,
+        "to_grid": {
+          "mean_normalized_wasserstein": 0.17885003225965973,
+          "parameters": {
+            "log_amplitude_ratio": {
+              "normalized_wasserstein": 0.21355035262704503,
+              "reference_sd": 0.7833293517424487,
+              "wasserstein": 0.1672802592877145
+            },
+            "log_amplitude_sum": {
+              "normalized_wasserstein": 0.14758890885094167,
+              "reference_sd": 0.034045954984543096,
+              "wasserstein": 0.005024805346956995
+            },
+            "log_delta_k": {
+              "normalized_wasserstein": 0.20579087583622332,
+              "reference_sd": 0.3833998022935049,
+              "wasserstein": 0.07890018110941524
+            },
+            "log_k1": {
+              "normalized_wasserstein": 0.18894763497757777,
+              "reference_sd": 0.20099946787915565,
+              "wasserstein": 0.03797837408751807
+            },
+            "log_sigma": {
+              "normalized_wasserstein": 0.13837238900651072,
+              "reference_sd": 0.10663398462597835,
+              "wasserstein": 0.01475519920198016
+            }
+          }
+        }
       },
-      "reference_nll": -2.1762777482246447,
+      "reference_nll": -2.721617062599127,
       "source": {
         "draw_index": 1,
         "signal_seed": 20260707
@@ -405,7 +589,7 @@
       ]
     }
   },
-  "description": "Two representative full-prior posterior checks for the current best-NLL two-exponential population NPE, the equal-5 mixture of the Flow2 ridge ensemble and high-SNR weighted member.",
+  "description": "Two representative full-prior posterior checks for the current best sampleable two-exponential population NPE, the equal-5 mixture of the Flow2 ridge ensemble and high-SNR weighted member. The learned stack has the best held-out NLL but is not promoted as the plotted sampleable posterior artifact.",
   "ensemble_summary": "runs/06_two_exponential/03_population_npe/21_flow2_e30_plus_high_snr_weighted_equal5_eval/results/two_exp_population_ensemble_summary.json",
   "labels": [
     "$\\log(A_1+A_2)$",
@@ -421,28 +605,28 @@
   },
   "selection": {
     "case_definition": "The easy case is an ordinary prior-predictive draw. The difficult case matches the single-decay convention: a deterministic low-prior-density draw in raw prior coordinates, not the largest held-out NLL miss.",
-    "case_importance_samples": 8192,
+    "case_importance_samples": 4096,
     "gap_summary": {
-      "max": 3.0031991205625905,
-      "mean": 1.2768296621515547,
-      "mean_abs": 1.7263694584110358,
-      "median": 1.2768296621515547,
-      "min": -0.44953979625948115
+      "max": 1.7360704802172324,
+      "mean": 0.9159337274383235,
+      "mean_abs": 0.9159337274383235,
+      "median": 0.9159337274383235,
+      "min": 0.0957969746594145
     },
     "importance_diagnostics": {
-      "ess_mean": 3.2523006624325626,
-      "ess_median": 3.2523006624325626,
-      "ess_min": 2.6504624159741774,
-      "ess_q05": 2.710646240620016,
+      "ess_mean": 2.6454482700490307,
+      "ess_median": 2.6454482700490307,
+      "ess_min": 2.3985303480457696,
+      "ess_q05": 2.4232221402460956,
       "floor_method": "importance",
       "importance_batch_size": 16,
-      "importance_samples": 8192,
-      "log_weight_std_mean": 189007.30944444425,
-      "log_weight_std_q95": 201609.1020679647,
+      "importance_samples": 4096,
+      "log_weight_std_mean": 70788.14866883517,
+      "log_weight_std_q95": 124713.84191188315,
       "prior_mixture": 0.02,
       "proposal_inflation": 1.0,
-      "relative_ess_mean": 0.0003970093582070999,
-      "relative_ess_q05": 0.00033088943366943555
+      "relative_ess_mean": 0.0006458613940549391,
+      "relative_ess_q05": 0.0005916069678335194
     }
   },
   "target": "amplitude_sum_delta"

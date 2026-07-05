@@ -370,6 +370,7 @@ equal-5 best Flow2 + high-SNR    NLL -3.20086, gap 0.08064
 512k x 1 4-component Flow2 mix, validation-selected 80 ep NLL -3.13618, gap 0.14531
 512k x 1 Flow2 profile-residual, validation-selected 80 ep NLL -2.36705, gap 0.91444
 512k x 1 Flow2 NAF, validation-selected 80 ep NLL -3.17602, gap 0.10547
+1.024M x 4 Flow2, validation-selected 120 ep NLL -3.19793, gap 0.08356
 11-member learned x-dependent stack over compatible frozen members NLL -3.20511, gap 0.07638
 ```
 
@@ -431,6 +432,13 @@ improved held-out NLL relative to the equal-5 mixture, but the full-prior gap
 remained highly resolved. This rules out simple post-hoc x-dependent weighting
 over the current member pool as a repair.
 
+The 1.024M-per-member 4-member Flow2 ridge-target probe ran with a
+65,536-example training-validation cache and a 120-epoch cap. Its held-out
+ensemble NLL was `-3.19793`, with a paired gap of `0.08188 +/- 0.00399`.
+Per-epoch validation selection and doubling the per-member training set did not
+improve on the older 512k-per-member 30-epoch Flow2 ensemble, so this closes the
+last planned same-recipe scale-up for the day.
+
 Useful infrastructure completed:
 
 - `train_sign_population_npe.py` can now sample, train, evaluate, and floor-probe
@@ -460,15 +468,9 @@ Useful infrastructure completed:
 
 Next viable experiments:
 
-- Finish the active Mac mini run
-  `27_flow2_ridge_full_prior_1m_ensemble4_converge_e120`. This is the one
-  remaining plain-Flow2 scale-up worth doing because the current best
-  4-member Flow2 run skipped training validation, while the later
-  validation-selected probes were single-member or changed the family/target.
-  It uses 1.024M simulations per member, 65,536 training-validation examples,
-  four members, and a 120-epoch cap with validation selection.
-- Do not keep scaling the same Flow2 recipe blindly after that run; the previous
-  1M single-member probe did not improve fixed-cache NLL.
+- Do not keep scaling the same Flow2 recipe blindly; both the previous 1M
+  single-member probe and the 1.024M-per-member validation-selected 4-member
+  probe failed to improve the fixed-cache NLL.
 - Try a genuinely different conditional posterior strategy, such as
   exact-posterior distillation on difficult signals, a sequential proposal, or a
   learned x-dependent ensemble/stacking objective. The stronger four-component

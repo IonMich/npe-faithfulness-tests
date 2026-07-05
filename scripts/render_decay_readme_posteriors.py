@@ -53,10 +53,13 @@ from train_sign_population_npe import (
     TWO_EXP_PRIOR_MEAN,
     TWO_EXP_PRIOR_STD,
     two_exp_exact_posterior_nll,
+    two_exp_log_likelihood_np,
     two_exp_log_likelihood_batched,
     two_exp_log_proposal_density,
+    two_exp_raw_prior_logpdf,
     two_exp_raw_prior_logpdf_batched,
     two_exp_sample_proposal,
+    two_exp_target_inverse,
     two_exp_target_transform,
 )
 
@@ -1297,6 +1300,89 @@ def sample_two_exp_importance_reference(
     }
 
 
+def two_exp_exact_grid_layer(
+    *,
+    x_raw: np.ndarray,
+    reference_samples: np.ndarray,
+    true_target: np.ndarray,
+    target: str,
+    grid_size: int,
+    quantile_low: float,
+    quantile_high: float,
+    padding_fraction: float,
+    chunk_size: int,
+) -> tuple[WeightedCornerLayer, dict[str, object]]:
+    reference = np.asarray(reference_samples, dtype=np.float64)
+    true_target = np.asarray(true_target, dtype=np.float64)
+    if reference.ndim != 2 or reference.shape[1] != true_target.size:
+        raise ValueError("two_exp exact grid needs reference samples shaped (n, d).")
+    if not 0.0 <= quantile_low < quantile_high <= 1.0:
+        raise ValueError("Two-exp grid quantiles must satisfy 0 <= low < high <= 1.")
+    axes = []
+    for index in range(reference.shape[1]):
+        finite = reference[np.isfinite(reference[:, index]), index]
+        if finite.size == 0:
+            raise RuntimeError(f"No finite reference samples for two-exp grid axis {index}.")
+        low, high = np.quantile(finite, [quantile_low, quantile_high])
+        low = min(float(low), float(true_target[index]))
+        high = max(float(high), float(true_target[index]))
+        span = max(high - low, 1e-3)
+        low -= float(padding_fraction) * span
+        high += float(padding_fraction) * span
+        axes.append(np.linspace(low, high, int(grid_size), dtype=np.float64))
+
+    mesh = np.meshgrid(*axes, indexing="ij")
+    target_values = np.column_stack([axis.ravel() for axis in mesh])
+    log_post = np.empty(target_values.shape[0], dtype=np.float64)
+    x_raw = np.asarray(x_raw, dtype=np.float64)
+    chunk_size = max(1, int(chunk_size))
+    for start in range(0, target_values.shape[0], chunk_size):
+        stop = min(start + chunk_size, target_values.shape[0])
+        raw_values = two_exp_target_inverse(target_values[start:stop], target=target)
+        repeated_x = np.repeat(x_raw[None, :], raw_values.shape[0], axis=0)
+        log_post[start:stop] = two_exp_raw_prior_logpdf(raw_values) + two_exp_log_likelihood_np(
+            repeated_x,
+            raw_values,
+        )
+    log_norm = float(logsumexp(log_post))
+    weights = np.exp(log_post - log_norm)
+    weight_grid = weights.reshape(tuple(int(grid_size) for _ in axes))
+    edge_mask = np.zeros_like(weight_grid, dtype=bool)
+    for axis in range(weight_grid.ndim):
+        edge_mask |= np.expand_dims(
+            np.arange(weight_grid.shape[axis]) == 0,
+            tuple(index for index in range(weight_grid.ndim) if index != axis),
+        )
+        edge_mask |= np.expand_dims(
+            np.arange(weight_grid.shape[axis]) == weight_grid.shape[axis] - 1,
+            tuple(index for index in range(weight_grid.ndim) if index != axis),
+        )
+
+    layer = WeightedCornerLayer(
+        label="Exact grid",
+        color="#172033",
+        values=target_values,
+        weights=weights,
+        grid_shape=weight_grid.shape,
+        axes=tuple(axes),
+        widths=tuple(uniform_axis_widths(axis) for axis in axes),
+        hist_lw=1.9,
+        contour_lw=1.45,
+    )
+    metadata = {
+        "grid_size": int(grid_size),
+        "grid_points": int(target_values.shape[0]),
+        "target": target,
+        "quantile_low": float(quantile_low),
+        "quantile_high": float(quantile_high),
+        "padding_fraction": float(padding_fraction),
+        "log_norm_discrete": log_norm,
+        "edge_mass": float(weight_grid[edge_mask].sum()),
+        "axis_ranges": [[float(axis[0]), float(axis[-1])] for axis in axes],
+    }
+    return layer, metadata
+
+
 def sample_two_exp_mcmc_reference(
     *,
     x_raw: np.ndarray,
@@ -1380,6 +1466,17 @@ def render_two_exp_population_cases(args: argparse.Namespace) -> None:
                 seed=int(args.seed) + 5000 + 101 * offset,
             )
             reference_label = "MCMC reference"
+        grid_layer, grid_metadata = two_exp_exact_grid_layer(
+            x_raw=np.asarray(case_info["x_raw"], dtype=np.float64),
+            reference_samples=reference_samples,
+            true_target=np.asarray(case_info["z_target"], dtype=np.float64),
+            target=str(args.two_exp_target),
+            grid_size=int(args.two_exp_grid_size),
+            quantile_low=float(args.two_exp_grid_quantile_low),
+            quantile_high=float(args.two_exp_grid_quantile_high),
+            padding_fraction=float(args.two_exp_grid_padding_fraction),
+            chunk_size=int(args.two_exp_grid_chunk_size),
+        )
         npe_samples = sample_stage1_ensemble(
             members=members,
             x_context=np.asarray(case_info["x_context"], dtype=np.float64),
@@ -1391,7 +1488,7 @@ def render_two_exp_population_cases(args: argparse.Namespace) -> None:
         figure = render_corner_layers(
             labels=TWO_EXP_TARGET_LABELS,
             true_values=true_target,
-            weighted_layers=[],
+            weighted_layers=[grid_layer],
             sample_layers=[
                 SampleCornerLayer(
                     reference_label,
@@ -1403,7 +1500,10 @@ def render_two_exp_population_cases(args: argparse.Namespace) -> None:
                 SampleCornerLayer("Best-NLL NPE", "#0f766e", npe_samples, hist_lw=1.45, contour_lw=1.15),
             ],
             true_color="#172033",
-            title=f"Two-exponential {case_name} full-prior posterior\n{reference_label} vs best-NLL NPE",
+            title=(
+                f"Two-exponential {case_name} full-prior posterior\n"
+                f"exact grid vs {reference_label} vs best sampleable NPE"
+            ),
             max_sample_plot=18_000,
             rng=np.random.default_rng(int(args.seed) + 2000 + offset),
         )
@@ -1412,9 +1512,22 @@ def render_two_exp_population_cases(args: argparse.Namespace) -> None:
         outputs[case_name] = repo_relative(figure_path)
         case_summaries[case_name] = {
             **case_info,
-            "posterior_reference": reference_metadata,
+            "grid": grid_metadata,
+            "posterior_reference": {
+                **reference_metadata,
+                "to_grid": compare_samples_to_weighted_grid_named(
+                    reference_samples,
+                    grid_layer,
+                    TWO_EXP_TARGET_NAMES,
+                ),
+            },
             "npe": {
                 "posterior_samples": int(npe_samples.shape[0]),
+                "to_grid": compare_samples_to_weighted_grid_named(
+                    npe_samples,
+                    grid_layer,
+                    TWO_EXP_TARGET_NAMES,
+                ),
                 "to_posterior_reference": compare_sample_marginals_named(
                     npe_samples,
                     reference_samples,
@@ -1430,8 +1543,10 @@ def render_two_exp_population_cases(args: argparse.Namespace) -> None:
     summary = {
         "description": (
             "Two representative full-prior posterior checks for the current "
-            "best-NLL two-exponential population NPE, the equal-5 mixture of "
-            "the Flow2 ridge ensemble and high-SNR weighted member."
+            "best sampleable two-exponential population NPE, the equal-5 "
+            "mixture of the Flow2 ridge ensemble and high-SNR weighted member. "
+            "The learned stack has the best held-out NLL but is not promoted "
+            "as the plotted sampleable posterior artifact."
         ),
         "ensemble_summary": repo_relative(args.two_exp_ensemble_summary),
         "target": str(args.two_exp_target),
@@ -1492,6 +1607,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--two-exp-reference-samples", type=int, default=100_000)
     parser.add_argument("--two-exp-posterior-reference", choices=("mcmc", "importance"), default="mcmc")
+    parser.add_argument("--two-exp-grid-size", type=int, default=13)
+    parser.add_argument("--two-exp-grid-quantile-low", type=float, default=0.002)
+    parser.add_argument("--two-exp-grid-quantile-high", type=float, default=0.998)
+    parser.add_argument("--two-exp-grid-padding-fraction", type=float, default=0.08)
+    parser.add_argument("--two-exp-grid-chunk-size", type=int, default=65_536)
     parser.add_argument("--two-exp-low-prior-offset", type=float, nargs=5, default=TWO_EXP_LOW_PRIOR_OFFSET.tolist())
     parser.add_argument("--two-exp-low-prior-noise-seed", type=int, default=2026070203)
     parser.add_argument("--two-exp-importance-seed", type=int, default=20260723)
