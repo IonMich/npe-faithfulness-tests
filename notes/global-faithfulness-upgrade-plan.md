@@ -358,6 +358,7 @@ Training probes tried:
 512k x 1 augmented context      NLL -3.17555, gap 0.10595
 128k x 1 CPU MDN8 smoke         NLL -3.01387, gap 0.26762
 512k x 1 Flow2 mixture, 30 ep   NLL -3.17577, gap 0.10404
+512k x 1 rate-sum target, 30 ep NLL -3.17315, gap 0.10667
 ```
 
 The best plain NPE result is the 4-member Flow2 30-epoch ensemble, and it is
@@ -371,6 +372,12 @@ and reached a competitive training loss (`-3.26366`) but not a better held-out
 NLL. Its validation result is effectively another single-member miss, so the
 next architecture change needs either a stronger mixture strategy or a better
 target/context, not just more of the same two-component probe.
+
+The first alternative rate target,
+`(log(A1 + A2), log(A1/A2), log k2, log(k1/Delta k), log sigma)`, also missed.
+It is an invertible unit-Jacobian transform like the default target, but its
+single-member held-out NLL was worse than the best default-target individual
+members.
 
 Useful infrastructure completed:
 
@@ -386,6 +393,9 @@ Useful infrastructure completed:
   population-loss mode ready once there is a result worth documenting.
 - `npe_stage1_decay.py` now has a reusable `spline_flow_mixture` family for
   gated mixtures of conditional spline flows.
+- `train_sign_population_npe.py` can select between the default
+  two-exponential target and the rate-sum/log-ratio target via
+  `--two-exp-target`.
 
 Next viable experiments:
 
@@ -396,7 +406,7 @@ Next viable experiments:
   signals, or a sequential proposal, rather than another single normalizing flow
   or the first two-component flow mixture.
 - Revisit target/context design with an invertible transform that separates the
-  ridge more cleanly than the current log-sum/log-ratio coordinates.
+  ridge more cleanly than either tested log-sum/log-ratio coordinate system.
 - Use exact-posterior or high-quality importance samples for a subset of signals
   to diagnose where the amortized posterior misses mass before launching another
   Mac mini training run.
