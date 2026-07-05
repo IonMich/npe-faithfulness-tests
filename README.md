@@ -972,17 +972,21 @@ The validation-selected 1.024M-per-member ensemble reached a paired gap of
 the current best held-out NLL, but its paired gap is still `0.07470 +/- 0.00394`,
 so it is not a floor-level result either.
 
-Posterior-shape diagnostics below use the learned x-dependent stack, the current
-best held-out-NLL model, not the old fixed-signal artifact. The easy case is an
-ordinary full-prior prior-predictive draw. The difficult case follows the
-single-decay convention: a low-prior-density stress draw, here `4.27` prior
-standard deviations from the raw prior mean with log prior density `9.125` below
-the prior mean. Because this posterior is five-dimensional, the diagnostic
-overlay uses an exact local 5D grid as the primary visual reference and keeps
-the MCMC chain as a sampler sanity check. The learned-stack NPE mean normalized
-marginal Wasserstein distance to the exact grid is `0.2456` on the easy case and
-`0.1601` on the difficult case; the grid edge mass is `0.0102` and `0.0266`,
-respectively.
+Posterior-shape diagnostics below use the equal-5 mixture, not the old
+fixed-signal artifact and not the learned stack. The learned stack has the best
+held-out NLL, but it produces a visibly worse easy-case posterior shape here:
+its NPE-to-grid mean normalized marginal Wasserstein distances are `0.2456`
+on the easy case and `0.1601` on the difficult case, versus `0.1488` and
+`0.1631` for equal-5. The equal-5 mixture therefore has the better aggregate
+grid agreement on these README diagnostics (`0.1560` mean versus `0.2029`) and
+is the plotted posterior-shape model. The easy case is an ordinary full-prior
+prior-predictive draw. The difficult case follows the single-decay convention:
+a low-prior-density stress draw, here `4.27` prior standard deviations from the
+raw prior mean with log prior density `9.125` below the prior mean. Because this
+posterior is five-dimensional, the diagnostic overlay uses an exact local 5D
+grid as the primary visual reference and keeps the MCMC chain as a sampler
+sanity check. The grid edge mass is `0.0102` on the easy case and `0.0266` on
+the difficult case.
 
 ![Two-exponential easy full-prior posterior overlay](runs/00_shared_assets/readme_two_exp_posteriors/two_exp_best_nll_easy_posterior_corner.png)
 

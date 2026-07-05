@@ -1748,8 +1748,8 @@ def render_two_exp_population_cases(args: argparse.Namespace) -> None:
     summary_path = TWO_EXP_OUTPUT_DIR / "two_exp_best_nll_posterior_summary.json"
     summary = {
         "description": (
-            "Two representative full-prior posterior checks for the current "
-            f"best held-out-NLL two-exponential population NPE, {model_description}."
+            "Two representative full-prior posterior checks for the selected "
+            f"two-exponential population NPE, {model_description}."
         ),
         "ensemble_summary": repo_relative(model_summary_path),
         "posterior_model": str(args.two_exp_posterior_model),
@@ -1795,7 +1795,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--two-exp-posterior-model",
         choices=("learned_stack", "equal5"),
-        default="learned_stack",
+        default="equal5",
     )
     parser.add_argument("--signal-seed", type=int, default=20260707)
     parser.add_argument("--draw-index", type=int, default=1)
