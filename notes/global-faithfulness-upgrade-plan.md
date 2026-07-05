@@ -323,11 +323,16 @@ Current floor probes:
 ```text
 10k validation, seed 23  -3.28149 +/- 0.02423
 10k validation, seed 31  -3.28349 +/- 0.02427
+50k validation, seed 05, 32768 importance samples  -3.27756 +/- 0.01072
+250k validation, seed 05, 8192 importance samples  -3.32453 +/- 0.00484
 ```
 
-Both runs use the same posterior-centered Gaussian-mixture importance sampler.
-The independent seeds agree at the reported precision, but this should still be
-treated as a probe-scale floor until the final method is cross-checked or scaled.
+These use the posterior-centered Gaussian-mixture importance sampler. The
+`50k x 32768` cross-check agrees with the shared 10k floor, while the
+`250k x 8192` run lands lower but has weak per-signal importance ESS diagnostics
+and is not used as the table reference. The practical table floor remains the
+shared `-3.28149` reference until a better evidence estimator makes the lower
+value repeatable.
 
 Floor cross-check:
 
@@ -361,6 +366,7 @@ Training probes tried:
 512k x 1 rate-sum target, 30 ep NLL -3.17315, gap 0.10834
 512k x 1 high-SNR weighted, 30 ep NLL -3.16299, gap 0.11851
 equal-5 best Flow2 + high-SNR    NLL -3.20086, gap 0.08064
+2.048M x 1 Flow4 linear-residual NLL -2.78417, gap 0.49732
 ```
 
 These gaps are normalized to the shared 10k validation reference floor
@@ -397,6 +403,12 @@ ensemble plus the high-SNR weighted member improved only marginally to
 `-3.20086`, a common-floor gap of `0.08064` and a paired gap z-score of `19.12`.
 This is the best held-out NLL observed so far, but it is not a meaningful
 near-floor repair.
+
+The 2.048M Flow4 linear-residual probe used validation-every-epoch checkpointing
+with a 100-epoch cap, but stopped at 30 completed epochs with best training-cache
+validation NLL `-2.83028` and held-out evaluation NLL `-2.78417`. This rules out
+that specific combination of simple scale-up, deeper flow, and linear residual
+target as a repair.
 
 Useful infrastructure completed:
 

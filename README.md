@@ -931,14 +931,18 @@ The diagnostic coordinates are the displayed physical parameters:
 g(z)=(A_1,k_1,A_2,k_2,\sigma).
 ```
 
-Full-prior population NPE is still unresolved. The current reference floor probe
-in the ridge target coordinates is `-3.28149 +/- 0.02423` NLL on the shared 10k
-validation cache. The best trained architecture is still the 4-member Flow2
-ridge-target ensemble at 30 epochs, at `0.08257` NLL above this common floor. A
-post-hoc equal-weight mixture with the high-SNR weighted member improves only to
-`0.08064` above the same floor. The table below normalizes every completed probe
-to that common reference floor; per-run floor estimates in some artifacts differ
-only by finite Monte Carlo noise and are not used for this comparison.
+Full-prior population NPE is still unresolved. The common reference floor in the
+ridge target coordinates remains `-3.28149 +/- 0.02423` NLL on the shared 10k
+validation cache. A larger 50k-cache cross-check with `32768` importance samples
+per signal gives `-3.27756 +/- 0.01072`, consistent with that common floor. A
+250k-cache run with only `8192` importance samples per signal gave a lower
+`-3.32453 +/- 0.00484`, but its per-signal importance ESS diagnostics are weak,
+so it is not used as the table reference. The best trained architecture is still
+the 4-member Flow2 ridge-target ensemble at 30 epochs, at `0.08257` NLL above
+the common floor. A post-hoc equal-weight mixture with the high-SNR weighted
+member improves only to `0.08064` above the same floor. The table below
+normalizes every completed probe to that common reference floor; per-run floor
+estimates in some artifacts differ and are not used for this comparison.
 
 | Population NPE probe | Validation NLL | Gap to common floor |
 | --- | ---: | ---: |
@@ -947,6 +951,7 @@ only by finite Monte Carlo noise and are not used for this comparison.
 | Flow2 ridge target, 512k x4, 30 epochs | `-3.19892` | `0.08257` |
 | Flow2 ridge target, 1.024M x1, 30 epochs | `-3.19045` | `0.09104` |
 | Flow4 h128 ridge target, 512k x1, 30 epochs | `-3.17108` | `0.11041` |
+| Flow4 h128 linear-residual target, 2.048M x1, validation-selected 30 epochs | `-2.78417` | `0.49732` |
 | MAF4 ridge target, 512k x1, 30 epochs | `-3.17836` | `0.10314` |
 | MDN8 ridge target, 128k x1, 20 epochs | `-3.01387` | `0.26762` |
 | Flow2 augmented context, 512k x1, 30 epochs | `-3.17555` | `0.10595` |
@@ -957,9 +962,11 @@ only by finite Monte Carlo noise and are not used for this comparison.
 
 The miss is therefore not explained by one short run or by the first floor
 estimate. Scaling the same Flow2 recipe to 1.024M simulations, increasing flow
-depth, trying MAF, adding a simple two-component flow mixture, adding the tested
-augmented context, switching to the tested rate-sum target, and upweighting the
-high-SNR prior tail have all stayed well above the full-prior floor.
+depth, running a 2.048M-simulation Flow4 linear-residual target with
+validation-selected checkpointing, trying MAF, adding a simple two-component
+flow mixture, adding the tested augmented context, switching to the tested
+rate-sum target, and upweighting the high-SNR prior tail have all stayed well
+above the full-prior floor.
 
 Posterior-shape diagnostics below use the current best-NLL equal-5 mixture,
 not the old fixed-signal artifact. The easy case is an ordinary full-prior
