@@ -937,12 +937,14 @@ validation cache. A larger 50k-cache cross-check with `32768` importance samples
 per signal gives `-3.27756 +/- 0.01072`, consistent with that common floor. A
 250k-cache run with only `8192` importance samples per signal gave a lower
 `-3.32453 +/- 0.00484`, but its per-signal importance ESS diagnostics are weak,
-so it is not used as the table reference. The best trained architecture is still
-the 4-member Flow2 ridge-target ensemble at 30 epochs, at `0.08257` NLL above
-the common floor. A post-hoc equal-weight mixture with the high-SNR weighted
-member improves only to `0.08064` above the same floor. The table below
-normalizes every completed probe to that common reference floor; per-run floor
-estimates in some artifacts differ and are not used for this comparison.
+so it is not used as the table reference. The best plain trained architecture is
+still the 4-member Flow2 ridge-target ensemble at 30 epochs, at `0.08257` NLL
+above the common floor. A post-hoc equal-weight mixture with the high-SNR
+weighted member improves only to `0.08064` above the same floor, and a learned
+x-dependent stack over the compatible frozen members improves to `0.07638`
+above the common floor. The table below normalizes every completed probe to
+that common reference floor; per-run floor estimates in some artifacts differ
+and are not used for this comparison.
 
 | Population NPE probe | Validation NLL | Gap to common floor |
 | --- | ---: | ---: |
@@ -962,6 +964,7 @@ estimates in some artifacts differ and are not used for this comparison.
 | 4-component Flow2 mixture, h96, 512k x1, validation-selected 80 epochs | `-3.13618` | `0.14531` |
 | Flow2 profile-residual target, 512k x1, validation-selected 80 epochs | `-2.36705` | `0.91444` |
 | Flow2 NAF ridge target, 512k x1, validation-selected 80 epochs | `-3.17602` | `0.10547` |
+| Learned x-dependent stack over 11 compatible frozen members | `-3.20511` | `0.07638` |
 
 The miss is therefore not explained by one short run or by the first floor
 estimate. Scaling the same Flow2 recipe to 1.024M simulations, increasing flow
@@ -970,19 +973,24 @@ validation-selected checkpointing, trying MAF, adding a simple two-component
 flow mixture, adding the tested augmented context, switching to the tested
 rate-sum target, upweighting the high-SNR prior tail, increasing the flow
 mixture to four components, residualizing around the two-exponential profile
-fit, and switching the direct-target flow kind to NAF have all stayed well above
-the full-prior floor. The NAF run reached `-3.20261` on its training validation
-cache, but the held-out full-prior evaluation was only `-3.17602`, so it does
-not improve the current best result.
+fit, switching the direct-target flow kind to NAF, and learning a post-hoc
+x-dependent stack have all stayed well above the full-prior floor. The NAF run
+reached `-3.20261` on its training validation cache, but the held-out full-prior
+evaluation was only `-3.17602`, so it does not improve the current best result.
+The learned stack is the current best held-out NLL, but its paired gap is still
+`0.07470 +/- 0.00394`, so it is also a resolved miss.
 
-Posterior-shape diagnostics below use the current best-NLL equal-5 mixture,
-not the old fixed-signal artifact. The easy case is an ordinary full-prior
-prior-predictive draw. The difficult case follows the single-decay convention:
-a low-prior-density stress draw, here `4.27` prior standard deviations from the
-raw prior mean with log prior density `9.125` below the prior mean. Because this
-posterior is five-dimensional, the visual reference is long MCMC rather than a
-grid. The NPE mean normalized marginal Wasserstein distance to MCMC is `0.0417`
-on the easy case and `0.0599` on the difficult case.
+Posterior-shape diagnostics below use the equal-5 mixture, the best plotted
+sampleable artifact, not the old fixed-signal artifact. The learned stack has a
+slightly better held-out NLL, but it remains a resolved full-prior miss and is
+not yet promoted to the plotted reference. The easy case is an ordinary
+full-prior prior-predictive draw. The difficult case follows the single-decay
+convention: a low-prior-density stress draw, here `4.27` prior standard
+deviations from the raw prior mean with log prior density `9.125` below the
+prior mean. Because this posterior is five-dimensional, the visual reference is
+long MCMC rather than a grid. The NPE mean normalized marginal Wasserstein
+distance to MCMC is `0.0417` on the easy case and `0.0599` on the difficult
+case.
 
 ![Two-exponential easy full-prior posterior overlay](runs/00_shared_assets/readme_two_exp_posteriors/two_exp_best_nll_easy_posterior_corner.png)
 

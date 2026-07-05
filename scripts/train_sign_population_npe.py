@@ -1364,6 +1364,65 @@ def evaluate_model_log_prob(
     ) - log_det
 
 
+def member_model_target(
+    *,
+    model_name: str,
+    z_raw: np.ndarray,
+    x_context: np.ndarray,
+    member: dict[str, object],
+    default_two_exp_target: str,
+) -> np.ndarray:
+    if model_name != "two_exp":
+        return z_raw
+    member_target = str(member.get("two_exp_target", default_two_exp_target))
+    target_z = two_exp_target_transform(z_raw, target=member_target)
+    target_mode = str(member.get("two_exp_target_mode", "direct"))
+    if target_mode == "direct":
+        return target_z
+    if target_mode == "profile_residual":
+        return target_z - two_exp_target_center_from_context(x_context, target=member_target)
+    raise ValueError(f"Unsupported two_exp target mode in checkpoint: {target_mode}")
+
+
+def evaluate_member_log_probs(
+    *,
+    model_name: str,
+    members: list[dict[str, object]],
+    x_context: np.ndarray,
+    z_raw: np.ndarray,
+    default_two_exp_target: str,
+    batch_size: int,
+    device: torch.device,
+) -> np.ndarray:
+    chunks: list[np.ndarray] = []
+    for start in range(0, x_context.shape[0], batch_size):
+        stop = min(start + batch_size, x_context.shape[0])
+        batch_x = x_context[start:stop]
+        batch_z = z_raw[start:stop]
+        batch_log_probs = []
+        for member in members:
+            member_z_model = member_model_target(
+                model_name=model_name,
+                z_raw=batch_z,
+                x_context=batch_x,
+                member=member,
+                default_two_exp_target=default_two_exp_target,
+            )
+            log_prob = evaluate_model_log_prob(
+                model=member["model"],
+                x_raw=batch_x,
+                z_raw=member_z_model,
+                x_mean=member["x_mean"],
+                x_std=member["x_std"],
+                z_mean=member["z_mean"],
+                z_std=member["z_std"],
+                device=device,
+            )
+            batch_log_probs.append(log_prob.detach().cpu().numpy().astype(np.float32))
+        chunks.append(np.stack(batch_log_probs, axis=1))
+    return np.concatenate(chunks, axis=0)
+
+
 def safe_corrcoef(x: np.ndarray, y: np.ndarray) -> float | None:
     a = np.asarray(x, dtype=np.float64)
     b = np.asarray(y, dtype=np.float64)
@@ -1541,6 +1600,9 @@ def evaluate_population_nll(
     two_exp_smc_batch_size: int,
     two_exp_smc_step_scale: float,
     diagnostics_output: Path | None = None,
+    stacking_gate: torch.nn.Module | None = None,
+    stacking_x_mean: np.ndarray | None = None,
+    stacking_x_std: np.ndarray | None = None,
 ) -> dict[str, Any]:
     if model_name == "label_switch":
         x_raw_val, x_val, z_val = sample_label_switch_population_raw(n=validation_examples, seed=validation_seed)
@@ -1556,6 +1618,7 @@ def evaluate_population_nll(
         )
     individual_chunks: list[list[np.ndarray]] = [[] for _ in members]
     ensemble_chunks: list[np.ndarray] = []
+    stacking_weight_chunks: list[np.ndarray] = []
     exact_chunks: list[np.ndarray] = []
     exact_diagnostics: list[dict[str, float]] = []
     start_time = time.perf_counter()
@@ -1563,7 +1626,6 @@ def evaluate_population_nll(
         stop = min(start + batch_size, validation_examples)
         batch_x = x_val[start:stop]
         batch_z = z_val[start:stop]
-        batch_z_model = two_exp_target_transform(batch_z, target=two_exp_target) if model_name == "two_exp" else batch_z
         if model_name == "banana":
             exact_chunks.append(
                 banana_exact_posterior_nll(
@@ -1619,16 +1681,13 @@ def evaluate_population_nll(
             )
         log_probs = []
         for index, member in enumerate(members):
-            member_z_model = batch_z_model
-            if model_name == "two_exp":
-                target_mode = str(member.get("two_exp_target_mode", "direct"))
-                if target_mode == "profile_residual":
-                    member_z_model = batch_z_model - two_exp_target_center_from_context(
-                        batch_x,
-                        target=two_exp_target,
-                    )
-                elif target_mode != "direct":
-                    raise ValueError(f"Unsupported two_exp target mode in checkpoint: {target_mode}")
+            member_z_model = member_model_target(
+                model_name=model_name,
+                z_raw=batch_z,
+                x_context=batch_x,
+                member=member,
+                default_two_exp_target=two_exp_target,
+            )
             log_prob = evaluate_model_log_prob(
                 model=member["model"],
                 x_raw=batch_x,
@@ -1643,7 +1702,18 @@ def evaluate_population_nll(
             individual_chunks[index].append(-log_prob_np)
             log_probs.append(log_prob_np)
         stacked = np.stack(log_probs, axis=0)
-        ensemble_log_prob = logsumexp(stacked, axis=0) - math.log(len(members))
+        if stacking_gate is None:
+            ensemble_log_prob = logsumexp(stacked, axis=0) - math.log(len(members))
+        else:
+            if stacking_x_mean is None or stacking_x_std is None:
+                raise ValueError("stacking_x_mean and stacking_x_std are required with stacking_gate.")
+            stacking_gate.eval()
+            with torch.no_grad():
+                gate_x = standardize(batch_x, stacking_x_mean, stacking_x_std).astype(np.float32)
+                logits = stacking_gate(torch.from_numpy(gate_x).to(device))
+                log_weights = torch.log_softmax(logits, dim=-1).detach().cpu().numpy().astype(np.float64)
+            ensemble_log_prob = logsumexp(stacked.T + log_weights, axis=1)
+            stacking_weight_chunks.append(np.exp(log_weights))
         ensemble_chunks.append(-ensemble_log_prob)
 
     individual_nll = [np.concatenate(chunks) for chunks in individual_chunks]
@@ -1657,6 +1727,16 @@ def evaluate_population_nll(
         "best_individual_nll": float(min(np.mean(values) for values in individual_nll)),
         "ensemble_nll": ensemble_summary,
     }
+    if stacking_weight_chunks:
+        weights = np.concatenate(stacking_weight_chunks, axis=0)
+        entropy = -np.sum(weights * np.log(np.maximum(weights, 1e-12)), axis=1)
+        output["stacking_gate"] = {
+            "mean_weights": weights.mean(axis=0).tolist(),
+            "q05_weights": np.quantile(weights, 0.05, axis=0).tolist(),
+            "q95_weights": np.quantile(weights, 0.95, axis=0).tolist(),
+            "mean_entropy": float(np.mean(entropy)),
+            "max_weight_mean": float(np.mean(np.max(weights, axis=1))),
+        }
     if model_name == "sign":
         gap = float(ensemble_summary["mean"] - FOLDED_SIGN_FLOOR)
         combined_se = math.sqrt(float(ensemble_summary["std_error"]) ** 2 + FOLDED_SIGN_FLOOR_SE**2)
@@ -1923,6 +2003,7 @@ def load_population_members(summary_path: Path, *, device: torch.device) -> list
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     members = []
     repo_root = Path.cwd()
+    source_two_exp_target = str(summary.get("recipe", {}).get("two_exp_target", "amplitude_sum_delta"))
     for member in summary["members"]:
         model_path = resolve_existing_path(str(member["model_pt"]), base_dir=repo_root)
         checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
@@ -1951,13 +2032,202 @@ def load_population_members(summary_path: Path, *, device: torch.device) -> list
                 "x_std": x_std,
                 "z_mean": z_mean,
                 "z_std": z_std,
+                "two_exp_target": str(
+                    checkpoint.get(
+                        "two_exp_target",
+                        member.get("two_exp_target", source_two_exp_target),
+                    )
+                ),
                 "two_exp_target_mode": str(checkpoint.get("two_exp_target_mode", "direct")),
+                "source_summary": str(summary_path),
                 "summary": member.get("member_summary", {}),
                 "summary_json": member.get("summary_json"),
                 "model_pt": str(model_path),
             }
         )
     return members
+
+
+def load_population_members_from_summaries(
+    summary_paths: list[Path],
+    *,
+    device: torch.device,
+) -> list[dict[str, object]]:
+    members: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for summary_path in summary_paths:
+        for member in load_population_members(summary_path, device=device):
+            key = str(resolve_existing_path(str(member["model_pt"]), base_dir=Path.cwd()))
+            if key in seen:
+                continue
+            seen.add(key)
+            members.append(member)
+    if not members:
+        raise ValueError("No population members loaded for stacking.")
+    return members
+
+
+def sample_population_for_stacking(
+    *,
+    model_name: str,
+    n: int,
+    seed: int,
+    two_exp_target: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    if model_name == "two_exp":
+        _x_raw, x_context, z_raw = sample_two_exp_population_raw(n=n, seed=seed)
+        return x_context, z_raw
+    if model_name == "label_switch":
+        _x_raw, x_context, z_sorted = sample_label_switch_population_raw(n=n, seed=seed)
+        return x_context, z_sorted
+    return sample_population(model=model_name, n=n, seed=seed, two_exp_target=two_exp_target)
+
+
+def train_stacking_gate(
+    *,
+    model_name: str,
+    members: list[dict[str, object]],
+    calibration_examples: int,
+    calibration_seed: int,
+    validation_fraction: float,
+    batch_size: int,
+    eval_batch_size: int,
+    hidden_dim: int,
+    hidden_layers: int,
+    epochs: int,
+    learning_rate: float,
+    weight_decay: float,
+    two_exp_target: str,
+    device: torch.device,
+) -> tuple[torch.nn.Module, dict[str, object]]:
+    if len(members) < 2:
+        raise ValueError("Stacking needs at least two frozen members.")
+    data_start = time.perf_counter()
+    x_context, z_raw = sample_population_for_stacking(
+        model_name=model_name,
+        n=calibration_examples,
+        seed=calibration_seed,
+        two_exp_target=two_exp_target,
+    )
+    incompatible = [
+        {
+            "model_pt": str(member.get("model_pt", "")),
+            "x_dim": int(np.asarray(member["x_mean"]).shape[0]),
+        }
+        for member in members
+        if int(np.asarray(member["x_mean"]).shape[0]) != int(x_context.shape[1])
+    ]
+    if incompatible:
+        raise ValueError(
+            f"Stacking context dimension mismatch: calibration x_dim={x_context.shape[1]}, "
+            f"incompatible_members={incompatible}"
+        )
+    x_mean = x_context.mean(axis=0).astype(np.float64)
+    x_std = np.maximum(x_context.std(axis=0), 1e-6).astype(np.float64)
+    x_gate = standardize(x_context, x_mean, x_std).astype(np.float32)
+    member_log_probs = evaluate_member_log_probs(
+        model_name=model_name,
+        members=members,
+        x_context=x_context,
+        z_raw=z_raw,
+        default_two_exp_target=two_exp_target,
+        batch_size=eval_batch_size,
+        device=device,
+    ).astype(np.float32)
+    data_seconds = time.perf_counter() - data_start
+
+    n = x_gate.shape[0]
+    val_count = int(round(n * float(validation_fraction)))
+    val_count = min(max(1, val_count), max(1, n - 1))
+    rng = np.random.default_rng(calibration_seed + 17)
+    order = rng.permutation(n)
+    val_idx = order[:val_count]
+    train_idx = order[val_count:]
+    if train_idx.size == 0:
+        raise ValueError("Stacking calibration split left no training examples.")
+
+    gate = stage1.make_mlp(x_gate.shape[1], len(members), hidden_dim, hidden_layers).to(device)
+    optimizer = torch.optim.AdamW(gate.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    train_loader = DataLoader(
+        TensorDataset(
+            torch.from_numpy(x_gate[train_idx]),
+            torch.from_numpy(member_log_probs[train_idx]),
+        ),
+        batch_size=batch_size,
+        shuffle=True,
+        generator=torch.Generator(device="cpu").manual_seed(calibration_seed + 23),
+    )
+    val_x = torch.from_numpy(x_gate[val_idx]).to(device)
+    val_log_probs = torch.from_numpy(member_log_probs[val_idx]).to(device)
+
+    def batch_loss(batch_x: torch.Tensor, batch_log_probs: torch.Tensor) -> torch.Tensor:
+        logits = gate(batch_x)
+        return -torch.logsumexp(torch.log_softmax(logits, dim=-1) + batch_log_probs, dim=-1).mean()
+
+    history = {"train_nll": [], "val_nll": [], "epoch_seconds": []}
+    best_state = {key: value.detach().cpu().clone() for key, value in gate.state_dict().items()}
+    best_val = float("inf")
+    best_epoch = 0
+    start_time = time.perf_counter()
+    for epoch in range(1, epochs + 1):
+        epoch_start = time.perf_counter()
+        gate.train()
+        train_loss_sum = 0.0
+        train_count = 0
+        for batch_x, batch_log_probs in train_loader:
+            batch_x = batch_x.to(device)
+            batch_log_probs = batch_log_probs.to(device)
+            loss = batch_loss(batch_x, batch_log_probs)
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            optimizer.step()
+            train_loss_sum += float(loss.detach().cpu()) * int(batch_x.shape[0])
+            train_count += int(batch_x.shape[0])
+        gate.eval()
+        with torch.no_grad():
+            val_loss = float(batch_loss(val_x, val_log_probs).detach().cpu())
+        train_loss = train_loss_sum / max(train_count, 1)
+        history["train_nll"].append(float(train_loss))
+        history["val_nll"].append(float(val_loss))
+        history["epoch_seconds"].append(float(time.perf_counter() - epoch_start))
+        if val_loss < best_val:
+            best_val = val_loss
+            best_epoch = epoch
+            best_state = {key: value.detach().cpu().clone() for key, value in gate.state_dict().items()}
+    gate.load_state_dict(best_state)
+    gate.eval()
+    with torch.no_grad():
+        logits = gate(torch.from_numpy(x_gate).to(device))
+        weights = torch.softmax(logits, dim=-1).detach().cpu().numpy().astype(np.float64)
+    entropy = -np.sum(weights * np.log(np.maximum(weights, 1e-12)), axis=1)
+    metadata = {
+        "calibration_examples": int(calibration_examples),
+        "calibration_seed": int(calibration_seed),
+        "validation_fraction": float(validation_fraction),
+        "train_examples": int(train_idx.size),
+        "validation_examples": int(val_idx.size),
+        "hidden_dim": int(hidden_dim),
+        "hidden_layers": int(hidden_layers),
+        "epochs": int(epochs),
+        "batch_size": int(batch_size),
+        "learning_rate": float(learning_rate),
+        "weight_decay": float(weight_decay),
+        "best_epoch": int(best_epoch),
+        "best_val_nll": float(best_val),
+        "final_train_nll": float(history["train_nll"][-1]),
+        "final_val_nll": float(history["val_nll"][-1]),
+        "data_seconds": float(data_seconds),
+        "training_seconds": float(time.perf_counter() - start_time),
+        "x_mean": x_mean,
+        "x_std": x_std,
+        "mean_weights": weights.mean(axis=0),
+        "q05_weights": np.quantile(weights, 0.05, axis=0),
+        "q95_weights": np.quantile(weights, 0.95, axis=0),
+        "mean_entropy": float(np.mean(entropy)),
+        "max_weight_mean": float(np.mean(np.max(weights, axis=1))),
+        "history": history,
+    }
+    return gate, metadata
 
 
 def train_member(
@@ -2128,6 +2398,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-root", type=Path, default=None)
     parser.add_argument("--evaluate-summary", type=Path, default=None)
     parser.add_argument("--diagnostics-output", type=Path, default=None)
+    parser.add_argument("--stack-summaries", type=Path, nargs="+", default=None)
+    parser.add_argument("--stack-calibration-examples", type=int, default=32_768)
+    parser.add_argument("--stack-calibration-seed", type=int, default=20260713)
+    parser.add_argument("--stack-validation-fraction", type=float, default=0.25)
+    parser.add_argument("--stack-epochs", type=int, default=200)
+    parser.add_argument("--stack-batch-size", type=int, default=1024)
+    parser.add_argument("--stack-hidden-dim", type=int, default=32)
+    parser.add_argument("--stack-hidden-layers", type=int, default=1)
+    parser.add_argument("--stack-learning-rate", type=float, default=0.01)
+    parser.add_argument("--stack-weight-decay", type=float, default=1e-4)
     parser.add_argument("--seeds", type=parse_int_list, default=(20260901, 20260902, 20260903, 20260904))
     parser.add_argument("--train-simulations", type=int, default=2_048_000)
     parser.add_argument("--val-simulations", type=int, default=65_536)
@@ -2206,11 +2486,127 @@ def main() -> None:
         output_root = args.output_root
     elif args.evaluate_summary is not None:
         output_root = args.evaluate_summary.parent.parent
+    elif args.stack_summaries is not None:
+        output_root = default_output_root(str(args.model)).parent / "26_learned_stack_full_prior"
     else:
         output_root = default_output_root(str(args.model))
     results_dir = output_root / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
     device = stage1.choose_training_device(args.device)
+    if args.stack_summaries is not None:
+        members = load_population_members_from_summaries(list(args.stack_summaries), device=device)
+        gate, stack_training = train_stacking_gate(
+            model_name=str(args.model),
+            members=members,
+            calibration_examples=int(args.stack_calibration_examples),
+            calibration_seed=int(args.stack_calibration_seed),
+            validation_fraction=float(args.stack_validation_fraction),
+            batch_size=int(args.stack_batch_size),
+            eval_batch_size=int(args.eval_batch_size),
+            hidden_dim=int(args.stack_hidden_dim),
+            hidden_layers=int(args.stack_hidden_layers),
+            epochs=int(args.stack_epochs),
+            learning_rate=float(args.stack_learning_rate),
+            weight_decay=float(args.stack_weight_decay),
+            two_exp_target=str(args.two_exp_target),
+            device=device,
+        )
+        gate_path = results_dir / f"{args.model}_population_stacking_gate.pt"
+        torch.save(
+            {
+                "state_dict": gate.state_dict(),
+                "x_mean": np.asarray(stack_training["x_mean"], dtype=np.float64),
+                "x_std": np.asarray(stack_training["x_std"], dtype=np.float64),
+                "member_count": len(members),
+                "model_name": str(args.model),
+                "two_exp_target": str(args.two_exp_target),
+                "training": stack_training,
+                "runtime": runtime_metadata(),
+            },
+            gate_path,
+        )
+        diagnostics_output = args.diagnostics_output
+        if diagnostics_output is None and str(args.model) == "two_exp":
+            diagnostics_output = results_dir / f"{args.model}_population_stacked_gap_diagnostics.json"
+        evaluation = evaluate_population_nll(
+            model_name=str(args.model),
+            members=members,
+            validation_examples=int(args.validation_examples),
+            validation_seed=int(args.validation_seed),
+            batch_size=int(args.eval_batch_size),
+            device=device,
+            linear6_quadrature_order=int(args.linear6_quadrature_order),
+            banana_quadrature_order=int(args.banana_quadrature_order),
+            label_importance_samples=int(args.label_importance_samples),
+            label_importance_seed=int(args.label_importance_seed),
+            label_importance_batch_size=int(args.label_importance_batch_size),
+            label_prior_mixture=float(args.label_prior_mixture),
+            label_proposal_inflation=float(args.label_proposal_inflation),
+            two_exp_target=str(args.two_exp_target),
+            two_exp_floor_method=str(args.two_exp_floor_method),
+            two_exp_importance_samples=int(args.two_exp_importance_samples),
+            two_exp_importance_seed=int(args.two_exp_importance_seed),
+            two_exp_importance_batch_size=int(args.two_exp_importance_batch_size),
+            two_exp_prior_mixture=float(args.two_exp_prior_mixture),
+            two_exp_proposal_inflation=float(args.two_exp_proposal_inflation),
+            two_exp_smc_particles=int(args.two_exp_smc_particles),
+            two_exp_smc_beta_steps=int(args.two_exp_smc_beta_steps),
+            two_exp_smc_mh_steps=int(args.two_exp_smc_mh_steps),
+            two_exp_smc_seed=int(args.two_exp_smc_seed),
+            two_exp_smc_batch_size=int(args.two_exp_smc_batch_size),
+            two_exp_smc_step_scale=float(args.two_exp_smc_step_scale),
+            diagnostics_output=diagnostics_output,
+            stacking_gate=gate,
+            stacking_x_mean=np.asarray(stack_training["x_mean"], dtype=np.float64),
+            stacking_x_std=np.asarray(stack_training["x_std"], dtype=np.float64),
+        )
+        summary = {
+            "kind": f"{args.model}_population_learned_stacking",
+            "description": f"Learned x-dependent stacking over frozen full-prior {args.model} population NPE members.",
+            "target": population_target_description(str(args.model), two_exp_target=str(args.two_exp_target)),
+            "device": str(device),
+            "source_summaries": [str(path) for path in args.stack_summaries],
+            "gate_pt": str(gate_path),
+            "recipe": {
+                "member_count": len(members),
+                "validation_examples": int(args.validation_examples),
+                "validation_seed": int(args.validation_seed),
+                "eval_batch_size": int(args.eval_batch_size),
+                "stack_calibration_examples": int(args.stack_calibration_examples),
+                "stack_calibration_seed": int(args.stack_calibration_seed),
+                "stack_validation_fraction": float(args.stack_validation_fraction),
+                "stack_epochs": int(args.stack_epochs),
+                "stack_batch_size": int(args.stack_batch_size),
+                "stack_hidden_dim": int(args.stack_hidden_dim),
+                "stack_hidden_layers": int(args.stack_hidden_layers),
+                "stack_learning_rate": float(args.stack_learning_rate),
+                "stack_weight_decay": float(args.stack_weight_decay),
+                "two_exp_target": str(args.two_exp_target),
+                "two_exp_floor_method": str(args.two_exp_floor_method),
+                "two_exp_importance_samples": int(args.two_exp_importance_samples),
+                "two_exp_importance_seed": int(args.two_exp_importance_seed),
+                "two_exp_importance_batch_size": int(args.two_exp_importance_batch_size),
+                "two_exp_prior_mixture": float(args.two_exp_prior_mixture),
+                "two_exp_proposal_inflation": float(args.two_exp_proposal_inflation),
+            },
+            "members": [
+                {
+                    "model_pt": str(member["model_pt"]),
+                    "source_summary": str(member.get("source_summary", "")),
+                    "two_exp_target": str(member.get("two_exp_target", "")),
+                    "two_exp_target_mode": str(member.get("two_exp_target_mode", "")),
+                }
+                for member in members
+            ],
+            "stack_training": stack_training,
+            "evaluation": evaluation,
+            "runtime": runtime_metadata(),
+        }
+        summary_path = results_dir / f"{args.model}_population_stacked_evaluation_summary.json"
+        summary_path.write_text(json.dumps(json_ready(summary), indent=2, sort_keys=True), encoding="utf-8")
+        print(json.dumps(json_ready(summary), indent=2, sort_keys=True))
+        print(f"summary_json: {summary_path}", flush=True)
+        return
     if args.evaluate_summary is not None:
         source_summary = json.loads(args.evaluate_summary.read_text(encoding="utf-8"))
         two_exp_target = str(source_summary.get("recipe", {}).get("two_exp_target", args.two_exp_target))

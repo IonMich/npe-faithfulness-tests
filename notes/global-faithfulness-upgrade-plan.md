@@ -370,6 +370,7 @@ equal-5 best Flow2 + high-SNR    NLL -3.20086, gap 0.08064
 512k x 1 4-component Flow2 mix, validation-selected 80 ep NLL -3.13618, gap 0.14531
 512k x 1 Flow2 profile-residual, validation-selected 80 ep NLL -2.36705, gap 0.91444
 512k x 1 Flow2 NAF, validation-selected 80 ep NLL -3.17602, gap 0.10547
+11-member learned x-dependent stack over compatible frozen members NLL -3.20511, gap 0.07638
 ```
 
 These gaps are normalized to the shared 10k validation reference floor
@@ -378,10 +379,11 @@ later evaluator invocation; those estimates differ by Monte Carlo noise and
 should not be mixed inside the architecture table.
 
 The best plain NPE result is the 4-member Flow2 30-epoch ensemble, and it is
-still about `0.083` NLL units above the floor. A diverse ensemble over the
-available probes improves only to about `-3.2036`, still roughly `0.078` above
-the floor. This is qualitatively different from Linear6/Banana/Label Switching
-and should be treated as a real miss, not an uncertainty issue.
+still about `0.083` NLL units above the floor. A learned x-dependent stack over
+11 compatible frozen members improves to `-3.20511`, still `0.07638` above the
+common floor and `0.07470 +/- 0.00394` above its paired floor estimate. This is
+qualitatively different from Linear6/Banana/Label Switching and should be
+treated as a real miss, not an uncertainty issue.
 
 The first gated mixture-of-flows probe used two Flow2 residual NSF components
 and reached a competitive training loss (`-3.26366`) but not a better held-out
@@ -422,6 +424,13 @@ validation NLL `-3.20261`, but held-out evaluation fell back to `-3.17602`; this
 does not improve the current best and suggests the 32k training validation cache
 is not sufficient to select these more flexible single-member variants.
 
+The learned-stack probe used a separate 65,536-example calibration cache, a
+50/50 validation split, and an x-dependent 1-hidden-layer gate over 11 frozen
+compatible members. It selected epoch 4 by calibration validation NLL and
+improved held-out NLL relative to the equal-5 mixture, but the full-prior gap
+remained highly resolved. This rules out simple post-hoc x-dependent weighting
+over the current member pool as a repair.
+
 Useful infrastructure completed:
 
 - `train_sign_population_npe.py` can now sample, train, evaluate, and floor-probe
@@ -445,11 +454,21 @@ Useful infrastructure completed:
 - `train_sign_population_npe.py` can evaluate existing two-exponential ensemble
   summaries with paired-gap diagnostics and can run targeted two-exponential
   loss weighting probes.
+- `train_sign_population_npe.py` can train and evaluate a frozen-member learned
+  stacking gate from existing population summaries, while preserving per-member
+  two-exponential target transforms.
 
 Next viable experiments:
 
-- Stop scaling the same Flow2 recipe blindly; the 1M single-member probe did not
-  improve fixed-cache NLL.
+- Finish the active Mac mini run
+  `27_flow2_ridge_full_prior_1m_ensemble4_converge_e120`. This is the one
+  remaining plain-Flow2 scale-up worth doing because the current best
+  4-member Flow2 run skipped training validation, while the later
+  validation-selected probes were single-member or changed the family/target.
+  It uses 1.024M simulations per member, 65,536 training-validation examples,
+  four members, and a 120-epoch cap with validation selection.
+- Do not keep scaling the same Flow2 recipe blindly after that run; the previous
+  1M single-member probe did not improve fixed-cache NLL.
 - Try a genuinely different conditional posterior strategy, such as
   exact-posterior distillation on difficult signals, a sequential proposal, or a
   learned x-dependent ensemble/stacking objective. The stronger four-component
@@ -515,8 +534,11 @@ Use the same stop/go logic for every model.
 2. Commit and push successful model slices as they finish; for Two-Exponential,
    commit only reusable infrastructure or clearly labeled blocker/probe notes
    until there is a near-floor result.
-3. Move the next two-exponential training attempt to a richer posterior family
-   or a better invertible target/context; another plain Flow2 scale-up is not
-   justified by the current probes.
-4. For any new posterior figures, keep the exact/reference layer in the same
+3. Let the active Mac mini validation-selected 1M x4 Flow2 run finish, then
+   commit/push its compact summaries and documentation whether it passes or
+   misses.
+4. If that run misses, move the next two-exponential training attempt to a
+   richer posterior family or a better invertible target/context; another plain
+   Flow2 scale-up is not justified by the current probes.
+5. For any new posterior figures, keep the exact/reference layer in the same
    reusable renderer and use deterministic seeded NPE samples.
