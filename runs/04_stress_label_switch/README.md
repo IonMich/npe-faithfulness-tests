@@ -4,6 +4,7 @@ Runs are grouped by method folder inside this model.
 
 | Status | Run | Metric | Target | Reason |
 | --- | --- | --- | --- | --- |
+| `near_floor` | [03_population_npe / 02_flow2_residual_full_prior_512k_ensemble4_e30](03_population_npe/02_flow2_residual_full_prior_512k_ensemble4_e30) | full-prior sorted z-NLL: `-3.09250 +/- 0.00822` | entropy floor: `-3.10112 +/- 0.00821` | gap `0.00862`, combined z `0.74`; paired cache resolves `0.00862 +/- 0.00060` |
 | `legacy_pairwise_pass` | [01_npe_flow / 05_npe_flow_stress_tests_label_em](01_npe_flow/05_npe_flow_stress_tests_label_em) | pairwise max diagnostic Wasserstein: 0.02868 | 0.034 inherited | Model-specific calibration pending |
 | `fail` | [01_npe_flow / 06_npe_flow_stress_tests_label_enhanced](01_npe_flow/06_npe_flow_stress_tests_label_enhanced) | max diagnostic Wasserstein: 0.242 | 0.034 | MCMC, HMC, and NPE agreement target |
 | `fail` | [01_npe_flow / 07_npe_flow_stress_tests_label_medium](01_npe_flow/07_npe_flow_stress_tests_label_medium) | max diagnostic Wasserstein: 0.3486 | 0.034 | MCMC, HMC, and NPE agreement target |

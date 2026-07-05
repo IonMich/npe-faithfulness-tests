@@ -37,6 +37,15 @@
       "source": "runs/03_stress_banana/03_population_npe/00_entropy_floor_full_prior/results/banana_population_floor_summary.json"
     },
     {
+      "model": "label_switch",
+      "coordinate_target": "z_sorted=(mu_low, mu_high, log sigma)",
+      "estimate": -3.1011164846256136,
+      "standard_error": 0.008210014576857754,
+      "examples": 50000,
+      "method": "Symmetry-folded sorted-coordinate posterior with raw evidence estimated by symmetric Gaussian-mixture importance sampling, 4096 samples per signal.",
+      "source": "runs/04_stress_label_switch/03_population_npe/02_flow2_residual_full_prior_512k_ensemble4_e30/results/label_switch_population_ensemble_summary.json"
+    },
+    {
       "model": "linear6",
       "coordinate_target": "z=(w1, ..., w6, log sigma)",
       "estimate": -10.786310881823061,

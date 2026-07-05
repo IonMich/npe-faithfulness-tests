@@ -1,32 +1,32 @@
 {
   "description": "Fresh full-prior Banana posterior check for the population-trained Flow2 residual NSF ensemble. The comparison is in raw theta coordinates.",
   "exact": {
-    "posterior_samples": 50000
+    "posterior_samples": 80000
   },
   "grid": {
-    "edge_mass": 8.678338717491315e-16,
+    "edge_mass": 6.074837102243928e-16,
     "grid_limit": 4.0,
-    "grid_size": 701
+    "grid_size": 1001
   },
   "mcmc": {
     "acceptance_rate": 0.41190625,
     "burn_in": 3000,
     "chains": 8,
     "posterior_samples": 72000,
-    "seconds": 0.5380016659619287,
+    "seconds": 0.6058487080736086,
     "steps": 12000,
     "to_exact": {
-      "mean_normalized_wasserstein": 0.010720786842272345,
+      "mean_normalized_wasserstein": 0.011881602664261335,
       "parameters": {
         "theta1": {
-          "normalized_wasserstein": 0.011795688940155835,
-          "reference_sd": 0.19349163019855917,
-          "wasserstein": 0.002282367082345867
+          "normalized_wasserstein": 0.011972846011461317,
+          "reference_sd": 0.19347956500522454,
+          "wasserstein": 0.002316501038172073
         },
         "theta2": {
-          "normalized_wasserstein": 0.009645884744388855,
-          "reference_sd": 0.37697203974580007,
-          "wasserstein": 0.003636228847245162
+          "normalized_wasserstein": 0.011790359317061355,
+          "reference_sd": 0.3788636466214897,
+          "wasserstein": 0.004466938525839521
         }
       }
     }
@@ -34,19 +34,19 @@
   "npe": {
     "ensemble_summary": "/Users/ioannism/repos/npe/runs/03_stress_banana/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/results/banana_population_ensemble_summary.json",
     "members": 4,
-    "posterior_samples": 50000,
+    "posterior_samples": 80000,
     "to_exact": {
-      "mean_normalized_wasserstein": 0.007405689280287154,
+      "mean_normalized_wasserstein": 0.0102544692826648,
       "parameters": {
         "theta1": {
-          "normalized_wasserstein": 0.007202237330516575,
-          "reference_sd": 0.19349163019855917,
-          "wasserstein": 0.0013935726421585711
+          "normalized_wasserstein": 0.010342984169324722,
+          "reference_sd": 0.19347956500522454,
+          "wasserstein": 0.002001156077936871
         },
         "theta2": {
-          "normalized_wasserstein": 0.007609141230057732,
-          "reference_sd": 0.37697203974580007,
-          "wasserstein": 0.0028684334902087296
+          "normalized_wasserstein": 0.010165954396004878,
+          "reference_sd": 0.3788636466214897,
+          "wasserstein": 0.003851510553858172
         }
       }
     }

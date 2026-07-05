@@ -1,49 +1,49 @@
 {
   "description": "Fresh full-prior Linear6 posterior check for the population-trained Flow2 residual NSF ensemble. The comparison is in the NLL target coordinates, including log_sigma.",
   "exact": {
-    "posterior_samples": 50000
+    "posterior_samples": 80000
   },
   "npe": {
     "ensemble_summary": "/Users/ioannism/repos/npe/runs/05_stress_linear6/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/results/linear6_population_ensemble_summary.json",
     "members": 4,
-    "posterior_samples": 50000,
+    "posterior_samples": 80000,
     "to_exact": {
-      "mean_normalized_wasserstein": 0.012793240312442802,
+      "mean_normalized_wasserstein": 0.012181477250120615,
       "parameters": {
         "log_sigma": {
-          "normalized_wasserstein": 0.0070191580448920885,
-          "reference_sd": 0.1324326923658656,
-          "wasserstein": 0.0009295659980265846
+          "normalized_wasserstein": 0.01046643791827414,
+          "reference_sd": 0.13243393689017965,
+          "wasserstein": 0.0013861115787337007
         },
         "w1": {
-          "normalized_wasserstein": 0.010808531220101975,
-          "reference_sd": 0.06005175367603965,
-          "wasserstein": 0.000649071254429348
+          "normalized_wasserstein": 0.007490762635565103,
+          "reference_sd": 0.06025965082151064,
+          "wasserstein": 0.0004513907408059719
         },
         "w2": {
-          "normalized_wasserstein": 0.014560670007795616,
-          "reference_sd": 0.05992952083805147,
-          "wasserstein": 0.0008726139766481784
+          "normalized_wasserstein": 0.009246676977310435,
+          "reference_sd": 0.05997276505687184,
+          "wasserstein": 0.0005545487859170246
         },
         "w3": {
-          "normalized_wasserstein": 0.02777179347506254,
-          "reference_sd": 0.05996130694830638,
-          "wasserstein": 0.0016652330330631973
+          "normalized_wasserstein": 0.010935370361320161,
+          "reference_sd": 0.06016702615301917,
+          "wasserstein": 0.0006579487145225008
         },
         "w4": {
-          "normalized_wasserstein": 0.008303207529379249,
-          "reference_sd": 0.05962600899928765,
-          "wasserstein": 0.00049508712686972
+          "normalized_wasserstein": 0.014018273767972267,
+          "reference_sd": 0.059918887806954486,
+          "wasserstein": 0.0008399593731503033
         },
         "w5": {
-          "normalized_wasserstein": 0.009683647438556911,
-          "reference_sd": 0.060006232406661336,
-          "wasserstein": 0.0005810791987422168
+          "normalized_wasserstein": 0.01569864309372854,
+          "reference_sd": 0.060200345804285425,
+          "wasserstein": 0.0009450637429005154
         },
         "w6": {
-          "normalized_wasserstein": 0.011405674471311227,
-          "reference_sd": 0.05962867644076089,
-          "wasserstein": 0.0006801052726384637
+          "normalized_wasserstein": 0.01741417599667366,
+          "reference_sd": 0.059600475042571856,
+          "wasserstein": 0.0010378931618767024
         }
       }
     }

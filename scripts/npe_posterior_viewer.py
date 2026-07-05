@@ -298,6 +298,18 @@ def sample_interval_rows(
     return rows
 
 
+def strip_math_delimiters(label: str) -> str:
+    text = label.strip()
+    if text.startswith("$") and text.endswith("$") and len(text) >= 2:
+        return text[1:-1]
+    return text
+
+
+def stacked_interval_title(row: dict[str, str]) -> str:
+    parameter = strip_math_delimiters(row["parameter"])
+    return rf"${parameter} = {row['median']}^{{+{row['plus']}}}_{{-{row['minus']}}}$"
+
+
 def add_diagonal_interval_titles(
     *,
     axes: np.ndarray,
@@ -308,19 +320,27 @@ def add_diagonal_interval_titles(
     if summary_layer is None:
         return
     rows = sample_interval_rows(labels=labels, layer=summary_layer)
-    fontsize = 7.3 if len(labels) >= 6 else 8.6
+    fontsize = 7.1 if len(labels) >= 6 else 8.3
     for index, row in enumerate(rows):
         ax = axes[index, index]
+        ymin, ymax = ax.get_ylim()
+        if np.isfinite(ymin) and np.isfinite(ymax) and ymax > ymin:
+            ax.set_ylim(ymin, ymin + 1.20 * (ymax - ymin))
         ax.text(
-            0.02,
-            1.08,
-            f"{row['parameter']}  {row['median']}  +{row['plus']}  -{row['minus']}",
+            0.5,
+            0.96,
+            stacked_interval_title(row),
             transform=ax.transAxes,
-            ha="left",
-            va="bottom",
+            ha="center",
+            va="top",
             fontsize=fontsize,
             color="#111827",
-            clip_on=False,
+            bbox={
+                "facecolor": "white",
+                "edgecolor": "none",
+                "alpha": 0.82,
+                "pad": 0.25,
+            },
         )
 
 
@@ -475,7 +495,7 @@ def render_corner_layers(
             labels=labels,
             sample_layers=prepared_sample_layers,
         )
-        hspace = 0.18 if dimensions >= 4 else 0.14
+        hspace = 0.08
     else:
         hspace = 0.08
     figure.legend(handles=handles, loc="upper right", bbox_to_anchor=(0.97, 0.96))

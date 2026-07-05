@@ -1,0 +1,49 @@
+{
+  "epochs": 30,
+  "figure": "/Users/ioannism/repos/npe/runs/00_shared_assets/readme_label_switch_posteriors/label_switch_population_training_loss.png",
+  "final_full_prior_validation_nll": {
+    "mean": -3.0924999546557705,
+    "standard_error": 0.008216554964424975
+  },
+  "floor": {
+    "estimate": -3.1011164846256136,
+    "standard_error": 0.008210014576857754
+  },
+  "mean_train_nll_target_units": {
+    "final_epoch": -3.1025456790973256,
+    "first_epoch": -1.7822209508049125
+  },
+  "members": [
+    {
+      "final_train_nll_target_units": -3.0998120665846276,
+      "member_index": 1,
+      "seed": 20261111,
+      "training_seconds": 254.90091895899968
+    },
+    {
+      "final_train_nll_target_units": -3.1018497259081848,
+      "member_index": 2,
+      "seed": 20261112,
+      "training_seconds": 254.46370891699917
+    },
+    {
+      "final_train_nll_target_units": -3.1032454898048645,
+      "member_index": 3,
+      "seed": 20261113,
+      "training_seconds": 254.7761860830069
+    },
+    {
+      "final_train_nll_target_units": -3.1052754340916255,
+      "member_index": 4,
+      "seed": 20261114,
+      "training_seconds": 255.53008733401657
+    }
+  ],
+  "note": "The source run skipped per-epoch validation. Curves are training NLL per member in target units against total training wall time; the marker is the final 1M-example full-prior validation NLL.",
+  "source": "Full-prior label-switching population NPE using the single-decay Flow2 residual NSF/randperm training recipe, with sorted target (mu_low, mu_high, log_sigma).",
+  "training_wall_seconds": 1272.5513495409978,
+  "wall_time_axis_seconds": {
+    "final_epoch": 1272.5513495409978,
+    "first_epoch": 41.81047129530979
+  }
+}

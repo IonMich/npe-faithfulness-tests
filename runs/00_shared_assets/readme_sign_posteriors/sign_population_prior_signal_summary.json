@@ -24,7 +24,7 @@
       "positive_theta1": 0.5
     },
     "posterior_samples": 72000,
-    "seconds": 0.5519108329899609,
+    "seconds": 0.550882332958281,
     "steps": 12000,
     "to_grid_diagnostic": {
       "max_normalized_wasserstein": 0.0273087675455215,
@@ -59,36 +59,36 @@
     "ensemble_summary": "/Users/ioannism/repos/npe/runs/02_stress_sign/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/results/sign_population_ensemble_summary.json",
     "members": 4,
     "mode_mass": {
-      "negative_theta1": 0.49683999999999995,
-      "positive_mass_error_vs_half": 0.0031600000000000517,
-      "positive_theta1": 0.50316
+      "negative_theta1": 0.49685,
+      "positive_mass_error_vs_half": 0.003149999999999986,
+      "positive_theta1": 0.50315
     },
-    "posterior_samples": 50000,
+    "posterior_samples": 80000,
     "to_grid_diagnostic": {
-      "max_normalized_wasserstein": 0.027381592942917338,
-      "mean_normalized_wasserstein": 0.021212137063099677,
+      "max_normalized_wasserstein": 0.0275140872922012,
+      "mean_normalized_wasserstein": 0.020693940515276496,
       "per_dim": {
         "$\\theta_2$": {
-          "normalized_wasserstein": 0.01504268118328202,
-          "wasserstein": 0.002397376507092786
+          "normalized_wasserstein": 0.013873793738351788,
+          "wasserstein": 0.0022110890184617164
         },
         "$|\\theta_1|$": {
-          "normalized_wasserstein": 0.027381592942917338,
-          "wasserstein": 0.0021847725255366096
+          "normalized_wasserstein": 0.0275140872922012,
+          "wasserstein": 0.0021953442265588144
         }
       }
     },
     "to_grid_raw": {
-      "max_normalized_wasserstein": 0.01504268118328202,
-      "mean_normalized_wasserstein": 0.01114273215020068,
+      "max_normalized_wasserstein": 0.013873793738351788,
+      "mean_normalized_wasserstein": 0.010650957125563212,
       "per_dim": {
         "$\\theta_1$": {
-          "normalized_wasserstein": 0.007242783117119342,
-          "wasserstein": 0.010078219613938184
+          "normalized_wasserstein": 0.007428120512774637,
+          "wasserstein": 0.010336113706013707
         },
         "$\\theta_2$": {
-          "normalized_wasserstein": 0.01504268118328202,
-          "wasserstein": 0.002397376507092786
+          "normalized_wasserstein": 0.013873793738351788,
+          "wasserstein": 0.0022110890184617164
         }
       }
     }

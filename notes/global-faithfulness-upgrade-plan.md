@@ -32,7 +32,7 @@ and the entropy-floor estimate.
 | Single-exponential decay | `near_floor` full-prior z-NLL result | Not a strict floor hit; keep as the reference recipe and plotting/evaluation template while tracking the remaining resolved gap. |
 | Sign symmetry | `near_floor` full-prior folded NLL result | Not globally faithful yet; close the remaining NLL-floor gap or reduce uncertainty until the floor hit is statistically clean. |
 | Banana | `floor_pass` full-prior raw-coordinate NLL result | Second completed transfer after Linear6; gap is within the entropy-floor uncertainty under the common criterion. |
-| Label-switching mixture | `legacy_pairwise_pass` | Estimate the sorted-coordinate floor, then train/evaluate a population NPE in symmetry-aware coordinates. |
+| Label-switching mixture | `near_floor` full-prior sorted z-NLL result | Third completed transfer after Linear6/Banana; combined uncertainty does not resolve the gap, but the paired cache still resolves a small residual. |
 | Linear6 | `near_floor` full-prior z-NLL result | First completed transfer after sign; remaining gap is real but at the same practical near-floor level as single decay and sign. |
 | Ordered two-exponential decay | `fail` | First build a reliable full-prior floor/evidence pipeline; only then claim or tune global NLL. |
 
@@ -254,8 +254,8 @@ Training recipe:
 Diagnostics:
 
 - Exact grid vs NPE vs MCMC on one fresh prior-predictive signal.
-- NPE-to-exact mean normalized marginal Wasserstein: `0.01022`.
-- MCMC-to-exact mean normalized marginal Wasserstein: `0.01072`.
+- NPE-to-exact mean normalized marginal Wasserstein: `0.01025`.
+- MCMC-to-exact mean normalized marginal Wasserstein: `0.01188`.
 
 Follow-up if we want to close even the paired residual:
 
@@ -266,46 +266,43 @@ Follow-up if we want to close even the paired residual:
 
 ### 3. Label-Switching Mixture
 
-This needs a symmetry-aware target before any NLL number is meaningful.
+Done as the third remaining-model transfer. It now has a full-prior
+population NPE result in symmetry-aware sorted coordinates.
 
 Target coordinates:
 
 ```text
-g(z) = (mu_low, mu_high, sigma)
+g(z) = (mu_low, mu_high, log_sigma)
 mu_low = min(mu_1, mu_2)
 mu_high = max(mu_1, mu_2)
 ```
 
-Floor plan:
+Result:
 
-- Compute the posterior density in sorted coordinates by summing raw posterior
-  density over the two label permutations:
-
-  ```text
-  p_sorted(mu_low, mu_high, sigma | x)
-    = p_raw(mu_low, mu_high, sigma | x)
-    + p_raw(mu_high, mu_low, sigma | x)
-  ```
-
-- Include the `log sigma -> sigma` Jacobian if using physical `sigma`.
-- Estimate the evidence `p(x)` using adaptive 3D integration, importance
-  sampling around EM modes, or bridge sampling from a converged HMC reference.
-- Validate symmetry mass and evidence stability on a small cache before running
-  the final validation.
-
-Training plan:
-
-- Train directly in sorted coordinates.
-- Restore random label assignment only for raw-coordinate posterior displays,
-  not for the NLL target.
-- Context: use the existing EM summaries, plus robust raw-data summaries such
-  as quantiles or a fixed histogram if they improve validation NLL.
-- Start with the 4-member Flow2 recipe at `512k` per member.
+- Run:
+  `runs/04_stress_label_switch/03_population_npe/02_flow2_residual_full_prior_512k_ensemble4_e30`
+- Target:
+  `z_sorted=(mu_low, mu_high, log_sigma)`.
+- Recipe:
+  4-member Flow2 residual NSF ensemble, `512k` full-prior simulations per
+  member, `30` epochs on the Mac mini.
+- Full-prior validation NLL:
+  `-3.09250 +/- 0.00822`.
+- Sorted-coordinate entropy floor:
+  `-3.10112 +/- 0.00821`, estimated on the same 50k validation cache with a
+  symmetric Gaussian-mixture importance estimator and the sorted-coordinate
+  `log 2` fold factor.
+- Gap:
+  `0.00862`, or `0.74` combined standard errors. The paired cache still
+  resolves the residual (`0.00862 +/- 0.00060`), so this is `near_floor`, not
+  a strict floor hit.
 
 Diagnostics:
 
-- Sorted-coordinate exact/reference vs NPE overlay.
-- Mode/permutation mass check in raw coordinates as a display diagnostic.
+- The README posterior overlay now includes exact finite grid, MCMC, and NPE
+  layers in sorted target coordinates.
+- Mean normalized marginal Wasserstein to the exact grid is `0.02729` for the
+  NPE and `0.02979` for MCMC on the representative full-prior signal.
 
 ### 4. Ordered Two-Exponential Decay
 
@@ -388,12 +385,8 @@ Use the same stop/go logic for every model.
 
 ## Immediate Next Work
 
-1. Commit and push the completed Banana floor-pass model slice.
-2. Build and sanity-check the Label Switching sorted-coordinate entropy-floor
-   estimator before launching any heavy Label Switching training.
-3. If Label Switching floor estimation is stable, run the same 4-member Flow2
-   `512k` population proof on the Mac mini.
-4. Extend the existing loss/posterior rendering scripts with a
-   `label_switch_population` mode rather than adding separate plotting scripts.
-5. Repeat the same floor-first workflow for Ordered Two-Exponential Decay only
+1. Commit and push the completed Label Switching near-floor model slice.
+2. Repeat the same floor-first workflow for Ordered Two-Exponential Decay only
    after its full-prior evidence method is credible.
+3. For any new posterior figures, keep the exact/reference layer in the same
+   reusable renderer and use deterministic seeded NPE samples.

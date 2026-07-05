@@ -99,7 +99,7 @@ NLL.
 A fresh full-prior signal was drawn with seed `20260707`, draw index `1`, giving
 \(\theta=(1.419,-1.175)\) and \(x=(1.956,-0.932)\). Against a dense exact grid,
 mean normalized Wasserstein in folded diagnostic coordinates is `0.02112` for
-MCMC and `0.02163` for this population NPE ensemble.
+MCMC and `0.02069` for this population NPE ensemble.
 
 ![Sign population exact grid, MCMC, and NPE posterior overlay](../../../00_shared_assets/readme_sign_posteriors/sign_population_prior_signal_corner.png)
 

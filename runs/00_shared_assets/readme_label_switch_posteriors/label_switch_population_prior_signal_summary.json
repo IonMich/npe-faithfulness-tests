@@ -1,0 +1,135 @@
+{
+  "description": "Fresh full-prior label-switching posterior check for the population-trained Flow2 residual NSF ensemble. Samples are shown in sorted NLL target coordinates.",
+  "grid": {
+    "axis_ranges": [
+      [
+        -1.755067661487428,
+        -0.9654485914683417
+      ],
+      [
+        1.0272533149287204,
+        1.843023762766485
+      ],
+      [
+        -0.9951066841662535,
+        -0.21800395424790436
+      ]
+    ],
+    "edge_mass": 1.3825965468900177e-05,
+    "grid_points": 884736,
+    "grid_size": 96,
+    "pad_fraction": 0.25
+  },
+  "mcmc": {
+    "acceptance_rate": 0.6539375,
+    "burn_in": 3000,
+    "chains": 8,
+    "posterior_samples": 72000,
+    "seconds": 0.7047962499782443,
+    "steps": 12000,
+    "to_grid": {
+      "mean_normalized_wasserstein": 0.029788710670713214,
+      "parameters": {
+        "log_sigma": {
+          "normalized_wasserstein": 0.03003403764091154,
+          "reference_sd": 0.08108778622579188,
+          "wasserstein": 0.0024353936237236215
+        },
+        "mu_high": {
+          "normalized_wasserstein": 0.02726374765632743,
+          "reference_sd": 0.08698319337158288,
+          "wasserstein": 0.0023714878344243684
+        },
+        "mu_low": {
+          "normalized_wasserstein": 0.03206834671490067,
+          "reference_sd": 0.08832351057822913,
+          "wasserstein": 0.0028323889602998487
+        }
+      }
+    }
+  },
+  "npe": {
+    "ensemble_summary": "/Users/ioannism/repos/npe/runs/04_stress_label_switch/03_population_npe/02_flow2_residual_full_prior_512k_ensemble4_e30/results/label_switch_population_ensemble_summary.json",
+    "members": 4,
+    "posterior_samples": 50000,
+    "to_grid": {
+      "mean_normalized_wasserstein": 0.027287979449565264,
+      "parameters": {
+        "log_sigma": {
+          "normalized_wasserstein": 0.026561110472522107,
+          "reference_sd": 0.08108778622579188,
+          "wasserstein": 0.0021537816479155147
+        },
+        "mu_high": {
+          "normalized_wasserstein": 0.03055745616554903,
+          "reference_sd": 0.08698319337158288,
+          "wasserstein": 0.0026579851185916186
+        },
+        "mu_low": {
+          "normalized_wasserstein": 0.024745371710624655,
+          "reference_sd": 0.08832351057822913,
+          "wasserstein": 0.0021855981000455686
+        }
+      }
+    },
+    "to_mcmc": {
+      "mean_normalized_wasserstein": 0.023654953976627587,
+      "parameters": {
+        "log_sigma": {
+          "normalized_wasserstein": 0.02369929054086294,
+          "reference_sd": 0.08062410650169256,
+          "wasserstein": 0.0019107341245810888
+        },
+        "mu_high": {
+          "normalized_wasserstein": 0.013231999239544852,
+          "reference_sd": 0.08607804552454802,
+          "wasserstein": 0.0011389846329223265
+        },
+        "mu_low": {
+          "normalized_wasserstein": 0.03403357214947497,
+          "reference_sd": 0.08750178082818229,
+          "wasserstein": 0.002977998171023488
+        }
+      }
+    }
+  },
+  "outputs": {
+    "figure": "/Users/ioannism/repos/npe/runs/00_shared_assets/readme_label_switch_posteriors/label_switch_population_prior_signal_corner.png",
+    "summary": "/Users/ioannism/repos/npe/runs/00_shared_assets/readme_label_switch_posteriors/label_switch_population_prior_signal_summary.json"
+  },
+  "signal": {
+    "draw_index": 10,
+    "seed": 20260707,
+    "x_summary_context": [
+      0.04910244510856926,
+      0.4009354679564188,
+      0.02418479991689728,
+      -1.9368718390524944,
+      -1.741550018431346,
+      -1.280083155564269,
+      0.16106973224016952,
+      1.4470338148933664,
+      1.8479729143577943,
+      2.214413081433524,
+      -1.3495949767307855,
+      1.4477998669479244,
+      -0.6823706953164578,
+      -0.6167666255284548,
+      -0.6484934578572503,
+      2.7973948436787097,
+      -1.3630253862573936,
+      1.4328250037506556,
+      -0.6441928083154984
+    ],
+    "z_raw": [
+      -1.2226352895284223,
+      1.4332909337924453,
+      -0.7126072870486244
+    ],
+    "z_sorted": [
+      -1.2226352895284223,
+      1.4332909337924453,
+      -0.7126072870486244
+    ]
+  }
+}

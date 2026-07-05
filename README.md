@@ -99,7 +99,7 @@ reported in one summary.
 The diagnostic parameterization is usually the raw parameter vector. Symmetric
 models use transformed coordinates such as
 $`\left(|\theta_1|,\theta_2\right)`$ or
-$`\left(\mu_{\mathrm{low}},\mu_{\mathrm{high}},\sigma\right)`$ so that sampler
+$`\left(\mu_{\mathrm{low}},\mu_{\mathrm{high}},\log\sigma\right)`$ so that sampler
 diagnostics measure posterior shape independently of arbitrary label
 assignments.
 
@@ -134,6 +134,7 @@ floor for the same density target parameterization.
 | Sign-symmetry stress | $`\theta=(\theta_1,\theta_2)`$ | `-0.73379 +/- 0.00115` |
 | Sign-symmetry stress, folded target | $`(\lvert\theta_1\rvert,\theta_2)`$ | `-1.42694 +/- 0.00115` |
 | Banana stress | $`\theta=(\theta_1,\theta_2)`$ | `-0.52826 +/- 0.00100` |
+| Label-switching mixture | $`z_{\mathrm{sorted}}=(\mu_{\mathrm{low}},\mu_{\mathrm{high}},\log\sigma)`$ | `-3.10112 +/- 0.00821` |
 | Linear6 stress | $`z=(w_1,\ldots,w_6,\log\sigma)`$ | `-10.78631 +/- 0.00353` |
 
 The single-decay estimate is the adaptive posterior-centered Gauss-Hermite
@@ -153,6 +154,12 @@ linear-Gaussian conditional posterior and one-dimensional Gauss-Hermite
 evidence integration over $`\log\sigma`$.
 The Banana floor integrates $`\theta_2`$ analytically and then uses
 one-dimensional Gauss-Hermite evidence integration over $`\theta_1`$.
+The Label Switching floor is evaluated in sorted coordinates. For each signal,
+the raw evidence is estimated with a symmetric Gaussian-mixture importance
+proposal over the two label permutations, and the sorted density includes the
+$`\log 2`$ fold factor. This estimator is expensive enough that the committed
+floor uses the `50k` validation cache from the population run rather than the
+`1M` caches used for the analytic floors.
 
 Finite validation-cache NLLs have their own Monte Carlo uncertainty. For the
 two single-decay NPEs listed below, the full 1M-example cache standard errors
@@ -644,7 +651,7 @@ fresh full-prior signal, not the old fixed-observation sign flow. The signal was
 drawn with seed `20260707`, draw index `1`, giving
 $`\theta=(1.419,-1.175)`$ and $`x=(1.956,-0.932)`$. Against a dense exact grid,
 mean normalized Wasserstein in folded diagnostic coordinates is `0.02112` for
-MCMC and `0.02163` for the population NPE.
+MCMC and `0.02069` for the population NPE.
 
 ![Sign population exact grid, MCMC, and NPE posterior overlay](runs/00_shared_assets/readme_sign_posteriors/sign_population_prior_signal_corner.png)
 
@@ -715,7 +722,7 @@ single-decay, sign, and Linear6 population gaps.
 The posterior-shape check below uses a fresh full-prior signal and overlays
 exact grid, MCMC, and the population-trained NPE in the same raw coordinates.
 Against exact posterior samples, the NPE mean normalized marginal Wasserstein
-distance is `0.01022`; the MCMC reference is `0.01072`.
+distance is `0.01025`; the MCMC reference is `0.01188`.
 
 ![Banana exact grid, MCMC, and NPE posterior overlay](runs/00_shared_assets/readme_banana_posteriors/banana_population_prior_signal_corner.png)
 
@@ -724,7 +731,8 @@ The run is documented at
 
 ### Label-Switching Mixture
 
-This model has exchangeable component labels:
+This model tests whether the density estimator handles a discrete symmetry in
+the posterior. The likelihood has exchangeable component labels:
 
 ```math
 x_i \sim
@@ -735,7 +743,18 @@ x_i \sim
 i=1,\ldots,80.
 ```
 
-The code parameterizes noise in log coordinates:
+The full-prior population NPE trains and evaluates in sorted log-noise
+coordinates:
+
+```math
+z_{\mathrm{sorted}}=(\mu_{\mathrm{low}},\mu_{\mathrm{high}},\log\sigma),
+\qquad
+\mu_{\mathrm{low}}=\min(\mu_1,\mu_2),
+\quad
+\mu_{\mathrm{high}}=\max(\mu_1,\mu_2).
+```
+
+The raw prior is:
 
 ```math
 z=(\mu_1,\mu_2,\log\sigma),
@@ -746,32 +765,37 @@ z \sim \mathcal N\!\left(
 \right).
 ```
 
-The benchmark observation is generated from:
+The NLL target stays in `log_sigma` units. Physical `sigma` can still be used
+for displays, but the population NLL and entropy floor are reported in the
+same sorted log-coordinate density.
 
-```math
-(\mu_1,\mu_2,\sigma)=(-1.25,1.15,0.34).
-```
+The new population run reuses the single-decay/sign Flow2 residual NSF recipe
+with minimal model-specific changes. The context is a compact set of raw-data,
+quantile, moment, and EM-like mixture summaries, while the target is the sorted
+coordinate vector above.
 
-The raw posterior is invariant to swapping $`\mu_1`$ and $`\mu_2`$. The
-diagnostic coordinates sort the component means:
+| Run | Training examples per member | Epochs | Full-prior validation NLL | Entropy floor | Gap |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 4-member Flow2 residual NSF ensemble | `512k` | `30` | `-3.09250 +/- 0.00822` | `-3.10112 +/- 0.00821` | `0.00862` |
 
-```math
-g(z)=(\mu_{\mathrm{low}},\mu_{\mathrm{high}},\sigma),
-\qquad
-\mu_{\mathrm{low}}=\min(\mu_1,\mu_2),
-\quad
-\mu_{\mathrm{high}}=\max(\mu_1,\mu_2).
-```
+The gap is only `0.74` combined standard errors, so this is at the same
+practical near-floor level as the single-decay, sign, and Linear6 population
+runs. Because the NPE and floor are evaluated on the same validation cache, the
+paired comparison still resolves a small remaining gap:
+`0.00862 +/- 0.00060`. This should be described as `near_floor`, not an exact
+floor hit.
 
-Progress: the best run trains in ordered coordinates, restores random label
-assignment after sampling, and uses EM-based context summaries. Sorted
-diagnostics pass and pairwise agreement is strong. Final status remains a
-legacy pairwise pass until model-specific calibration is added.
+![Label-switching population NPE training loss](runs/00_shared_assets/readme_label_switch_posteriors/label_switch_population_training_loss.png)
 
-Best posterior:
-[label_em run](runs/04_stress_label_switch/01_npe_flow/05_npe_flow_stress_tests_label_em/README.md).
+For a fresh full-prior diagnostic signal, the sorted-coordinate NPE posterior
+overlays an exact finite grid and an MCMC reference. Mean normalized marginal
+Wasserstein distance to the exact grid is `0.02729` for the NPE and `0.02979`
+for MCMC; the NPE-to-MCMC diagnostic is `0.02365`.
 
-![Label-switching best posterior overlay](runs/00_shared_assets/readme_model_overlays/label_switching_best_posterior_overlay.png)
+![Label-switching exact grid, MCMC, and NPE posterior overlay](runs/00_shared_assets/readme_label_switch_posteriors/label_switch_population_prior_signal_corner.png)
+
+The run is documented at
+[02_flow2_residual_full_prior_512k_ensemble4_e30](runs/04_stress_label_switch/03_population_npe/02_flow2_residual_full_prior_512k_ensemble4_e30/README.md).
 
 ### Linear6 Stress Test
 
@@ -852,7 +876,7 @@ be treated as real model bias unless a larger ensemble or data scale closes it.
 The posterior-shape check below uses the same population-trained ensemble on a
 fresh full-prior signal, in the NLL target coordinates including
 $`\log\sigma`$. Against exact posterior samples, the mean normalized marginal
-Wasserstein distance is `0.01407`.
+Wasserstein distance is `0.01218`.
 
 ![Linear6 exact reference and NPE posterior overlay](runs/00_shared_assets/readme_linear6_posteriors/linear6_population_prior_signal_corner.png)
 

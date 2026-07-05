@@ -94,7 +94,7 @@ A fresh full-prior signal was drawn with seed `20260707`, draw index `1`,
 giving
 `z=(1.897, -0.2525, 0.00248, -0.4968, -0.1156, 0.4749, -1.228)`.
 Against exact posterior samples, the population NPE has mean normalized
-marginal Wasserstein distance `0.01407` in the NLL target coordinates.
+marginal Wasserstein distance `0.01218` in the NLL target coordinates.
 
 ![Linear6 exact reference and NPE posterior overlay](../../../00_shared_assets/readme_linear6_posteriors/linear6_population_prior_signal_corner.png)
 

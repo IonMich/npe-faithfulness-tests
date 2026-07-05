@@ -92,8 +92,8 @@ remaining bias rather than an exact zero-gap model.
 A fresh full-prior signal was drawn with seed `20260707`, draw index `1`,
 giving `theta=(1.419, -1.175)` and
 `x=(1.367, -0.0473)`. Against exact posterior samples, the population NPE has
-mean normalized marginal Wasserstein distance `0.01022`; the MCMC reference is
-`0.01072`.
+mean normalized marginal Wasserstein distance `0.01025`; the MCMC reference is
+`0.01188`.
 
 ![Banana exact grid, MCMC, and NPE posterior overlay](../../../00_shared_assets/readme_banana_posteriors/banana_population_prior_signal_corner.png)
 

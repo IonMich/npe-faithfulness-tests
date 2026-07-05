@@ -30,6 +30,12 @@ DEFAULT_BANANA_OUTPUT = (
 DEFAULT_BANANA_SUMMARY = (
     ROOT / "runs/00_shared_assets/readme_banana_posteriors/banana_population_training_loss_summary.json"
 )
+DEFAULT_LABEL_SWITCH_OUTPUT = (
+    ROOT / "runs/00_shared_assets/readme_label_switch_posteriors/label_switch_population_training_loss.png"
+)
+DEFAULT_LABEL_SWITCH_SUMMARY = (
+    ROOT / "runs/00_shared_assets/readme_label_switch_posteriors/label_switch_population_training_loss_summary.json"
+)
 DEFAULT_LINEAR6_OUTPUT = (
     ROOT / "runs/00_shared_assets/readme_linear6_posteriors/linear6_population_training_loss.png"
 )
@@ -45,6 +51,11 @@ DEFAULT_BANANA_ENSEMBLE_SUMMARY = (
     ROOT
     / "runs/03_stress_banana/03_population_npe/01_flow2_residual_full_prior_512k_ensemble4/"
     "results/banana_population_ensemble_summary.json"
+)
+DEFAULT_LABEL_SWITCH_ENSEMBLE_SUMMARY = (
+    ROOT
+    / "runs/04_stress_label_switch/03_population_npe/02_flow2_residual_full_prior_512k_ensemble4_e30/"
+    "results/label_switch_population_ensemble_summary.json"
 )
 DEFAULT_LINEAR6_ENSEMBLE_SUMMARY = (
     ROOT
@@ -621,17 +632,33 @@ def plot_banana_population(
     )
 
 
+def plot_label_switch_population(
+    *,
+    ensemble_summary: Path = DEFAULT_LABEL_SWITCH_ENSEMBLE_SUMMARY,
+    output_path: Path = DEFAULT_LABEL_SWITCH_OUTPUT,
+    summary_output: Path = DEFAULT_LABEL_SWITCH_SUMMARY,
+) -> Path:
+    return plot_population_training(
+        ensemble_summary=ensemble_summary,
+        output_path=output_path,
+        summary_output=summary_output,
+        title="Label switching population NPE loss by wall time",
+        ylabel="NLL in sorted target units",
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot population NPE training-loss curves.")
     parser.add_argument(
         "--mode",
-        choices=("single_decay", "sign_population", "banana_population", "linear6_population"),
+        choices=("single_decay", "sign_population", "banana_population", "label_switch_population", "linear6_population"),
         default="single_decay",
     )
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--summary-output", type=Path, default=None)
     parser.add_argument("--sign-ensemble-summary", type=Path, default=DEFAULT_SIGN_ENSEMBLE_SUMMARY)
     parser.add_argument("--banana-ensemble-summary", type=Path, default=DEFAULT_BANANA_ENSEMBLE_SUMMARY)
+    parser.add_argument("--label-switch-ensemble-summary", type=Path, default=DEFAULT_LABEL_SWITCH_ENSEMBLE_SUMMARY)
     parser.add_argument("--linear6-ensemble-summary", type=Path, default=DEFAULT_LINEAR6_ENSEMBLE_SUMMARY)
     return parser.parse_args()
 
@@ -651,6 +678,12 @@ def main() -> None:
             ensemble_summary=args.banana_ensemble_summary,
             output_path=args.output or DEFAULT_BANANA_OUTPUT,
             summary_output=args.summary_output or DEFAULT_BANANA_SUMMARY,
+        )
+    elif args.mode == "label_switch_population":
+        output_path = plot_label_switch_population(
+            ensemble_summary=args.label_switch_ensemble_summary,
+            output_path=args.output or DEFAULT_LABEL_SWITCH_OUTPUT,
+            summary_output=args.summary_output or DEFAULT_LABEL_SWITCH_SUMMARY,
         )
     else:
         output_path = plot_linear6_population(
