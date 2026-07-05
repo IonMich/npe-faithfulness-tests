@@ -1,0 +1,108 @@
+{
+  "description": "Evaluation-only full-prior two_exp population NPE run.",
+  "device": "mps",
+  "evaluation": {
+    "best_individual_nll": -2.3670499051094054,
+    "ensemble_gap_to_floor": 0.9127652162264892,
+    "ensemble_nll": {
+      "max": 522.0498657226562,
+      "mean": -2.3670499051094054,
+      "median": -3.2537307739257812,
+      "min": -11.367424011230469,
+      "n": 10000,
+      "q01": -8.672889671325683,
+      "q05": -7.047426986694336,
+      "q95": 0.9551571011543238,
+      "q99": 3.755627722740175,
+      "std": 19.36829531785704,
+      "std_error": 0.1936829531785704
+    },
+    "evaluation_seconds": 49.374153125012526,
+    "floor": {
+      "coordinate_target": "(log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)",
+      "diagnostics": {
+        "ess_mean": 88.45557202441753,
+        "ess_median": 48.467805095692576,
+        "ess_min": 1.2728671247120529,
+        "ess_q05": 4.698477764742155,
+        "floor_method": "importance",
+        "importance_batch_size": 16.0,
+        "importance_samples": 8192.0,
+        "log_weight_std_mean": 201367236626.91486,
+        "log_weight_std_q95": 555940.1455632324,
+        "prior_mixture": 0.020000000000000004,
+        "proposal_inflation": 1.0,
+        "relative_ess_mean": 0.010797799319386906,
+        "relative_ess_q05": 0.0005735446490163764
+      },
+      "estimate": -3.2798151213358944,
+      "method": "Ordered two-exponential ridge-coordinate posterior with raw-coordinate evidence estimated by Gaussian-mixture importance sampling around the profile fit and validation draw, 8192 samples per signal.",
+      "standard_error": 0.02424658850162358,
+      "summary": {
+        "max": 11.560284769099994,
+        "mean": -3.2798151213358944,
+        "median": -3.324660325915219,
+        "min": -12.066817514983097,
+        "n": 10000,
+        "q01": -8.856155845077557,
+        "q05": -7.224561142560585,
+        "q95": 0.7462419947873539,
+        "q99": 2.9661054712922335,
+        "std": 2.424658850162358,
+        "std_error": 0.02424658850162358
+      }
+    },
+    "gap_diagnostics_json": "runs/06_two_exponential/03_population_npe/24_flow2_profile_residual_full_prior_512k_converge_probe/results/two_exp_population_gap_diagnostics.json",
+    "gap_z_score": 4.762964202276929,
+    "individual_nll": [
+      {
+        "max": 522.0498657226562,
+        "mean": -2.3670499051094054,
+        "median": -3.2537307739257812,
+        "min": -11.367424011230469,
+        "n": 10000,
+        "q01": -8.672889671325683,
+        "q05": -7.047426986694336,
+        "q95": 0.9551571011543238,
+        "q99": 3.755627722740175,
+        "std": 19.36829531785704,
+        "std_error": 0.1936829531785704
+      }
+    ],
+    "paired_gap_standard_error": 0.19163805929722147,
+    "paired_gap_summary": {
+      "max": 523.3944118302624,
+      "mean": 0.9127652162264892,
+      "median": 0.06866933983338397,
+      "min": -2.401220285028259,
+      "n": 10000,
+      "q01": -1.07643750143281,
+      "q05": -0.5317408806864157,
+      "q95": 0.8494132723939793,
+      "q99": 1.8090421687453981,
+      "std": 19.163805929722148,
+      "std_error": 0.19163805929722147
+    },
+    "validation_examples": 10000,
+    "validation_seed": 20260705
+  },
+  "kind": "two_exp_population_existing_evaluation",
+  "recipe": {
+    "eval_batch_size": 512,
+    "two_exp_floor_method": "importance",
+    "two_exp_importance_batch_size": 16,
+    "two_exp_importance_samples": 8192,
+    "two_exp_importance_seed": 20260723,
+    "two_exp_prior_mixture": 0.02,
+    "two_exp_proposal_inflation": 1.0,
+    "two_exp_target": "amplitude_sum_delta",
+    "validation_examples": 10000,
+    "validation_seed": 20260705
+  },
+  "runtime": {
+    "numpy_version": "2.5.0",
+    "torch_version": "2.12.1"
+  },
+  "source_summary": "runs/06_two_exponential/03_population_npe/24_flow2_profile_residual_full_prior_512k_converge_probe/results/two_exp_population_ensemble_summary.json",
+  "target": "(log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)"
+}

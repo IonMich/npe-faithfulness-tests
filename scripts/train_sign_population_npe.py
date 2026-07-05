@@ -49,6 +49,7 @@ TWO_EXP_PRIOR_MEAN = np.array(
 TWO_EXP_PRIOR_STD = np.array([0.60, 0.55, 0.65, 0.60, 0.45], dtype=np.float64)
 TWO_EXP_CONTEXT_CHUNK_SIZE = 32_768
 TWO_EXP_TARGETS = ("amplitude_sum_delta", "amplitude_sum_rate")
+TWO_EXP_TARGET_MODES = ("direct", "profile_residual")
 POPULATION_LOSS_WEIGHT_MODES = ("none", "two_exp_high_snr", "two_exp_low_noise", "two_exp_high_snr_low_noise")
 
 
@@ -849,6 +850,30 @@ def two_exp_profile_center_from_context(x_context: np.ndarray) -> np.ndarray:
     return np.column_stack([log_a1, log_k1, log_a2, log_delta, log_sigma])
 
 
+def two_exp_target_center_from_context(
+    x_context: np.ndarray,
+    *,
+    target: str,
+) -> np.ndarray:
+    profile_raw = two_exp_profile_center_from_context(x_context)
+    return two_exp_target_transform(profile_raw, target=target)
+
+
+def two_exp_model_target_from_raw(
+    z_raw: np.ndarray,
+    x_context: np.ndarray,
+    *,
+    target: str,
+    mode: str,
+) -> np.ndarray:
+    target_z = two_exp_target_transform(z_raw, target=target)
+    if mode == "direct":
+        return target_z
+    if mode == "profile_residual":
+        return target_z - two_exp_target_center_from_context(x_context, target=target)
+    raise ValueError(f"Unsupported two_exp target mode: {mode}")
+
+
 def two_exp_raw_prior_logpdf(z_raw: np.ndarray) -> np.ndarray:
     z = np.asarray(z_raw, dtype=np.float64)
     return (
@@ -1594,10 +1619,20 @@ def evaluate_population_nll(
             )
         log_probs = []
         for index, member in enumerate(members):
+            member_z_model = batch_z_model
+            if model_name == "two_exp":
+                target_mode = str(member.get("two_exp_target_mode", "direct"))
+                if target_mode == "profile_residual":
+                    member_z_model = batch_z_model - two_exp_target_center_from_context(
+                        batch_x,
+                        target=two_exp_target,
+                    )
+                elif target_mode != "direct":
+                    raise ValueError(f"Unsupported two_exp target mode in checkpoint: {target_mode}")
             log_prob = evaluate_model_log_prob(
                 model=member["model"],
                 x_raw=batch_x,
-                z_raw=batch_z_model,
+                z_raw=member_z_model,
                 x_mean=member["x_mean"],
                 x_std=member["x_std"],
                 z_mean=member["z_mean"],
@@ -1916,6 +1951,7 @@ def load_population_members(summary_path: Path, *, device: torch.device) -> list
                 "x_std": x_std,
                 "z_mean": z_mean,
                 "z_std": z_std,
+                "two_exp_target_mode": str(checkpoint.get("two_exp_target_mode", "direct")),
                 "summary": member.get("member_summary", {}),
                 "summary_json": member.get("summary_json"),
                 "model_pt": str(model_path),
@@ -1942,8 +1978,18 @@ def train_member(
     if str(args.model) == "two_exp":
         _train_x_raw, train_x, train_z_raw = sample_two_exp_population_raw(n=int(args.train_simulations), seed=seed)
         _val_x_raw, val_x, val_z_raw = sample_two_exp_population_raw(n=int(args.val_simulations), seed=seed + 1)
-        train_z = two_exp_target_transform(train_z_raw, target=str(args.two_exp_target))
-        val_z = two_exp_target_transform(val_z_raw, target=str(args.two_exp_target))
+        train_z = two_exp_model_target_from_raw(
+            train_z_raw,
+            train_x,
+            target=str(args.two_exp_target),
+            mode=str(args.two_exp_target_mode),
+        )
+        val_z = two_exp_model_target_from_raw(
+            val_z_raw,
+            val_x,
+            target=str(args.two_exp_target),
+            mode=str(args.two_exp_target_mode),
+        )
         train_w = two_exp_loss_weights(
             train_z_raw,
             mode=str(args.loss_weight_mode),
@@ -2019,6 +2065,8 @@ def train_member(
         "z_std": z_std,
         "config": asdict(config),
         "target": population_target_description(str(args.model), two_exp_target=str(args.two_exp_target)),
+        "two_exp_target": str(args.two_exp_target),
+        "two_exp_target_mode": str(args.two_exp_target_mode),
         "loss_weight": weights_metadata,
         "runtime": runtime_metadata(),
     }
@@ -2035,6 +2083,7 @@ def train_member(
         "z_mean": z_mean,
         "z_std": z_std,
         "z_log_det": z_log_det,
+        "two_exp_target_mode": str(args.two_exp_target_mode) if str(args.model) == "two_exp" else None,
         "best_val_nll_standardized": float(metrics["best_val_nll"]),
         "best_val_nll_target_units": float(metrics["best_val_nll"] + z_log_det)
         if math.isfinite(float(metrics["best_val_nll"]))
@@ -2064,6 +2113,7 @@ def train_member(
         "x_std": x_std,
         "z_mean": z_mean,
         "z_std": z_std,
+        "two_exp_target_mode": str(args.two_exp_target_mode) if str(args.model) == "two_exp" else "direct",
         "summary": summary,
         "summary_json": str(summary_path),
         "model_pt": str(model_path),
@@ -2132,6 +2182,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--label-prior-mixture", type=float, default=0.03)
     parser.add_argument("--label-proposal-inflation", type=float, default=2.0)
     parser.add_argument("--two-exp-target", choices=TWO_EXP_TARGETS, default="amplitude_sum_delta")
+    parser.add_argument("--two-exp-target-mode", choices=TWO_EXP_TARGET_MODES, default="direct")
     parser.add_argument("--two-exp-floor-method", choices=("importance", "smc"), default="importance")
     parser.add_argument("--two-exp-importance-samples", type=int, default=4096)
     parser.add_argument("--two-exp-importance-seed", type=int, default=20260723)
@@ -2361,6 +2412,7 @@ def main() -> None:
             "banana_quadrature_order": int(args.banana_quadrature_order),
             "linear6_quadrature_order": int(args.linear6_quadrature_order),
             "two_exp_target": str(args.two_exp_target),
+            "two_exp_target_mode": str(args.two_exp_target_mode),
             "label_importance_samples": int(args.label_importance_samples),
             "label_importance_seed": int(args.label_importance_seed),
             "label_importance_batch_size": int(args.label_importance_batch_size),

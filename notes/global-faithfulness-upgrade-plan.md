@@ -367,6 +367,9 @@ Training probes tried:
 512k x 1 high-SNR weighted, 30 ep NLL -3.16299, gap 0.11851
 equal-5 best Flow2 + high-SNR    NLL -3.20086, gap 0.08064
 2.048M x 1 Flow4 linear-residual NLL -2.78417, gap 0.49732
+512k x 1 4-component Flow2 mix, validation-selected 80 ep NLL -3.13618, gap 0.14531
+512k x 1 Flow2 profile-residual, validation-selected 80 ep NLL -2.36705, gap 0.91444
+512k x 1 Flow2 NAF, validation-selected 80 ep NLL -3.17602, gap 0.10547
 ```
 
 These gaps are normalized to the shared 10k validation reference floor
@@ -410,6 +413,15 @@ validation NLL `-2.83028` and held-out evaluation NLL `-2.78417`. This rules out
 that specific combination of simple scale-up, deeper flow, and linear residual
 target as a repair.
 
+The stronger 4-component Flow2 mixture overfit its training validation cache and
+fell to held-out NLL `-3.13618`, worse than the first two-component mixture. The
+profile-residual target, which subtracts the two-exponential profile center
+before standardization, was also a poor full-prior fit (`-2.36705`) and produced
+large held-out outliers. The direct-target NAF probe reached training-cache
+validation NLL `-3.20261`, but held-out evaluation fell back to `-3.17602`; this
+does not improve the current best and suggests the 32k training validation cache
+is not sufficient to select these more flexible single-member variants.
+
 Useful infrastructure completed:
 
 - `train_sign_population_npe.py` can now sample, train, evaluate, and floor-probe
@@ -427,6 +439,9 @@ Useful infrastructure completed:
 - `train_sign_population_npe.py` can select between the default
   two-exponential target and the rate-sum/log-ratio target via
   `--two-exp-target`.
+- `train_sign_population_npe.py` records two-exponential internal target modes
+  in checkpoints/evaluation, which caught the failed profile-residual target
+  experiment without changing the reported full-prior density coordinates.
 - `train_sign_population_npe.py` can evaluate existing two-exponential ensemble
   summaries with paired-gap diagnostics and can run targeted two-exponential
   loss weighting probes.
@@ -435,10 +450,10 @@ Next viable experiments:
 
 - Stop scaling the same Flow2 recipe blindly; the 1M single-member probe did not
   improve fixed-cache NLL.
-- Try a genuinely different conditional posterior strategy, such as a stronger
-  mixture-of-experts objective, exact-posterior distillation on difficult
-  signals, or a sequential proposal, rather than another single normalizing flow
-  or the first two-component flow mixture.
+- Try a genuinely different conditional posterior strategy, such as
+  exact-posterior distillation on difficult signals, a sequential proposal, or a
+  learned x-dependent ensemble/stacking objective. The stronger four-component
+  mixture and NAF single-flow probes did not repair the miss.
 - Revisit target/context design with an invertible transform that separates the
   ridge more cleanly than either tested log-sum/log-ratio coordinate system.
 - Use exact-posterior or high-quality importance samples for a subset of signals

@@ -959,14 +959,21 @@ estimates in some artifacts differ and are not used for this comparison.
 | Flow2 rate-sum target, 512k x1, 30 epochs | `-3.17315` | `0.10834` |
 | Flow2 high-SNR weighted ridge target, 512k x1, 30 epochs | `-3.16299` | `0.11851` |
 | Equal-5 mixture: Flow2 ridge x4 + high-SNR weighted x1 | `-3.20086` | `0.08064` |
+| 4-component Flow2 mixture, h96, 512k x1, validation-selected 80 epochs | `-3.13618` | `0.14531` |
+| Flow2 profile-residual target, 512k x1, validation-selected 80 epochs | `-2.36705` | `0.91444` |
+| Flow2 NAF ridge target, 512k x1, validation-selected 80 epochs | `-3.17602` | `0.10547` |
 
 The miss is therefore not explained by one short run or by the first floor
 estimate. Scaling the same Flow2 recipe to 1.024M simulations, increasing flow
 depth, running a 2.048M-simulation Flow4 linear-residual target with
 validation-selected checkpointing, trying MAF, adding a simple two-component
 flow mixture, adding the tested augmented context, switching to the tested
-rate-sum target, and upweighting the high-SNR prior tail have all stayed well
-above the full-prior floor.
+rate-sum target, upweighting the high-SNR prior tail, increasing the flow
+mixture to four components, residualizing around the two-exponential profile
+fit, and switching the direct-target flow kind to NAF have all stayed well above
+the full-prior floor. The NAF run reached `-3.20261` on its training validation
+cache, but the held-out full-prior evaluation was only `-3.17602`, so it does
+not improve the current best result.
 
 Posterior-shape diagnostics below use the current best-NLL equal-5 mixture,
 not the old fixed-signal artifact. The easy case is an ordinary full-prior
