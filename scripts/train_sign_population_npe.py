@@ -49,6 +49,7 @@ TWO_EXP_PRIOR_MEAN = np.array(
 TWO_EXP_PRIOR_STD = np.array([0.60, 0.55, 0.65, 0.60, 0.45], dtype=np.float64)
 TWO_EXP_CONTEXT_CHUNK_SIZE = 32_768
 TWO_EXP_TARGETS = ("amplitude_sum_delta", "amplitude_sum_rate")
+POPULATION_LOSS_WEIGHT_MODES = ("none", "two_exp_high_snr", "two_exp_low_noise", "two_exp_high_snr_low_noise")
 
 
 def json_ready(value: object) -> object:
@@ -392,6 +393,67 @@ def standardize(value: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndar
     return ((value - mean[None, :]) / std[None, :]).astype(np.float32)
 
 
+def two_exp_loss_weights(
+    z_raw: np.ndarray,
+    *,
+    mode: str,
+    tail_weight: float,
+    tail_quantile: float,
+) -> np.ndarray | None:
+    if mode == "none":
+        return None
+    if not 0.0 < tail_quantile < 1.0:
+        raise ValueError("tail_quantile must be in (0, 1).")
+    if tail_weight <= 0.0:
+        raise ValueError("tail_weight must be positive.")
+    z = np.asarray(z_raw, dtype=np.float64)
+    log_total_amplitude = np.logaddexp(z[:, 0], z[:, 2])
+    log_snr = log_total_amplitude - z[:, 4]
+    low_noise_score = -z[:, 4]
+    if mode == "two_exp_high_snr":
+        score = log_snr
+    elif mode == "two_exp_low_noise":
+        score = low_noise_score
+    elif mode == "two_exp_high_snr_low_noise":
+        score = (
+            (log_snr - np.mean(log_snr)) / max(float(np.std(log_snr)), 1e-8)
+            + (low_noise_score - np.mean(low_noise_score)) / max(float(np.std(low_noise_score)), 1e-8)
+        )
+    else:
+        raise ValueError(f"Unsupported loss weight mode: {mode}")
+    threshold = float(np.quantile(score, tail_quantile))
+    weights = np.ones(z.shape[0], dtype=np.float32)
+    weights[score >= threshold] = float(tail_weight)
+    weights /= float(np.mean(weights))
+    return weights.astype(np.float32)
+
+
+def loss_weight_summary(
+    weights: np.ndarray | None,
+    *,
+    mode: str,
+    tail_weight: float,
+    tail_quantile: float,
+) -> dict[str, object]:
+    output: dict[str, object] = {
+        "mode": mode,
+        "tail_weight": float(tail_weight),
+        "tail_quantile": float(tail_quantile),
+        "applied": weights is not None,
+    }
+    if weights is None:
+        return output
+    weight_array = np.asarray(weights, dtype=np.float64)
+    output.update(
+        {
+            "summary": summarize(weight_array),
+            "effective_sample_size": float(weight_array.sum() ** 2 / np.sum(weight_array * weight_array)),
+            "upweighted_fraction": float(np.mean(weight_array > 1.0)),
+        }
+    )
+    return output
+
+
 def make_config(args: argparse.Namespace, *, seed: int, train_simulations: int) -> stage1.Stage1Config:
     return stage1.Stage1Config(
         train_simulations=int(train_simulations),
@@ -428,8 +490,8 @@ def make_config(args: argparse.Namespace, *, seed: int, train_simulations: int) 
         ema_decay=float(args.ema_decay),
         batching_mode=str(args.batching_mode),
         max_optimizer_steps=int(args.max_optimizer_steps),
-        loss_weight_mode="none",
-        loss_tail_weight=3.0,
+        loss_weight_mode=str(args.loss_weight_mode),
+        loss_tail_weight=float(args.loss_tail_weight),
         target_transform="none",
         target_ridge=1e-3,
         flow_activation=str(args.flow_activation),
@@ -1277,6 +1339,153 @@ def evaluate_model_log_prob(
     ) - log_det
 
 
+def safe_corrcoef(x: np.ndarray, y: np.ndarray) -> float | None:
+    a = np.asarray(x, dtype=np.float64)
+    b = np.asarray(y, dtype=np.float64)
+    mask = np.isfinite(a) & np.isfinite(b)
+    if int(mask.sum()) < 3:
+        return None
+    a = a[mask]
+    b = b[mask]
+    if float(np.std(a)) == 0.0 or float(np.std(b)) == 0.0:
+        return None
+    return float(np.corrcoef(a, b)[0, 1])
+
+
+def quantile_bin_summary(feature: np.ndarray, gap: np.ndarray, *, bins: int = 5) -> list[dict[str, object]]:
+    values = np.asarray(feature, dtype=np.float64)
+    gaps = np.asarray(gap, dtype=np.float64)
+    mask = np.isfinite(values) & np.isfinite(gaps)
+    values = values[mask]
+    gaps = gaps[mask]
+    if values.size == 0:
+        return []
+    edges = np.quantile(values, np.linspace(0.0, 1.0, bins + 1))
+    rows = []
+    for index in range(bins):
+        low = float(edges[index])
+        high = float(edges[index + 1])
+        if index == bins - 1:
+            bin_mask = (values >= low) & (values <= high)
+        else:
+            bin_mask = (values >= low) & (values < high)
+        bin_gap = gaps[bin_mask]
+        rows.append(
+            {
+                "low": low,
+                "high": high,
+                "n": int(bin_gap.size),
+                "gap_mean": float(np.mean(bin_gap)) if bin_gap.size else None,
+                "gap_std_error": float(np.std(bin_gap, ddof=1) / math.sqrt(bin_gap.size))
+                if bin_gap.size > 1
+                else 0.0,
+            }
+        )
+    return rows
+
+
+def two_exp_gap_features(z_raw: np.ndarray, x_context: np.ndarray, *, target: str) -> dict[str, np.ndarray]:
+    z = np.asarray(z_raw, dtype=np.float64)
+    profile = two_exp_profile_center_from_context(x_context)
+    target_z = two_exp_target_transform(z, target=target).astype(np.float64)
+    log_k2 = np.logaddexp(z[:, 1], z[:, 3])
+    log_total_amplitude = np.logaddexp(z[:, 0], z[:, 2])
+    profile_delta = profile - z
+    features = {
+        "log_A1": z[:, 0],
+        "log_k1": z[:, 1],
+        "log_A2": z[:, 2],
+        "log_delta_k": z[:, 3],
+        "log_sigma": z[:, 4],
+        "log_k2": log_k2,
+        "log_total_amplitude": log_total_amplitude,
+        "log_amplitude_ratio": z[:, 0] - z[:, 2],
+        "log_delta_over_k1": z[:, 3] - z[:, 1],
+        "log_snr": log_total_amplitude - z[:, 4],
+        "profile_abs_error_log_A1": np.abs(profile_delta[:, 0]),
+        "profile_abs_error_log_k1": np.abs(profile_delta[:, 1]),
+        "profile_abs_error_log_A2": np.abs(profile_delta[:, 2]),
+        "profile_abs_error_log_delta_k": np.abs(profile_delta[:, 3]),
+        "profile_abs_error_log_sigma": np.abs(profile_delta[:, 4]),
+        "profile_l2_error": np.linalg.norm(profile_delta, axis=1),
+    }
+    for index, name in enumerate(two_exp_target_description(target).strip("()").split(", ")):
+        features[f"target_{index}_{name}"] = target_z[:, index]
+    return features
+
+
+def write_two_exp_gap_diagnostics(
+    *,
+    path: Path,
+    z_raw: np.ndarray,
+    x_context: np.ndarray,
+    exact_nll: np.ndarray,
+    ensemble_nll: np.ndarray,
+    two_exp_target: str,
+) -> None:
+    gap = np.asarray(ensemble_nll, dtype=np.float64) - np.asarray(exact_nll, dtype=np.float64)
+    features = two_exp_gap_features(z_raw, x_context, target=two_exp_target)
+    feature_rows = {}
+    for name, values in features.items():
+        values_array = np.asarray(values, dtype=np.float64)
+        q90 = np.quantile(values_array, 0.90)
+        q10 = np.quantile(values_array, 0.10)
+        high_gap = gap[values_array >= q90]
+        low_gap = gap[values_array <= q10]
+        feature_rows[name] = {
+            "summary": summarize(values_array),
+            "corr_with_gap": safe_corrcoef(values_array, gap),
+            "gap_mean_top_decile": float(np.mean(high_gap)) if high_gap.size else None,
+            "gap_mean_bottom_decile": float(np.mean(low_gap)) if low_gap.size else None,
+            "gap_top_minus_bottom_decile": float(np.mean(high_gap) - np.mean(low_gap))
+            if high_gap.size and low_gap.size
+            else None,
+            "gap_by_feature_quantile": quantile_bin_summary(values_array, gap),
+        }
+    ranked_by_corr = sorted(
+        (
+            {"feature": name, "corr_with_gap": row["corr_with_gap"]}
+            for name, row in feature_rows.items()
+            if row["corr_with_gap"] is not None
+        ),
+        key=lambda item: abs(float(item["corr_with_gap"])),
+        reverse=True,
+    )
+    ranked_by_decile = sorted(
+        (
+            {"feature": name, "gap_top_minus_bottom_decile": row["gap_top_minus_bottom_decile"]}
+            for name, row in feature_rows.items()
+            if row["gap_top_minus_bottom_decile"] is not None
+        ),
+        key=lambda item: abs(float(item["gap_top_minus_bottom_decile"])),
+        reverse=True,
+    )
+    top_indices = np.argsort(gap)[-20:][::-1]
+    output = {
+        "target": two_exp_target_description(two_exp_target),
+        "n": int(gap.size),
+        "gap": summarize(gap),
+        "ensemble_nll": summarize(np.asarray(ensemble_nll, dtype=np.float64)),
+        "exact_nll": summarize(np.asarray(exact_nll, dtype=np.float64)),
+        "ranked_by_abs_correlation": ranked_by_corr[:12],
+        "ranked_by_abs_decile_contrast": ranked_by_decile[:12],
+        "features": feature_rows,
+        "top_gap_examples": [
+            {
+                "index": int(index),
+                "gap": float(gap[index]),
+                "ensemble_nll": float(ensemble_nll[index]),
+                "exact_nll": float(exact_nll[index]),
+                "z_raw": np.asarray(z_raw[index], dtype=np.float64).tolist(),
+                "profile_center": two_exp_profile_center_from_context(x_context[index : index + 1])[0].tolist(),
+            }
+            for index in top_indices
+        ],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(json_ready(output), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 @torch.no_grad()
 def evaluate_population_nll(
     *,
@@ -1306,6 +1515,7 @@ def evaluate_population_nll(
     two_exp_smc_seed: int,
     two_exp_smc_batch_size: int,
     two_exp_smc_step_scale: float,
+    diagnostics_output: Path | None = None,
 ) -> dict[str, Any]:
     if model_name == "label_switch":
         x_raw_val, x_val, z_val = sample_label_switch_population_raw(n=validation_examples, seed=validation_seed)
@@ -1482,6 +1692,16 @@ def evaluate_population_nll(
             else None,
             "paired_gap_summary": paired_gap,
         })
+        if model_name == "two_exp" and diagnostics_output is not None:
+            write_two_exp_gap_diagnostics(
+                path=diagnostics_output,
+                z_raw=z_val,
+                x_context=x_val,
+                exact_nll=exact_nll,
+                ensemble_nll=ensemble_nll,
+                two_exp_target=two_exp_target,
+            )
+            output["gap_diagnostics_json"] = str(diagnostics_output)
     else:
         raise ValueError(f"Unsupported population model: {model_name}")
     return output
@@ -1652,6 +1872,58 @@ def estimate_population_floor(
     }
 
 
+def resolve_existing_path(path: str | Path, *, base_dir: Path) -> Path:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return candidate
+    if candidate.exists():
+        return candidate
+    rooted = base_dir / candidate
+    if rooted.exists():
+        return rooted
+    return candidate
+
+
+def load_population_members(summary_path: Path, *, device: torch.device) -> list[dict[str, object]]:
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    members = []
+    repo_root = Path.cwd()
+    for member in summary["members"]:
+        model_path = resolve_existing_path(str(member["model_pt"]), base_dir=repo_root)
+        checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
+        config_dict = dict(checkpoint["config"])
+        progress_jsonl = config_dict.get("progress_jsonl")
+        if progress_jsonl is not None:
+            config_dict["progress_jsonl"] = Path(progress_jsonl)
+        config = stage1.Stage1Config(**config_dict)
+        x_mean = np.asarray(checkpoint["x_mean"], dtype=np.float64)
+        x_std = np.asarray(checkpoint["x_std"], dtype=np.float64)
+        z_mean = np.asarray(checkpoint["z_mean"], dtype=np.float64)
+        z_std = np.asarray(checkpoint["z_std"], dtype=np.float64)
+        model = stage1.make_model(
+            str(checkpoint["family"]),
+            config,
+            x_dim=int(x_mean.shape[0]),
+            z_dim=int(z_mean.shape[0]),
+        )
+        model.load_state_dict(checkpoint["state_dict"])
+        model = model.to(device)
+        model.eval()
+        members.append(
+            {
+                "model": model,
+                "x_mean": x_mean,
+                "x_std": x_std,
+                "z_mean": z_mean,
+                "z_std": z_std,
+                "summary": member.get("member_summary", {}),
+                "summary_json": member.get("summary_json"),
+                "model_pt": str(model_path),
+            }
+        )
+    return members
+
+
 def train_member(
     *,
     args: argparse.Namespace,
@@ -1666,18 +1938,31 @@ def train_member(
     progress_jsonl = results_dir / "training_progress.jsonl"
 
     data_start = time.perf_counter()
-    train_x, train_z = sample_population(
-        model=args.model,
-        n=int(args.train_simulations),
-        seed=seed,
-        two_exp_target=str(args.two_exp_target),
-    )
-    val_x, val_z = sample_population(
-        model=args.model,
-        n=int(args.val_simulations),
-        seed=seed + 1,
-        two_exp_target=str(args.two_exp_target),
-    )
+    train_w = None
+    if str(args.model) == "two_exp":
+        _train_x_raw, train_x, train_z_raw = sample_two_exp_population_raw(n=int(args.train_simulations), seed=seed)
+        _val_x_raw, val_x, val_z_raw = sample_two_exp_population_raw(n=int(args.val_simulations), seed=seed + 1)
+        train_z = two_exp_target_transform(train_z_raw, target=str(args.two_exp_target))
+        val_z = two_exp_target_transform(val_z_raw, target=str(args.two_exp_target))
+        train_w = two_exp_loss_weights(
+            train_z_raw,
+            mode=str(args.loss_weight_mode),
+            tail_weight=float(args.loss_tail_weight),
+            tail_quantile=float(args.loss_tail_quantile),
+        )
+    else:
+        train_x, train_z = sample_population(
+            model=args.model,
+            n=int(args.train_simulations),
+            seed=seed,
+            two_exp_target=str(args.two_exp_target),
+        )
+        val_x, val_z = sample_population(
+            model=args.model,
+            n=int(args.val_simulations),
+            seed=seed + 1,
+            two_exp_target=str(args.two_exp_target),
+        )
     x_mean = train_x.mean(axis=0).astype(np.float64)
     x_std = np.maximum(train_x.std(axis=0), 1e-6).astype(np.float64)
     z_mean = train_z.mean(axis=0).astype(np.float64)
@@ -1686,6 +1971,12 @@ def train_member(
     train_z_std = standardize(train_z, z_mean, z_std)
     val_x_std = standardize(val_x, x_mean, x_std)
     val_z_std = standardize(val_z, z_mean, z_std)
+    weights_metadata = loss_weight_summary(
+        train_w,
+        mode=str(args.loss_weight_mode),
+        tail_weight=float(args.loss_tail_weight),
+        tail_quantile=float(args.loss_tail_quantile),
+    )
     data_seconds = time.perf_counter() - data_start
 
     config = replace(
@@ -1693,8 +1984,11 @@ def train_member(
         progress_jsonl=progress_jsonl,
         progress_nll_offset=float(np.log(z_std).sum()),
     )
+    train_tensors = [torch.from_numpy(train_x_std), torch.from_numpy(train_z_std)]
+    if train_w is not None:
+        train_tensors.append(torch.from_numpy(train_w.astype(np.float32)))
     train_loader = DataLoader(
-        TensorDataset(torch.from_numpy(train_x_std), torch.from_numpy(train_z_std)),
+        TensorDataset(*train_tensors),
         batch_size=int(args.batch_size),
         shuffle=str(args.batching_mode) == "dataloader",
         generator=torch.Generator(device="cpu").manual_seed(seed + 2),
@@ -1725,6 +2019,7 @@ def train_member(
         "z_std": z_std,
         "config": asdict(config),
         "target": population_target_description(str(args.model), two_exp_target=str(args.two_exp_target)),
+        "loss_weight": weights_metadata,
         "runtime": runtime_metadata(),
     }
     torch.save(checkpoint, model_path)
@@ -1755,6 +2050,7 @@ def train_member(
         "training_seconds": float(metrics["training_seconds"]),
         "history": metrics["history"],
         "config": asdict(config),
+        "loss_weight": weights_metadata,
     }
     if args.model == "sign":
         summary["best_val_nll_folded_units"] = summary["best_val_nll_target_units"]
@@ -1780,6 +2076,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--model", choices=("sign", "banana", "label_switch", "linear6", "two_exp"), default="sign")
     parser.add_argument("--output-root", type=Path, default=None)
+    parser.add_argument("--evaluate-summary", type=Path, default=None)
+    parser.add_argument("--diagnostics-output", type=Path, default=None)
     parser.add_argument("--seeds", type=parse_int_list, default=(20260901, 20260902, 20260903, 20260904))
     parser.add_argument("--train-simulations", type=int, default=2_048_000)
     parser.add_argument("--val-simulations", type=int, default=65_536)
@@ -1814,6 +2112,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ema-decay", type=float, default=0.0)
     parser.add_argument("--batching-mode", choices=("dataloader", "pre_shuffle", "sequential"), default="pre_shuffle")
     parser.add_argument("--max-optimizer-steps", type=int, default=0)
+    parser.add_argument("--loss-weight-mode", choices=POPULATION_LOSS_WEIGHT_MODES, default="none")
+    parser.add_argument("--loss-tail-weight", type=float, default=3.0)
+    parser.add_argument("--loss-tail-quantile", type=float, default=0.8)
     parser.add_argument("--device", choices=("auto", "cpu", "mps", "cuda"), default="auto")
     parser.add_argument("--eval-batch-size", type=int, default=65_536)
     parser.add_argument("--floor-only", action="store_true")
@@ -1842,10 +2143,79 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    output_root = args.output_root or default_output_root(str(args.model))
+    if str(args.loss_weight_mode) != "none" and str(args.model) != "two_exp":
+        raise ValueError("--loss-weight-mode is currently only supported for --model two_exp.")
+    if args.output_root is not None:
+        output_root = args.output_root
+    elif args.evaluate_summary is not None:
+        output_root = args.evaluate_summary.parent.parent
+    else:
+        output_root = default_output_root(str(args.model))
     results_dir = output_root / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
     device = stage1.choose_training_device(args.device)
+    if args.evaluate_summary is not None:
+        source_summary = json.loads(args.evaluate_summary.read_text(encoding="utf-8"))
+        two_exp_target = str(source_summary.get("recipe", {}).get("two_exp_target", args.two_exp_target))
+        diagnostics_output = args.diagnostics_output
+        if diagnostics_output is None and str(args.model) == "two_exp":
+            diagnostics_output = results_dir / f"{args.model}_population_gap_diagnostics.json"
+        members = load_population_members(args.evaluate_summary, device=device)
+        evaluation = evaluate_population_nll(
+            model_name=str(args.model),
+            members=members,
+            validation_examples=int(args.validation_examples),
+            validation_seed=int(args.validation_seed),
+            batch_size=int(args.eval_batch_size),
+            device=device,
+            linear6_quadrature_order=int(args.linear6_quadrature_order),
+            banana_quadrature_order=int(args.banana_quadrature_order),
+            label_importance_samples=int(args.label_importance_samples),
+            label_importance_seed=int(args.label_importance_seed),
+            label_importance_batch_size=int(args.label_importance_batch_size),
+            label_prior_mixture=float(args.label_prior_mixture),
+            label_proposal_inflation=float(args.label_proposal_inflation),
+            two_exp_target=two_exp_target,
+            two_exp_floor_method=str(args.two_exp_floor_method),
+            two_exp_importance_samples=int(args.two_exp_importance_samples),
+            two_exp_importance_seed=int(args.two_exp_importance_seed),
+            two_exp_importance_batch_size=int(args.two_exp_importance_batch_size),
+            two_exp_prior_mixture=float(args.two_exp_prior_mixture),
+            two_exp_proposal_inflation=float(args.two_exp_proposal_inflation),
+            two_exp_smc_particles=int(args.two_exp_smc_particles),
+            two_exp_smc_beta_steps=int(args.two_exp_smc_beta_steps),
+            two_exp_smc_mh_steps=int(args.two_exp_smc_mh_steps),
+            two_exp_smc_seed=int(args.two_exp_smc_seed),
+            two_exp_smc_batch_size=int(args.two_exp_smc_batch_size),
+            two_exp_smc_step_scale=float(args.two_exp_smc_step_scale),
+            diagnostics_output=diagnostics_output,
+        )
+        summary = {
+            "kind": f"{args.model}_population_existing_evaluation",
+            "description": f"Evaluation-only full-prior {args.model} population NPE run.",
+            "source_summary": str(args.evaluate_summary),
+            "target": population_target_description(str(args.model), two_exp_target=two_exp_target),
+            "device": str(device),
+            "recipe": {
+                "validation_examples": int(args.validation_examples),
+                "validation_seed": int(args.validation_seed),
+                "eval_batch_size": int(args.eval_batch_size),
+                "two_exp_target": two_exp_target,
+                "two_exp_floor_method": str(args.two_exp_floor_method),
+                "two_exp_importance_samples": int(args.two_exp_importance_samples),
+                "two_exp_importance_seed": int(args.two_exp_importance_seed),
+                "two_exp_importance_batch_size": int(args.two_exp_importance_batch_size),
+                "two_exp_prior_mixture": float(args.two_exp_prior_mixture),
+                "two_exp_proposal_inflation": float(args.two_exp_proposal_inflation),
+            },
+            "evaluation": evaluation,
+            "runtime": runtime_metadata(),
+        }
+        summary_path = results_dir / f"{args.model}_population_existing_evaluation_summary.json"
+        summary_path.write_text(json.dumps(json_ready(summary), indent=2, sort_keys=True), encoding="utf-8")
+        print(json.dumps(json_ready(summary), indent=2, sort_keys=True))
+        print(f"summary_json: {summary_path}", flush=True)
+        return
     if bool(args.floor_only):
         floor = estimate_population_floor(
             model_name=str(args.model),
@@ -1949,6 +2319,7 @@ def main() -> None:
         two_exp_smc_seed=int(args.two_exp_smc_seed),
         two_exp_smc_batch_size=int(args.two_exp_smc_batch_size),
         two_exp_smc_step_scale=float(args.two_exp_smc_step_scale),
+        diagnostics_output=args.diagnostics_output,
     )
     summary = {
         "kind": population_kind(str(args.model)),
@@ -1976,6 +2347,9 @@ def main() -> None:
             "lr_schedule": str(args.lr_schedule),
             "lr_warmup_steps": int(args.lr_warmup_steps),
             "batching_mode": str(args.batching_mode),
+            "loss_weight_mode": str(args.loss_weight_mode),
+            "loss_tail_weight": float(args.loss_tail_weight),
+            "loss_tail_quantile": float(args.loss_tail_quantile),
             "banana_quadrature_order": int(args.banana_quadrature_order),
             "linear6_quadrature_order": int(args.linear6_quadrature_order),
             "two_exp_target": str(args.two_exp_target),
