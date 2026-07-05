@@ -95,6 +95,20 @@ def summarize(values: np.ndarray) -> dict[str, float | int]:
     }
 
 
+def summarize_diagnostics(items: list[dict[str, Any]]) -> dict[str, object] | None:
+    if not items:
+        return None
+    output: dict[str, object] = {}
+    keys = sorted(set().union(*(item.keys() for item in items)))
+    for key in keys:
+        values = [item[key] for item in items if key in item]
+        if values and all(isinstance(value, (int, float, np.integer, np.floating)) for value in values):
+            output[key] = float(np.mean(np.asarray(values, dtype=np.float64)))
+        elif values and all(value == values[0] for value in values):
+            output[key] = values[0]
+    return output
+
+
 def runtime_metadata() -> dict[str, object]:
     return {
         "numpy_version": np.__version__,
@@ -985,30 +999,167 @@ def two_exp_log_evidence_importance(
     return log_evidence, diagnostics
 
 
+def two_exp_beta_schedule(steps: int) -> np.ndarray:
+    if steps < 1:
+        raise ValueError("SMC beta steps must be positive.")
+    t = np.linspace(0.0, 1.0, steps + 1)
+    return 0.5 - 0.5 * np.cos(np.pi * t)
+
+
+def systematic_resample_indices(weights: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    normalized = np.asarray(weights, dtype=np.float64)
+    normalized = normalized / normalized.sum(axis=1, keepdims=True)
+    batch, particles = normalized.shape
+    positions = (rng.random((batch, 1)) + np.arange(particles, dtype=np.float64)[None, :]) / particles
+    cdf = np.cumsum(normalized, axis=1)
+    cdf[:, -1] = 1.0
+    indices = np.empty((batch, particles), dtype=np.int64)
+    for row in range(batch):
+        indices[row] = np.searchsorted(cdf[row], positions[row], side="right")
+    return np.minimum(indices, particles - 1)
+
+
+def two_exp_log_evidence_smc(
+    x_raw: np.ndarray,
+    z_true: np.ndarray,
+    *,
+    particles: int,
+    beta_steps: int,
+    mh_steps: int,
+    seed: int,
+    batch_size: int,
+    step_scale: float,
+) -> tuple[np.ndarray, dict[str, float]]:
+    if particles < 2:
+        raise ValueError("SMC needs at least two particles.")
+    if batch_size < 1:
+        raise ValueError("SMC batch size must be positive.")
+    betas = two_exp_beta_schedule(beta_steps)
+    x = np.asarray(x_raw, dtype=np.float64)
+    true_z = np.asarray(z_true, dtype=np.float64)
+    log_evidence = np.empty(x.shape[0], dtype=np.float64)
+    ess_batches = []
+    acceptance_batches = []
+    for start in range(0, x.shape[0], batch_size):
+        stop = min(start + batch_size, x.shape[0])
+        rng = np.random.default_rng(seed + start)
+        batch_x = x[start:stop]
+        batch_z = true_z[start:stop]
+        batch = batch_x.shape[0]
+        z = rng.normal(
+            TWO_EXP_PRIOR_MEAN[None, None, :],
+            TWO_EXP_PRIOR_STD[None, None, :],
+            size=(batch, particles, 5),
+        )
+        log_prior = two_exp_raw_prior_logpdf_batched(z)
+        log_likelihood = two_exp_log_likelihood_batched(batch_x, z)
+        local_scale = two_exp_gauss_newton_scale(batch_z)
+        row_index = np.arange(batch)[:, None]
+        batch_log_evidence = np.zeros(batch, dtype=np.float64)
+        batch_ess = []
+        batch_acceptance = []
+        for beta_previous, beta in zip(betas[:-1], betas[1:]):
+            log_increment = (float(beta) - float(beta_previous)) * log_likelihood
+            log_norm = logsumexp(log_increment, axis=1)
+            batch_log_evidence += log_norm - math.log(particles)
+            normalized = np.exp(log_increment - log_norm[:, None])
+            ess = 1.0 / np.sum(normalized * normalized, axis=1)
+            batch_ess.append(ess)
+            indices = systematic_resample_indices(normalized, rng)
+            z = z[row_index, indices, :]
+            log_prior = log_prior[row_index, indices]
+            log_likelihood = log_likelihood[row_index, indices]
+            target = log_prior + float(beta) * log_likelihood
+            if mh_steps <= 0:
+                continue
+            beta_scale = max(float(beta), 0.02)
+            proposal_scale = local_scale * float(step_scale) / math.sqrt(beta_scale)
+            proposal_scale = np.minimum(proposal_scale, TWO_EXP_PRIOR_STD[None, :] * 0.75)
+            for _ in range(mh_steps):
+                proposal = z + rng.normal(size=z.shape) * proposal_scale[:, None, :]
+                proposal_log_prior = two_exp_raw_prior_logpdf_batched(proposal)
+                proposal_log_likelihood = two_exp_log_likelihood_batched(batch_x, proposal)
+                proposal_target = proposal_log_prior + float(beta) * proposal_log_likelihood
+                accept = np.log(rng.random((batch, particles))) < (proposal_target - target)
+                z[accept] = proposal[accept]
+                log_prior[accept] = proposal_log_prior[accept]
+                log_likelihood[accept] = proposal_log_likelihood[accept]
+                target[accept] = proposal_target[accept]
+                batch_acceptance.append(np.mean(accept, axis=1))
+        log_evidence[start:stop] = batch_log_evidence
+        ess_batches.append(np.stack(batch_ess, axis=1))
+        if batch_acceptance:
+            acceptance_batches.append(np.stack(batch_acceptance, axis=1))
+    ess_matrix = np.concatenate(ess_batches, axis=0)
+    min_relative_ess = np.min(ess_matrix / particles, axis=1)
+    diagnostics = {
+        "smc_particles": int(particles),
+        "smc_beta_steps": int(beta_steps),
+        "smc_mh_steps": int(mh_steps),
+        "smc_batch_size": int(batch_size),
+        "smc_step_scale": float(step_scale),
+        "incremental_relative_ess_mean": float(np.mean(ess_matrix) / particles),
+        "incremental_relative_ess_q05": float(np.quantile(ess_matrix / particles, 0.05)),
+        "min_incremental_relative_ess_mean": float(np.mean(min_relative_ess)),
+        "min_incremental_relative_ess_q05": float(np.quantile(min_relative_ess, 0.05)),
+    }
+    if acceptance_batches:
+        acceptance_matrix = np.concatenate(acceptance_batches, axis=0)
+        diagnostics.update(
+            {
+                "mh_acceptance_mean": float(np.mean(acceptance_matrix)),
+                "mh_acceptance_q05": float(np.quantile(acceptance_matrix, 0.05)),
+            }
+        )
+    return log_evidence, diagnostics
+
+
 def two_exp_exact_posterior_nll(
     *,
     x_raw: np.ndarray,
     x_context: np.ndarray,
     z_raw: np.ndarray,
+    floor_method: str,
     importance_samples: int,
     importance_seed: int,
     importance_batch_size: int,
     prior_mixture: float,
     proposal_inflation: float,
+    smc_particles: int,
+    smc_beta_steps: int,
+    smc_mh_steps: int,
+    smc_seed: int,
+    smc_batch_size: int,
+    smc_step_scale: float,
 ) -> tuple[np.ndarray, dict[str, float]]:
     z = np.asarray(z_raw, dtype=np.float64)
     log_prior = two_exp_raw_prior_logpdf(z)
     log_likelihood = two_exp_log_likelihood_np(np.asarray(x_raw, dtype=np.float64), z)
-    log_evidence, diagnostics = two_exp_log_evidence_importance(
-        x_raw=x_raw,
-        x_context=x_context,
-        z_true=z,
-        samples=importance_samples,
-        seed=importance_seed,
-        batch_size=importance_batch_size,
-        prior_mixture=prior_mixture,
-        inflation=proposal_inflation,
-    )
+    if floor_method == "importance":
+        log_evidence, diagnostics = two_exp_log_evidence_importance(
+            x_raw=x_raw,
+            x_context=x_context,
+            z_true=z,
+            samples=importance_samples,
+            seed=importance_seed,
+            batch_size=importance_batch_size,
+            prior_mixture=prior_mixture,
+            inflation=proposal_inflation,
+        )
+    elif floor_method == "smc":
+        log_evidence, diagnostics = two_exp_log_evidence_smc(
+            x_raw=x_raw,
+            z_true=z,
+            particles=smc_particles,
+            beta_steps=smc_beta_steps,
+            mh_steps=smc_mh_steps,
+            seed=smc_seed,
+            batch_size=smc_batch_size,
+            step_scale=smc_step_scale,
+        )
+    else:
+        raise ValueError(f"Unsupported two_exp floor method: {floor_method}")
+    diagnostics["floor_method"] = floor_method
     return -(log_prior + log_likelihood - log_evidence), diagnostics
 
 
@@ -1117,11 +1268,18 @@ def evaluate_population_nll(
     label_importance_batch_size: int,
     label_prior_mixture: float,
     label_proposal_inflation: float,
+    two_exp_floor_method: str,
     two_exp_importance_samples: int,
     two_exp_importance_seed: int,
     two_exp_importance_batch_size: int,
     two_exp_prior_mixture: float,
     two_exp_proposal_inflation: float,
+    two_exp_smc_particles: int,
+    two_exp_smc_beta_steps: int,
+    two_exp_smc_mh_steps: int,
+    two_exp_smc_seed: int,
+    two_exp_smc_batch_size: int,
+    two_exp_smc_step_scale: float,
 ) -> dict[str, Any]:
     if model_name == "label_switch":
         x_raw_val, x_val, z_val = sample_label_switch_population_raw(n=validation_examples, seed=validation_seed)
@@ -1169,11 +1327,18 @@ def evaluate_population_nll(
                 x_raw=x_raw_val[start:stop],
                 x_context=batch_x,
                 z_raw=batch_z,
+                floor_method=two_exp_floor_method,
                 importance_samples=two_exp_importance_samples,
                 importance_seed=two_exp_importance_seed + start,
                 importance_batch_size=two_exp_importance_batch_size,
                 prior_mixture=two_exp_prior_mixture,
                 proposal_inflation=two_exp_proposal_inflation,
+                smc_particles=two_exp_smc_particles,
+                smc_beta_steps=two_exp_smc_beta_steps,
+                smc_mh_steps=two_exp_smc_mh_steps,
+                smc_seed=two_exp_smc_seed + start,
+                smc_batch_size=two_exp_smc_batch_size,
+                smc_step_scale=two_exp_smc_step_scale,
             )
             exact_chunks.append(exact_nll)
             exact_diagnostics.append(diagnostics)
@@ -1247,27 +1412,22 @@ def evaluate_population_nll(
                 "Symmetry-folded sorted-coordinate posterior with raw evidence "
                 f"estimated by symmetric Gaussian-mixture importance sampling, {label_importance_samples} samples per signal."
             )
-            if exact_diagnostics:
-                floor_diagnostics = {
-                    key: float(np.mean([item[key] for item in exact_diagnostics]))
-                    for key in exact_diagnostics[0]
-                }
-            else:
-                floor_diagnostics = None
+            floor_diagnostics = summarize_diagnostics(exact_diagnostics)
         elif model_name == "two_exp":
             floor_target = "(log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)"
-            floor_method = (
-                "Ordered two-exponential ridge-coordinate posterior with raw-coordinate evidence "
-                "estimated by Gaussian-mixture importance sampling around the "
-                f"profile fit and validation draw, {two_exp_importance_samples} samples per signal."
-            )
-            if exact_diagnostics:
-                floor_diagnostics = {
-                    key: float(np.mean([item[key] for item in exact_diagnostics]))
-                    for key in exact_diagnostics[0]
-                }
+            if two_exp_floor_method == "smc":
+                floor_method = (
+                    "Ordered two-exponential ridge-coordinate posterior with raw-coordinate evidence "
+                    "estimated by prior-to-posterior tempered SMC, "
+                    f"{two_exp_smc_particles} particles, {two_exp_smc_beta_steps} beta steps."
+                )
             else:
-                floor_diagnostics = None
+                floor_method = (
+                    "Ordered two-exponential ridge-coordinate posterior with raw-coordinate evidence "
+                    "estimated by Gaussian-mixture importance sampling around the "
+                    f"profile fit and validation draw, {two_exp_importance_samples} samples per signal."
+                )
+            floor_diagnostics = summarize_diagnostics(exact_diagnostics)
         else:
             floor_target = "(w1, ..., w6, log_sigma)"
             floor_method = (
@@ -1309,11 +1469,18 @@ def estimate_population_floor(
     label_importance_batch_size: int,
     label_prior_mixture: float,
     label_proposal_inflation: float,
+    two_exp_floor_method: str,
     two_exp_importance_samples: int,
     two_exp_importance_seed: int,
     two_exp_importance_batch_size: int,
     two_exp_prior_mixture: float,
     two_exp_proposal_inflation: float,
+    two_exp_smc_particles: int,
+    two_exp_smc_beta_steps: int,
+    two_exp_smc_mh_steps: int,
+    two_exp_smc_seed: int,
+    two_exp_smc_batch_size: int,
+    two_exp_smc_step_scale: float,
 ) -> dict[str, Any]:
     if model_name == "sign":
         return {
@@ -1369,11 +1536,18 @@ def estimate_population_floor(
                 x_raw=x_raw_val[start:stop],
                 x_context=batch_x,
                 z_raw=batch_z,
+                floor_method=two_exp_floor_method,
                 importance_samples=two_exp_importance_samples,
                 importance_seed=two_exp_importance_seed + start,
                 importance_batch_size=two_exp_importance_batch_size,
                 prior_mixture=two_exp_prior_mixture,
                 proposal_inflation=two_exp_proposal_inflation,
+                smc_particles=two_exp_smc_particles,
+                smc_beta_steps=two_exp_smc_beta_steps,
+                smc_mh_steps=two_exp_smc_mh_steps,
+                smc_seed=two_exp_smc_seed + start,
+                smc_batch_size=two_exp_smc_batch_size,
+                smc_step_scale=two_exp_smc_step_scale,
             )
             exact_chunks.append(exact_nll)
             exact_diagnostics.append(diagnostics)
@@ -1403,21 +1577,22 @@ def estimate_population_floor(
             "Symmetry-folded sorted-coordinate posterior with raw evidence "
             f"estimated by symmetric Gaussian-mixture importance sampling, {label_importance_samples} samples per signal."
         )
-        floor_diagnostics = {
-            key: float(np.mean([item[key] for item in exact_diagnostics]))
-            for key in exact_diagnostics[0]
-        }
+        floor_diagnostics = summarize_diagnostics(exact_diagnostics)
     elif model_name == "two_exp":
         floor_target = "(log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)"
-        floor_method = (
-            "Ordered two-exponential ridge-coordinate posterior with raw-coordinate evidence "
-            "estimated by Gaussian-mixture importance sampling around the "
-            f"profile fit and validation draw, {two_exp_importance_samples} samples per signal."
-        )
-        floor_diagnostics = {
-            key: float(np.mean([item[key] for item in exact_diagnostics]))
-            for key in exact_diagnostics[0]
-        }
+        if two_exp_floor_method == "smc":
+            floor_method = (
+                "Ordered two-exponential ridge-coordinate posterior with raw-coordinate evidence "
+                "estimated by prior-to-posterior tempered SMC, "
+                f"{two_exp_smc_particles} particles, {two_exp_smc_beta_steps} beta steps."
+            )
+        else:
+            floor_method = (
+                "Ordered two-exponential ridge-coordinate posterior with raw-coordinate evidence "
+                "estimated by Gaussian-mixture importance sampling around the "
+                f"profile fit and validation draw, {two_exp_importance_samples} samples per signal."
+            )
+        floor_diagnostics = summarize_diagnostics(exact_diagnostics)
     else:
         floor_target = "(w1, ..., w6, log_sigma)"
         floor_method = (
@@ -1602,11 +1777,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--label-importance-batch-size", type=int, default=64)
     parser.add_argument("--label-prior-mixture", type=float, default=0.03)
     parser.add_argument("--label-proposal-inflation", type=float, default=2.0)
+    parser.add_argument("--two-exp-floor-method", choices=("importance", "smc"), default="importance")
     parser.add_argument("--two-exp-importance-samples", type=int, default=4096)
     parser.add_argument("--two-exp-importance-seed", type=int, default=20260723)
     parser.add_argument("--two-exp-importance-batch-size", type=int, default=16)
     parser.add_argument("--two-exp-prior-mixture", type=float, default=0.02)
     parser.add_argument("--two-exp-proposal-inflation", type=float, default=1.0)
+    parser.add_argument("--two-exp-smc-particles", type=int, default=2048)
+    parser.add_argument("--two-exp-smc-beta-steps", type=int, default=48)
+    parser.add_argument("--two-exp-smc-mh-steps", type=int, default=1)
+    parser.add_argument("--two-exp-smc-seed", type=int, default=20260729)
+    parser.add_argument("--two-exp-smc-batch-size", type=int, default=4)
+    parser.add_argument("--two-exp-smc-step-scale", type=float, default=1.0)
     return parser.parse_args()
 
 
@@ -1629,11 +1811,18 @@ def main() -> None:
             label_importance_batch_size=int(args.label_importance_batch_size),
             label_prior_mixture=float(args.label_prior_mixture),
             label_proposal_inflation=float(args.label_proposal_inflation),
+            two_exp_floor_method=str(args.two_exp_floor_method),
             two_exp_importance_samples=int(args.two_exp_importance_samples),
             two_exp_importance_seed=int(args.two_exp_importance_seed),
             two_exp_importance_batch_size=int(args.two_exp_importance_batch_size),
             two_exp_prior_mixture=float(args.two_exp_prior_mixture),
             two_exp_proposal_inflation=float(args.two_exp_proposal_inflation),
+            two_exp_smc_particles=int(args.two_exp_smc_particles),
+            two_exp_smc_beta_steps=int(args.two_exp_smc_beta_steps),
+            two_exp_smc_mh_steps=int(args.two_exp_smc_mh_steps),
+            two_exp_smc_seed=int(args.two_exp_smc_seed),
+            two_exp_smc_batch_size=int(args.two_exp_smc_batch_size),
+            two_exp_smc_step_scale=float(args.two_exp_smc_step_scale),
         )
         summary = {
             "kind": f"{args.model}_population_entropy_floor",
@@ -1650,11 +1839,18 @@ def main() -> None:
                 "label_importance_batch_size": int(args.label_importance_batch_size),
                 "label_prior_mixture": float(args.label_prior_mixture),
                 "label_proposal_inflation": float(args.label_proposal_inflation),
+                "two_exp_floor_method": str(args.two_exp_floor_method),
                 "two_exp_importance_samples": int(args.two_exp_importance_samples),
                 "two_exp_importance_seed": int(args.two_exp_importance_seed),
                 "two_exp_importance_batch_size": int(args.two_exp_importance_batch_size),
                 "two_exp_prior_mixture": float(args.two_exp_prior_mixture),
                 "two_exp_proposal_inflation": float(args.two_exp_proposal_inflation),
+                "two_exp_smc_particles": int(args.two_exp_smc_particles),
+                "two_exp_smc_beta_steps": int(args.two_exp_smc_beta_steps),
+                "two_exp_smc_mh_steps": int(args.two_exp_smc_mh_steps),
+                "two_exp_smc_seed": int(args.two_exp_smc_seed),
+                "two_exp_smc_batch_size": int(args.two_exp_smc_batch_size),
+                "two_exp_smc_step_scale": float(args.two_exp_smc_step_scale),
             },
             "evaluation": floor,
             "runtime": runtime_metadata(),
@@ -1690,11 +1886,18 @@ def main() -> None:
         label_importance_batch_size=int(args.label_importance_batch_size),
         label_prior_mixture=float(args.label_prior_mixture),
         label_proposal_inflation=float(args.label_proposal_inflation),
+        two_exp_floor_method=str(args.two_exp_floor_method),
         two_exp_importance_samples=int(args.two_exp_importance_samples),
         two_exp_importance_seed=int(args.two_exp_importance_seed),
         two_exp_importance_batch_size=int(args.two_exp_importance_batch_size),
         two_exp_prior_mixture=float(args.two_exp_prior_mixture),
         two_exp_proposal_inflation=float(args.two_exp_proposal_inflation),
+        two_exp_smc_particles=int(args.two_exp_smc_particles),
+        two_exp_smc_beta_steps=int(args.two_exp_smc_beta_steps),
+        two_exp_smc_mh_steps=int(args.two_exp_smc_mh_steps),
+        two_exp_smc_seed=int(args.two_exp_smc_seed),
+        two_exp_smc_batch_size=int(args.two_exp_smc_batch_size),
+        two_exp_smc_step_scale=float(args.two_exp_smc_step_scale),
     )
     summary = {
         "kind": population_kind(str(args.model)),
@@ -1729,11 +1932,18 @@ def main() -> None:
             "label_importance_batch_size": int(args.label_importance_batch_size),
             "label_prior_mixture": float(args.label_prior_mixture),
             "label_proposal_inflation": float(args.label_proposal_inflation),
+            "two_exp_floor_method": str(args.two_exp_floor_method),
             "two_exp_importance_samples": int(args.two_exp_importance_samples),
             "two_exp_importance_seed": int(args.two_exp_importance_seed),
             "two_exp_importance_batch_size": int(args.two_exp_importance_batch_size),
             "two_exp_prior_mixture": float(args.two_exp_prior_mixture),
             "two_exp_proposal_inflation": float(args.two_exp_proposal_inflation),
+            "two_exp_smc_particles": int(args.two_exp_smc_particles),
+            "two_exp_smc_beta_steps": int(args.two_exp_smc_beta_steps),
+            "two_exp_smc_mh_steps": int(args.two_exp_smc_mh_steps),
+            "two_exp_smc_seed": int(args.two_exp_smc_seed),
+            "two_exp_smc_batch_size": int(args.two_exp_smc_batch_size),
+            "two_exp_smc_step_scale": float(args.two_exp_smc_step_scale),
         },
         "members": [
             {

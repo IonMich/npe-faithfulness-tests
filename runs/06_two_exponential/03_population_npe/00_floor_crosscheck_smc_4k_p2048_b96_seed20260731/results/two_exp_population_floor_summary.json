@@ -1,0 +1,71 @@
+{
+  "description": "Full-prior two_exp population entropy-floor estimate.",
+  "evaluation": {
+    "evaluation_seconds": 702.4566019999911,
+    "floor": {
+      "coordinate_target": "(log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)",
+      "diagnostics": {
+        "floor_method": "smc",
+        "incremental_relative_ess_mean": 0.9894972850805634,
+        "incremental_relative_ess_q05": 0.9485671665538099,
+        "mh_acceptance_mean": 0.3906329534947872,
+        "mh_acceptance_q05": 0.1640228271484375,
+        "min_incremental_relative_ess_mean": 0.8793830996554807,
+        "min_incremental_relative_ess_q05": 0.7075476106058319,
+        "smc_batch_size": 8.0,
+        "smc_beta_steps": 96.0,
+        "smc_mh_steps": 2.0,
+        "smc_particles": 2048.0,
+        "smc_step_scale": 0.25
+      },
+      "estimate": -3.301200667622435,
+      "method": "Ordered two-exponential ridge-coordinate posterior with raw-coordinate evidence estimated by prior-to-posterior tempered SMC, 2048 particles, 96 beta steps.",
+      "standard_error": 0.03815228249471572,
+      "summary": {
+        "max": 10.692497501909394,
+        "mean": -3.301200667622435,
+        "median": -3.3100850444693144,
+        "min": -16.161544561559896,
+        "n": 4096,
+        "q01": -9.170192825701115,
+        "q05": -7.244094691501252,
+        "q95": 0.7573699293532563,
+        "q99": 2.914088276492397,
+        "std": 2.4417460796618062,
+        "std_error": 0.03815228249471572
+      }
+    },
+    "validation_examples": 4096,
+    "validation_seed": 20260731
+  },
+  "kind": "two_exp_population_entropy_floor",
+  "recipe": {
+    "banana_quadrature_order": 64,
+    "eval_batch_size": 64,
+    "label_importance_batch_size": 64,
+    "label_importance_samples": 4096,
+    "label_importance_seed": 20260719,
+    "label_prior_mixture": 0.03,
+    "label_proposal_inflation": 2.0,
+    "linear6_quadrature_order": 64,
+    "two_exp_floor_method": "smc",
+    "two_exp_importance_batch_size": 16,
+    "two_exp_importance_samples": 4096,
+    "two_exp_importance_seed": 20260723,
+    "two_exp_prior_mixture": 0.02,
+    "two_exp_proposal_inflation": 1.0,
+    "two_exp_smc_batch_size": 8,
+    "two_exp_smc_beta_steps": 96,
+    "two_exp_smc_mh_steps": 2,
+    "two_exp_smc_particles": 2048,
+    "two_exp_smc_seed": 20260729,
+    "two_exp_smc_step_scale": 0.25,
+    "validation_examples": 4096,
+    "validation_seed": 20260731
+  },
+  "runtime": {
+    "numpy_version": "2.5.0",
+    "torch_version": "2.12.1"
+  },
+  "target": "(log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)"
+}

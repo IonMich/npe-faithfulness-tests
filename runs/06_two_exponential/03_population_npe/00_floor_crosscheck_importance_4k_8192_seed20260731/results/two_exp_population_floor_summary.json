@@ -1,0 +1,72 @@
+{
+  "description": "Full-prior two_exp population entropy-floor estimate.",
+  "evaluation": {
+    "evaluation_seconds": 21.20392412500223,
+    "floor": {
+      "coordinate_target": "(log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)",
+      "diagnostics": {
+        "ess_mean": 87.00982531143674,
+        "ess_median": 49.913687347314095,
+        "ess_min": 1.3346661307847785,
+        "ess_q05": 4.921381435298612,
+        "floor_method": "importance",
+        "importance_batch_size": 16.0,
+        "importance_samples": 8192.0,
+        "log_weight_std_mean": 294349117504.5788,
+        "log_weight_std_q95": 516264.64449982886,
+        "prior_mixture": 0.02,
+        "proposal_inflation": 1.0,
+        "relative_ess_mean": 0.010621316566337493,
+        "relative_ess_q05": 0.0006007545697386
+      },
+      "estimate": -3.3383068041330954,
+      "method": "Ordered two-exponential ridge-coordinate posterior with raw-coordinate evidence estimated by Gaussian-mixture importance sampling around the profile fit and validation draw, 8192 samples per signal.",
+      "standard_error": 0.038009188703050915,
+      "summary": {
+        "max": 10.654188253721273,
+        "mean": -3.3383068041330954,
+        "median": -3.3272521310586933,
+        "min": -12.086047884160596,
+        "n": 4096,
+        "q01": -9.007591380694135,
+        "q05": -7.271218096630706,
+        "q95": 0.6880729716632112,
+        "q99": 2.9553310019837076,
+        "std": 2.4325880769952586,
+        "std_error": 0.038009188703050915
+      }
+    },
+    "validation_examples": 4096,
+    "validation_seed": 20260731
+  },
+  "kind": "two_exp_population_entropy_floor",
+  "recipe": {
+    "banana_quadrature_order": 64,
+    "eval_batch_size": 256,
+    "label_importance_batch_size": 64,
+    "label_importance_samples": 4096,
+    "label_importance_seed": 20260719,
+    "label_prior_mixture": 0.03,
+    "label_proposal_inflation": 2.0,
+    "linear6_quadrature_order": 64,
+    "two_exp_floor_method": "importance",
+    "two_exp_importance_batch_size": 16,
+    "two_exp_importance_samples": 8192,
+    "two_exp_importance_seed": 20260723,
+    "two_exp_prior_mixture": 0.02,
+    "two_exp_proposal_inflation": 1.0,
+    "two_exp_smc_batch_size": 4,
+    "two_exp_smc_beta_steps": 48,
+    "two_exp_smc_mh_steps": 1,
+    "two_exp_smc_particles": 2048,
+    "two_exp_smc_seed": 20260729,
+    "two_exp_smc_step_scale": 1.0,
+    "validation_examples": 4096,
+    "validation_seed": 20260731
+  },
+  "runtime": {
+    "numpy_version": "2.5.0",
+    "torch_version": "2.12.1"
+  },
+  "target": "(log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)"
+}

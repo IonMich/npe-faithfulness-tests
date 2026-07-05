@@ -318,7 +318,7 @@ g(z) = (log(A1 + A2), log(A1/A2), log k1, log Delta k, log sigma)
 The transform is invertible and has unit Jacobian, so NPE NLL and floor NLL are
 reported in the same ridge coordinates without an additional correction.
 
-Current floor probe:
+Current floor probes:
 
 ```text
 10k validation, seed 23  -3.28149 +/- 0.02423
@@ -328,6 +328,24 @@ Current floor probe:
 Both runs use the same posterior-centered Gaussian-mixture importance sampler.
 The independent seeds agree at the reported precision, but this should still be
 treated as a probe-scale floor until the final method is cross-checked or scaled.
+
+Floor cross-check:
+
+```text
+4k validation, seed 20260731, Gaussian-mixture importance  -3.33831 +/- 0.03801
+4k validation, seed 20260731, tempered SMC                -3.30120 +/- 0.03815
+SMC - importance                                           0.03711, about 0.69 conservative combined SE
+```
+
+This does not make the floor final, but it is enough to show that the importance
+floor is not obviously the source of the `~0.08` NPE miss. The SMC run used
+`2048` particles, `96` cosine-spaced beta steps, `2` MH moves per step, and a
+local proposal scale multiplier of `0.25`.
+
+Artifacts:
+
+- `runs/06_two_exponential/03_population_npe/00_floor_crosscheck_importance_4k_8192_seed20260731/results/two_exp_population_floor_summary.json`
+- `runs/06_two_exponential/03_population_npe/00_floor_crosscheck_smc_4k_p2048_b96_seed20260731/results/two_exp_population_floor_summary.json`
 
 Training probes tried:
 
@@ -351,6 +369,8 @@ Useful infrastructure completed:
 
 - `train_sign_population_npe.py` can now sample, train, evaluate, and floor-probe
   `--model two_exp` on the full prior.
+- The same harness also supports a second two-exponential floor estimator:
+  prior-to-posterior tempered SMC with systematic resampling.
 - Two-exponential sampling is chunked, avoiding the large profile-context memory
   spike seen in the 2M probe.
 - The full Gaussian and MDN covariance heads in `npe_stage1_decay.py` now use
@@ -360,8 +380,6 @@ Useful infrastructure completed:
 
 Next viable experiments:
 
-- Cross-check the 10k floor with a second numerical evidence method on a smaller
-  subset before spending more full validation time.
 - Stop scaling the same Flow2 recipe blindly; the 1M single-member probe did not
   improve fixed-cache NLL.
 - Try a genuinely richer conditional posterior family, such as a conditional
@@ -423,7 +441,8 @@ Use the same stop/go logic for every model.
 2. Commit and push successful model slices as they finish; for Two-Exponential,
    commit only reusable infrastructure or clearly labeled blocker/probe notes
    until there is a near-floor result.
-3. Cross-check the two-exponential floor estimator before launching another
-   expensive training family.
+3. Move the next two-exponential training attempt to a richer posterior family
+   or a better invertible target/context; another plain Flow2 scale-up is not
+   justified by the current probes.
 4. For any new posterior figures, keep the exact/reference layer in the same
    reusable renderer and use deterministic seeded NPE samples.
