@@ -141,7 +141,7 @@
         "min_bulk_ess": 18.01652103902397,
         "min_tail_ess": 46.06451211544817,
         "posterior_samples": 72000,
-        "seconds": 0.39838208301807754,
+        "seconds": 0.383855541003868,
         "steps": 12000,
         "to_grid": {
           "mean_normalized_wasserstein": 0.21862034982060216,
@@ -442,7 +442,7 @@
         "min_bulk_ess": 17.25889151158519,
         "min_tail_ess": 65.3562242758498,
         "posterior_samples": 72000,
-        "seconds": 0.3909450839855708,
+        "seconds": 0.38880645899917,
         "steps": 12000,
         "to_grid": {
           "mean_normalized_wasserstein": 0.17885003225965973,

@@ -1645,6 +1645,7 @@ def render_two_exp_population_cases(args: argparse.Namespace) -> None:
                 proposal_inflation=float(args.two_exp_proposal_inflation),
             )
             reference_label = "Importance reference"
+            reference_color = "#6d5bd0"
         else:
             reference_samples, reference_metadata = sample_two_exp_mcmc_reference(
                 x_raw=np.asarray(case_info["x_raw"], dtype=np.float64),
@@ -1656,6 +1657,7 @@ def render_two_exp_population_cases(args: argparse.Namespace) -> None:
                 seed=int(args.seed) + 5000 + 101 * offset,
             )
             reference_label = "MCMC reference"
+            reference_color = "#b85c38"
         grid_layer, grid_metadata = two_exp_exact_grid_layer(
             x_raw=np.asarray(case_info["x_raw"], dtype=np.float64),
             reference_samples=reference_samples,
@@ -1695,7 +1697,7 @@ def render_two_exp_population_cases(args: argparse.Namespace) -> None:
             sample_layers=[
                 SampleCornerLayer(
                     reference_label,
-                    "#172033",
+                    reference_color,
                     reference_samples,
                     hist_lw=1.55,
                     contour_lw=1.20,
